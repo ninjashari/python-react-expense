@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Date, DateTime, Numeric, Integer
+from sqlalchemy import Column, String, Date, DateTime, Numeric, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -9,7 +9,7 @@ class Account(Base):
     __tablename__ = "accounts"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     name = Column(String(255), nullable=False)
     type = Column(String(50), nullable=False)
     balance = Column(Numeric(12, 2), default=0.00)
