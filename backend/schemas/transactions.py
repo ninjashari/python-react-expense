@@ -1,42 +1,37 @@
 from pydantic import BaseModel
 from datetime import date, datetime
 from typing import Optional
-from models.transactions import TransactionType
-from .accounts import AccountResponse
-from .payees import PayeeResponse
-from .categories import CategoryResponse
+from decimal import Decimal
+import uuid
 
 class TransactionBase(BaseModel):
     date: date
-    amount: float
+    amount: Decimal
+    type: str
     description: Optional[str] = None
-    transaction_type: TransactionType
-    account_id: int
-    to_account_id: Optional[int] = None
-    payee_id: Optional[int] = None
-    category_id: Optional[int] = None
+    notes: Optional[str] = None
+    account_id: uuid.UUID
+    payee_id: Optional[uuid.UUID] = None
+    category_id: Optional[uuid.UUID] = None
 
 class TransactionCreate(TransactionBase):
     pass
 
 class TransactionUpdate(BaseModel):
     date: Optional[date] = None
-    amount: Optional[float] = None
+    amount: Optional[Decimal] = None
+    type: Optional[str] = None
     description: Optional[str] = None
-    transaction_type: Optional[TransactionType] = None
-    account_id: Optional[int] = None
-    to_account_id: Optional[int] = None
-    payee_id: Optional[int] = None
-    category_id: Optional[int] = None
+    notes: Optional[str] = None
+    account_id: Optional[uuid.UUID] = None
+    payee_id: Optional[uuid.UUID] = None
+    category_id: Optional[uuid.UUID] = None
 
 class TransactionResponse(TransactionBase):
-    id: int
+    id: uuid.UUID
+    user_id: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime]
-    account: Optional[AccountResponse] = None
-    to_account: Optional[AccountResponse] = None
-    payee: Optional[PayeeResponse] = None
-    category: Optional[CategoryResponse] = None
     
     class Config:
         from_attributes = True

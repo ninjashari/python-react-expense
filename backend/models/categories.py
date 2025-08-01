@@ -1,12 +1,19 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, String, DateTime
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
+import uuid
 
 class Category(Base):
     __tablename__ = "categories"
     
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False, unique=True)
-    color = Column(String, nullable=False, unique=True)  # Hex color code
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    name = Column(String(100), nullable=False)
+    color = Column(String(7), default='#6366f1')
+    created_at = Column(DateTime, server_default=func.current_timestamp())
+    updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
+    
+    # Relationships
+    user = relationship("User")

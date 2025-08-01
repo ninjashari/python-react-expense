@@ -85,7 +85,7 @@ DEBUG=True
 
 6. Run database migrations:
 ```bash
-alembic upgrade head
+python -m alembic upgrade head
 ```
 
 7. Start the backend server:

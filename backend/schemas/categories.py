@@ -1,10 +1,11 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
+import uuid
 
 class CategoryBase(BaseModel):
     name: str
-    color: Optional[str] = None
+    color: str = '#6366f1'
 
 class CategoryCreate(CategoryBase):
     pass
@@ -14,8 +15,8 @@ class CategoryUpdate(BaseModel):
     color: Optional[str] = None
 
 class CategoryResponse(CategoryBase):
-    id: int
-    color: str
+    id: uuid.UUID
+    user_id: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime]
     

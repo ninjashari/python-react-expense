@@ -1,36 +1,28 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, Enum, Text
+from sqlalchemy import Column, String, Date, DateTime, Numeric, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
-import enum
-
-class TransactionType(enum.Enum):
-    DEPOSIT = "deposit"
-    WITHDRAWAL = "withdrawal"
-    TRANSFER = "transfer"
+import uuid
 
 class Transaction(Base):
     __tablename__ = "transactions"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    account_id = Column(UUID(as_uuid=True), nullable=False)
+    category_id = Column(UUID(as_uuid=True), nullable=True)
+    payee_id = Column(UUID(as_uuid=True), nullable=True)
+    amount = Column(Numeric(12, 2), nullable=False)
+    type = Column(String(10), nullable=False)
+    description = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
     date = Column(Date, nullable=False)
-    amount = Column(Float, nullable=False)
-    description = Column(Text)
-    transaction_type = Column(Enum(TransactionType), nullable=False)
-    
-    # Account relationships
-    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
-    to_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)  # For transfers
-    
-    # Optional relationships
-    payee_id = Column(Integer, ForeignKey("payees.id"), nullable=True)
-    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime, server_default=func.current_timestamp())
+    updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     
     # Relationships
-    account = relationship("Account", foreign_keys=[account_id])
-    to_account = relationship("Account", foreign_keys=[to_account_id])
+    user = relationship("User")
+    account = relationship("Account")
     payee = relationship("Payee")
     category = relationship("Category")

@@ -1,29 +1,28 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Enum
+from sqlalchemy import Column, String, Date, DateTime, Numeric, Integer
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
-import enum
-
-class AccountType(enum.Enum):
-    CHECKING = "checking"
-    SAVINGS = "savings"
-    CREDIT_CARD = "credit_card"
-    CASH = "cash"
-    INVESTMENT = "investment"
-    LOAN = "loan"
+import uuid
 
 class Account(Base):
     __tablename__ = "accounts"
     
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    account_type = Column(Enum(AccountType), nullable=False)
-    balance = Column(Float, default=0.0)
-    opening_date = Column(Date, nullable=False)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    name = Column(String(255), nullable=False)
+    type = Column(String(50), nullable=False)
+    balance = Column(Numeric(12, 2), default=0.00)
+    created_at = Column(DateTime, server_default=func.current_timestamp())
+    updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     
     # Credit card specific fields
-    credit_limit = Column(Float, nullable=True)
-    bill_generation_date = Column(Integer, nullable=True)  # Day of month (1-31)
-    last_payment_date = Column(Date, nullable=True)
+    credit_limit = Column(Numeric(12, 2), nullable=True)
+    bill_generation_date = Column(Integer, nullable=True)
+    payment_due_date = Column(Integer, nullable=True)
+    status = Column(String(20), default='active')
+    opening_date = Column(Date, server_default=func.current_date())
+    currency = Column(String(3), default='INR')
     
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Relationships
+    user = relationship("User")

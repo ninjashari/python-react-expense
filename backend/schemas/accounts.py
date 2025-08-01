@@ -1,29 +1,35 @@
 from pydantic import BaseModel
 from datetime import date, datetime
 from typing import Optional
-from models.accounts import AccountType
+from decimal import Decimal
+import uuid
 
 class AccountBase(BaseModel):
     name: str
-    account_type: AccountType
-    balance: float = 0.0
-    opening_date: date
-    credit_limit: Optional[float] = None
+    type: str
+    balance: Decimal = Decimal('0.00')
+    opening_date: Optional[date] = None
+    credit_limit: Optional[Decimal] = None
     bill_generation_date: Optional[int] = None
-    last_payment_date: Optional[date] = None
+    payment_due_date: Optional[int] = None
+    status: str = 'active'
+    currency: str = 'INR'
 
 class AccountCreate(AccountBase):
     pass
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
-    balance: Optional[float] = None
-    credit_limit: Optional[float] = None
+    type: Optional[str] = None
+    balance: Optional[Decimal] = None
+    credit_limit: Optional[Decimal] = None
     bill_generation_date: Optional[int] = None
-    last_payment_date: Optional[date] = None
+    payment_due_date: Optional[int] = None
+    status: Optional[str] = None
 
 class AccountResponse(AccountBase):
-    id: int
+    id: uuid.UUID
+    user_id: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime]
     
