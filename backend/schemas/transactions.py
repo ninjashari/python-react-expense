@@ -11,6 +11,7 @@ class TransactionBase(BaseModel):
     description: Optional[str] = None
     notes: Optional[str] = None
     account_id: uuid.UUID
+    to_account_id: Optional[uuid.UUID] = None
     payee_id: Optional[uuid.UUID] = None
     category_id: Optional[uuid.UUID] = None
 
@@ -24,6 +25,7 @@ class TransactionUpdate(BaseModel):
     description: Optional[str] = None
     notes: Optional[str] = None
     account_id: Optional[uuid.UUID] = None
+    to_account_id: Optional[uuid.UUID] = None
     payee_id: Optional[uuid.UUID] = None
     category_id: Optional[uuid.UUID] = None
 

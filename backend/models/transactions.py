@@ -3,7 +3,13 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
+from enum import Enum
 import uuid
+
+class TransactionType(str, Enum):
+    DEPOSIT = "deposit"
+    WITHDRAWAL = "withdrawal"
+    TRANSFER = "transfer"
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -11,6 +17,7 @@ class Transaction(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), nullable=False)
     account_id = Column(UUID(as_uuid=True), nullable=False)
+    to_account_id = Column(UUID(as_uuid=True), nullable=True)
     category_id = Column(UUID(as_uuid=True), nullable=True)
     payee_id = Column(UUID(as_uuid=True), nullable=True)
     amount = Column(Numeric(12, 2), nullable=False)

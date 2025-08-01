@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import uuid
 from database import get_db
 from models.transactions import Transaction, TransactionType
 from models.accounts import Account
@@ -8,7 +9,7 @@ from schemas.transactions import TransactionCreate, TransactionUpdate, Transacti
 
 router = APIRouter()
 
-def update_account_balance(db: Session, account_id: int, amount: float, transaction_type: TransactionType, is_reversal: bool = False):
+def update_account_balance(db: Session, account_id: uuid.UUID, amount: float, transaction_type: TransactionType, is_reversal: bool = False):
     """Update account balance based on transaction type"""
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
@@ -36,7 +37,7 @@ def create_transaction(transaction: TransactionCreate, db: Session = Depends(get
         if not to_account:
             raise HTTPException(status_code=404, detail="Destination account not found")
         
-        if transaction.transaction_type != TransactionType.TRANSFER:
+        if transaction.type != TransactionType.TRANSFER:
             raise HTTPException(status_code=400, detail="to_account_id can only be used with transfer transactions")
     
     db_transaction = Transaction(**transaction.dict())
@@ -44,9 +45,9 @@ def create_transaction(transaction: TransactionCreate, db: Session = Depends(get
     db.commit()
     
     # Update account balances
-    if transaction.transaction_type in [TransactionType.DEPOSIT, TransactionType.WITHDRAWAL]:
-        update_account_balance(db, transaction.account_id, transaction.amount, transaction.transaction_type)
-    elif transaction.transaction_type == TransactionType.TRANSFER:
+    if transaction.type in [TransactionType.DEPOSIT, TransactionType.WITHDRAWAL]:
+        update_account_balance(db, transaction.account_id, transaction.amount, transaction.type)
+    elif transaction.type == TransactionType.TRANSFER:
         # Debit from source account
         update_account_balance(db, transaction.account_id, transaction.amount, TransactionType.WITHDRAWAL)
         # Credit to destination account
@@ -59,9 +60,9 @@ def create_transaction(transaction: TransactionCreate, db: Session = Depends(get
 def get_transactions(
     skip: int = 0, 
     limit: int = 100, 
-    account_id: Optional[int] = None,
-    category_id: Optional[int] = None,
-    payee_id: Optional[int] = None,
+    account_id: Optional[uuid.UUID] = None,
+    category_id: Optional[uuid.UUID] = None,
+    payee_id: Optional[uuid.UUID] = None,
     transaction_type: Optional[TransactionType] = None,
     db: Session = Depends(get_db)
 ):
@@ -74,27 +75,27 @@ def get_transactions(
     if payee_id:
         query = query.filter(Transaction.payee_id == payee_id)
     if transaction_type:
-        query = query.filter(Transaction.transaction_type == transaction_type)
+        query = query.filter(Transaction.type == transaction_type)
     
     transactions = query.order_by(Transaction.date.desc()).offset(skip).limit(limit).all()
     return transactions
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
-def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
+def get_transaction(transaction_id: uuid.UUID, db: Session = Depends(get_db)):
     transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return transaction
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
-def update_transaction(transaction_id: int, transaction_update: TransactionUpdate, db: Session = Depends(get_db)):
+def update_transaction(transaction_id: uuid.UUID, transaction_update: TransactionUpdate, db: Session = Depends(get_db)):
     transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
     
     # Store original values for balance reversal
     original_amount = transaction.amount
-    original_type = transaction.transaction_type
+    original_type = transaction.type
     original_account_id = transaction.account_id
     original_to_account_id = transaction.to_account_id
     
@@ -114,9 +115,9 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     db.commit()
     
     # Apply new balance changes
-    if transaction.transaction_type in [TransactionType.DEPOSIT, TransactionType.WITHDRAWAL]:
-        update_account_balance(db, transaction.account_id, transaction.amount, transaction.transaction_type)
-    elif transaction.transaction_type == TransactionType.TRANSFER:
+    if transaction.type in [TransactionType.DEPOSIT, TransactionType.WITHDRAWAL]:
+        update_account_balance(db, transaction.account_id, transaction.amount, transaction.type)
+    elif transaction.type == TransactionType.TRANSFER:
         update_account_balance(db, transaction.account_id, transaction.amount, TransactionType.WITHDRAWAL)
         if transaction.to_account_id:
             update_account_balance(db, transaction.to_account_id, transaction.amount, TransactionType.DEPOSIT)
@@ -125,15 +126,15 @@ def update_transaction(transaction_id: int, transaction_update: TransactionUpdat
     return transaction
 
 @router.delete("/{transaction_id}")
-def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
+def delete_transaction(transaction_id: uuid.UUID, db: Session = Depends(get_db)):
     transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
     
     # Reverse balance changes
-    if transaction.transaction_type in [TransactionType.DEPOSIT, TransactionType.WITHDRAWAL]:
-        update_account_balance(db, transaction.account_id, transaction.amount, transaction.transaction_type, is_reversal=True)
-    elif transaction.transaction_type == TransactionType.TRANSFER:
+    if transaction.type in [TransactionType.DEPOSIT, TransactionType.WITHDRAWAL]:
+        update_account_balance(db, transaction.account_id, transaction.amount, transaction.type, is_reversal=True)
+    elif transaction.type == TransactionType.TRANSFER:
         update_account_balance(db, transaction.account_id, transaction.amount, TransactionType.WITHDRAWAL, is_reversal=True)
         if transaction.to_account_id:
             update_account_balance(db, transaction.to_account_id, transaction.amount, TransactionType.DEPOSIT, is_reversal=True)

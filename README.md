@@ -32,7 +32,7 @@ A comprehensive expense management application built with React frontend and Pyt
 - **Excel/CSV Processing** with pandas and openpyxl
 
 ### Frontend
-- **React 18** with TypeScript
+- **React 19** with TypeScript
 - **Material-UI (MUI)** for component library
 - **React Router** for navigation
 - **TanStack Query** (React Query) for data fetching
@@ -90,7 +90,7 @@ python -m alembic upgrade head
 
 7. Start the backend server:
 ```bash
-uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8000
 ```
 
 The API will be available at `http://localhost:8000` with interactive documentation at `http://localhost:8000/docs`.
@@ -103,7 +103,7 @@ cd frontend
 
 2. Install dependencies:
 ```bash
-npm install --legacy-peer-deps
+npm install
 ```
 
 3. Create environment file:
@@ -113,7 +113,7 @@ cp .env.example .env
 
 4. Update the `.env` file if needed:
 ```
-REACT_APP_API_BASE_URL=http://localhost:8000/api
+REACT_APP_API_URL=http://localhost:8000
 ```
 
 5. Start the development server:
@@ -143,46 +143,50 @@ Download and install from: https://github.com/UB-Mannheim/tesseract/wiki
 
 The backend provides a comprehensive REST API with the following endpoints:
 
+### Authentication
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - User login  
+- `GET /auth/me` - Get current user info
+
 ### Accounts
-- `GET /api/accounts` - List all accounts
-- `POST /api/accounts` - Create new account
-- `GET /api/accounts/{id}` - Get account by ID
-- `PUT /api/accounts/{id}` - Update account
-- `DELETE /api/accounts/{id}` - Delete account
+- `GET /accounts/` - List all accounts
+- `POST /accounts/` - Create new account
+- `GET /accounts/{id}` - Get account by ID
+- `PUT /accounts/{id}` - Update account
+- `DELETE /accounts/{id}` - Delete account
 
 ### Transactions
-- `GET /api/transactions` - List transactions with filtering
-- `POST /api/transactions` - Create new transaction
-- `GET /api/transactions/{id}` - Get transaction by ID
-- `PUT /api/transactions/{id}` - Update transaction
-- `DELETE /api/transactions/{id}` - Delete transaction
+- `GET /transactions/` - List transactions with filtering
+- `POST /transactions/` - Create new transaction
+- `GET /transactions/{id}` - Get transaction by ID
+- `PUT /transactions/{id}` - Update transaction
+- `DELETE /transactions/{id}` - Delete transaction
 
 ### Payees
-- `GET /api/payees` - List payees with search
-- `POST /api/payees` - Create new payee
-- `GET /api/payees/{id}` - Get payee by ID
-- `PUT /api/payees/{id}` - Update payee
-- `DELETE /api/payees/{id}` - Delete payee
+- `GET /payees/` - List payees with search
+- `POST /payees/` - Create new payee
+- `GET /payees/{id}` - Get payee by ID
+- `PUT /payees/{id}` - Update payee
+- `DELETE /payees/{id}` - Delete payee
 
 ### Categories
-- `GET /api/categories` - List categories with search
-- `POST /api/categories` - Create new category (auto-generates unique color)
-- `GET /api/categories/{id}` - Get category by ID
-- `PUT /api/categories/{id}` - Update category
-- `DELETE /api/categories/{id}` - Delete category
+- `GET /categories/` - List categories with search
+- `POST /categories/` - Create new category (auto-generates unique color)
+- `GET /categories/{id}` - Get category by ID
+- `PUT /categories/{id}` - Update category
+- `DELETE /categories/{id}` - Delete category
 
 ### Reports
-- `GET /api/reports/summary` - Get financial summary with filtering
-- `GET /api/reports/by-category` - Get transactions grouped by category
-- `GET /api/reports/by-payee` - Get transactions grouped by payee
-- `GET /api/reports/by-account` - Get transactions grouped by account
-- `GET /api/reports/monthly-trend` - Get monthly transaction trends
+- `GET /reports/summary` - Get financial summary with filtering
+- `GET /reports/by-category` - Get transactions grouped by category
+- `GET /reports/by-payee` - Get transactions grouped by payee
+- `GET /reports/by-account` - Get transactions grouped by account
+- `GET /reports/monthly-trend` - Get monthly transaction trends
 
 ### Import
-- `POST /api/import/csv` - Import transactions from CSV file
-- `POST /api/import/excel` - Import transactions from Excel file
-- `POST /api/import/pdf-ocr` - Extract text from PDF using OCR
-- `GET /api/import/column-mapping/{file_type}` - Analyze file and suggest column mappings
+- `POST /import/csv` - Import transactions from CSV file
+- `POST /import/excel` - Import transactions from Excel file
+- `POST /import/pdf` - Extract text from PDF using OCR
 
 ## Usage Guide
 

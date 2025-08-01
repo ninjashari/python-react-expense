@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from typing import List, Optional
 from datetime import date, datetime
+import uuid
 from database import get_db
 from models.transactions import Transaction, TransactionType
 from models.accounts import Account
@@ -15,9 +16,9 @@ router = APIRouter()
 def get_summary(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    account_ids: List[int] = Query(default=[]),
-    category_ids: List[int] = Query(default=[]),
-    payee_ids: List[int] = Query(default=[]),
+    account_ids: List[uuid.UUID] = Query(default=[]),
+    category_ids: List[uuid.UUID] = Query(default=[]),
+    payee_ids: List[uuid.UUID] = Query(default=[]),
     db: Session = Depends(get_db)
 ):
     """Get summary statistics for transactions"""
@@ -36,9 +37,9 @@ def get_summary(
         query = query.filter(Transaction.payee_id.in_(payee_ids))
     
     # Calculate summaries
-    total_income = query.filter(Transaction.transaction_type == TransactionType.DEPOSIT).with_entities(func.sum(Transaction.amount)).scalar() or 0
-    total_expenses = query.filter(Transaction.transaction_type == TransactionType.WITHDRAWAL).with_entities(func.sum(Transaction.amount)).scalar() or 0
-    total_transfers = query.filter(Transaction.transaction_type == TransactionType.TRANSFER).with_entities(func.sum(Transaction.amount)).scalar() or 0
+    total_income = query.filter(Transaction.type == TransactionType.DEPOSIT).with_entities(func.sum(Transaction.amount)).scalar() or 0
+    total_expenses = query.filter(Transaction.type == TransactionType.WITHDRAWAL).with_entities(func.sum(Transaction.amount)).scalar() or 0
+    total_transfers = query.filter(Transaction.type == TransactionType.TRANSFER).with_entities(func.sum(Transaction.amount)).scalar() or 0
     
     transaction_count = query.count()
     
@@ -54,7 +55,7 @@ def get_summary(
 def get_transactions_by_category(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    account_ids: List[int] = Query(default=[]),
+    account_ids: List[uuid.UUID] = Query(default=[]),
     transaction_type: Optional[TransactionType] = None,
     db: Session = Depends(get_db)
 ):
@@ -74,7 +75,7 @@ def get_transactions_by_category(
     if account_ids:
         query = query.filter(Transaction.account_id.in_(account_ids))
     if transaction_type:
-        query = query.filter(Transaction.transaction_type == transaction_type)
+        query = query.filter(Transaction.type == transaction_type)
     
     results = query.group_by(Category.id, Category.name, Category.color).all()
     
@@ -92,7 +93,7 @@ def get_transactions_by_category(
 def get_transactions_by_payee(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    account_ids: List[int] = Query(default=[]),
+    account_ids: List[uuid.UUID] = Query(default=[]),
     transaction_type: Optional[TransactionType] = None,
     db: Session = Depends(get_db)
 ):
@@ -111,7 +112,7 @@ def get_transactions_by_payee(
     if account_ids:
         query = query.filter(Transaction.account_id.in_(account_ids))
     if transaction_type:
-        query = query.filter(Transaction.transaction_type == transaction_type)
+        query = query.filter(Transaction.type == transaction_type)
     
     results = query.group_by(Payee.id, Payee.name).all()
     
@@ -128,8 +129,8 @@ def get_transactions_by_payee(
 def get_transactions_by_account(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    category_ids: List[int] = Query(default=[]),
-    payee_ids: List[int] = Query(default=[]),
+    category_ids: List[uuid.UUID] = Query(default=[]),
+    payee_ids: List[uuid.UUID] = Query(default=[]),
     transaction_type: Optional[TransactionType] = None,
     db: Session = Depends(get_db)
 ):
@@ -151,7 +152,7 @@ def get_transactions_by_account(
     if payee_ids:
         query = query.filter(Transaction.payee_id.in_(payee_ids))
     if transaction_type:
-        query = query.filter(Transaction.transaction_type == transaction_type)
+        query = query.filter(Transaction.type == transaction_type)
     
     results = query.group_by(Account.id, Account.name, Account.account_type).all()
     
@@ -169,13 +170,13 @@ def get_transactions_by_account(
 def get_monthly_trend(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
-    account_ids: List[int] = Query(default=[]),
+    account_ids: List[uuid.UUID] = Query(default=[]),
     db: Session = Depends(get_db)
 ):
     """Get monthly transaction trends"""
     query = db.query(
         func.date_trunc('month', Transaction.date).label('month'),
-        Transaction.transaction_type,
+        Transaction.type,
         func.sum(Transaction.amount).label('total_amount')
     )
     
@@ -189,7 +190,7 @@ def get_monthly_trend(
     
     results = query.group_by(
         func.date_trunc('month', Transaction.date),
-        Transaction.transaction_type
+        Transaction.type
     ).order_by(func.date_trunc('month', Transaction.date)).all()
     
     return [

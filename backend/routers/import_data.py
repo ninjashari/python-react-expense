@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional, List
+import uuid
 import pandas as pd
 import io
 import PyPDF2
@@ -83,7 +84,7 @@ def create_or_get_category(db: Session, name: str) -> Optional[int]:
 @router.post("/csv")
 async def import_csv(
     file: UploadFile = File(...),
-    account_id: int = Form(...),
+    account_id: uuid.UUID = Form(...),
     date_column: str = Form("date"),
     amount_column: str = Form("amount"),
     description_column: str = Form("description"),
@@ -143,7 +144,7 @@ async def import_csv(
                 date=transaction_date,
                 amount=abs(amount),  # Ensure positive amount
                 description=description,
-                transaction_type=transaction_type,
+                type=transaction_type,
                 account_id=account_id,
                 payee_id=payee_id,
                 category_id=category_id
@@ -171,7 +172,7 @@ async def import_csv(
 @router.post("/excel")
 async def import_excel(
     file: UploadFile = File(...),
-    account_id: int = Form(...),
+    account_id: uuid.UUID = Form(...),
     sheet_name: Optional[str] = Form(None),
     date_column: str = Form("date"),
     amount_column: str = Form("amount"),
@@ -235,7 +236,7 @@ async def import_excel(
                 date=transaction_date,
                 amount=abs(amount),
                 description=description,
-                transaction_type=transaction_type,
+                type=transaction_type,
                 account_id=account_id,
                 payee_id=payee_id,
                 category_id=category_id
@@ -263,7 +264,7 @@ async def import_excel(
 @router.post("/pdf-ocr")
 async def import_pdf_with_ocr(
     file: UploadFile = File(...),
-    account_id: int = Form(...),
+    account_id: uuid.UUID = Form(...),
     db: Session = Depends(get_db)
 ):
     """Extract text from PDF using OCR (basic implementation)"""
