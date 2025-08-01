@@ -10,7 +10,11 @@ load_dotenv()
 
 # Import your models here
 from database import Base
-from models import Account, Transaction, Payee, Category
+from models.users import User
+from models.accounts import Account
+from models.transactions import Transaction
+from models.payees import Payee
+from models.categories import Category
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

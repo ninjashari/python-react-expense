@@ -137,7 +137,7 @@ def get_transactions_by_account(
     """Get transaction summaries grouped by account"""
     query = db.query(
         Account.name.label("account_name"),
-        Account.account_type.label("account_type"),
+        Account.type.label("account_type"),
         func.sum(Transaction.amount).label("total_amount"),
         func.count(Transaction.id).label("transaction_count")
     ).join(Account, Transaction.account_id == Account.id)
@@ -154,7 +154,7 @@ def get_transactions_by_account(
     if transaction_type:
         query = query.filter(Transaction.type == transaction_type)
     
-    results = query.group_by(Account.id, Account.name, Account.account_type).all()
+    results = query.group_by(Account.id, Account.name, Account.type).all()
     
     return [
         {
