@@ -18,6 +18,7 @@ from schemas.transactions import TransactionCreate
 from utils.color_generator import generate_unique_color
 from utils.slug import create_slug
 from utils.auth import get_current_active_user
+from routers.transactions import update_account_balance
 
 router = APIRouter()
 
@@ -159,6 +160,10 @@ def process_transactions_data(
             
             db_transaction = Transaction(**transaction_data.model_dump(), user_id=current_user.id)
             db.add(db_transaction)
+            
+            # Update account balance for imported transaction
+            update_account_balance(db, account_id, abs(amount), transaction_type)
+            
             transactions_created += 1
             
         except Exception as e:

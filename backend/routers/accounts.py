@@ -2,11 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
+from decimal import Decimal
 from database import get_db
 from models.accounts import Account
+from models.transactions import Transaction
 from models.users import User
 from schemas.accounts import AccountCreate, AccountUpdate, AccountResponse
 from utils.auth import get_current_active_user
+from routers.transactions import update_account_balance
 
 router = APIRouter()
 
@@ -100,3 +103,51 @@ def delete_account(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail="Failed to delete account")
+
+@router.post("/recalculate-balances")
+def recalculate_all_balances(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Recalculate balances for all user's accounts based on their transactions"""
+    try:
+        # Get all accounts for the current user
+        accounts = db.query(Account).filter(Account.user_id == current_user.id).all()
+        updated_accounts = []
+        
+        for account in accounts:
+            # Reset balance to 0
+            account.balance = Decimal('0.00')
+            db.commit()
+            
+            # Get all transactions for this account in chronological order
+            transactions = db.query(Transaction).filter(
+                Transaction.account_id == account.id
+            ).order_by(Transaction.date, Transaction.created_at).all()
+            
+            # Apply each transaction to recalculate balance
+            for txn in transactions:
+                if txn.type in ['income', 'expense']:
+                    update_account_balance(db, account.id, float(txn.amount), txn.type)
+                elif txn.type == 'transfer':
+                    # For transfers, this account is the source (debit/expense side)
+                    update_account_balance(db, account.id, float(txn.amount), 'expense')
+            
+            # Get updated balance
+            db.refresh(account)
+            updated_accounts.append({
+                "account_id": account.id,
+                "account_name": account.name,
+                "account_type": account.type,
+                "new_balance": float(account.balance),
+                "transactions_processed": len(transactions)
+            })
+        
+        return {
+            "message": f"Successfully recalculated balances for {len(accounts)} accounts",
+            "updated_accounts": updated_accounts
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to recalculate balances: {str(e)}")
