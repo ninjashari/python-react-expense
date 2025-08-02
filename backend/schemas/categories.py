@@ -5,13 +5,16 @@ import uuid
 
 class CategoryBase(BaseModel):
     name: str
+    slug: str
     color: str = '#6366f1'
 
-class CategoryCreate(CategoryBase):
-    pass
+class CategoryCreate(BaseModel):
+    name: str
+    color: Optional[str] = None
 
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
+    slug: Optional[str] = None
     color: Optional[str] = None
 
 class CategoryResponse(CategoryBase):

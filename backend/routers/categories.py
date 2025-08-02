@@ -7,6 +7,8 @@ from models.categories import Category
 from models.users import User
 from schemas.categories import CategoryCreate, CategoryUpdate, CategoryResponse
 from utils.auth import get_current_active_user
+from utils.color_generator import generate_unique_color
+from utils.slug import create_slug
 
 router = APIRouter()
 
@@ -24,7 +26,18 @@ def create_category(
         if existing_category:
             raise HTTPException(status_code=400, detail="Category with this name already exists")
         
-        db_category = Category(**category.dict(), user_id=current_user.id)
+        # Generate slug from name
+        slug = create_slug(category.name)
+        
+        # Generate color if not provided
+        color = category.color or generate_unique_color(db, category.name, str(current_user.id))
+        
+        db_category = Category(
+            name=category.name,
+            slug=slug,
+            color=color,
+            user_id=current_user.id
+        )
         db.add(db_category)
         db.commit()
         db.refresh(db_category)
@@ -79,6 +92,11 @@ def update_category(
             raise HTTPException(status_code=404, detail="Category not found")
         
         update_data = category_update.dict(exclude_unset=True)
+        
+        # If name is being updated, regenerate slug
+        if 'name' in update_data:
+            update_data['slug'] = create_slug(update_data['name'])
+        
         for field, value in update_data.items():
             setattr(category, field, value)
         

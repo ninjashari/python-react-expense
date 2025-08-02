@@ -7,6 +7,7 @@ from models.payees import Payee
 from models.users import User
 from schemas.payees import PayeeCreate, PayeeUpdate, PayeeResponse
 from utils.auth import get_current_active_user
+from utils.slug import create_slug
 
 router = APIRouter()
 
@@ -24,7 +25,14 @@ def create_payee(
         if existing_payee:
             raise HTTPException(status_code=400, detail="Payee with this name already exists")
         
-        db_payee = Payee(**payee.dict(), user_id=current_user.id)
+        # Generate slug from name
+        slug = create_slug(payee.name)
+        
+        db_payee = Payee(
+            name=payee.name,
+            slug=slug,
+            user_id=current_user.id
+        )
         db.add(db_payee)
         db.commit()
         db.refresh(db_payee)
@@ -79,6 +87,11 @@ def update_payee(
             raise HTTPException(status_code=404, detail="Payee not found")
         
         update_data = payee_update.dict(exclude_unset=True)
+        
+        # If name is being updated, regenerate slug
+        if 'name' in update_data:
+            update_data['slug'] = create_slug(update_data['name'])
+        
         for field, value in update_data.items():
             setattr(payee, field, value)
         

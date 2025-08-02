@@ -7,8 +7,8 @@ from enum import Enum
 import uuid
 
 class TransactionType(str, Enum):
-    DEPOSIT = "deposit"
-    WITHDRAWAL = "withdrawal"
+    DEPOSIT = "income"
+    WITHDRAWAL = "expense"
     TRANSFER = "transfer"
 
 class Transaction(Base):

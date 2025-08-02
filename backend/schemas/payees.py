@@ -5,12 +5,14 @@ import uuid
 
 class PayeeBase(BaseModel):
     name: str
+    slug: str
 
-class PayeeCreate(PayeeBase):
-    pass
+class PayeeCreate(BaseModel):
+    name: str
 
 class PayeeUpdate(BaseModel):
     name: Optional[str] = None
+    slug: Optional[str] = None
 
 class PayeeResponse(PayeeBase):
     id: uuid.UUID

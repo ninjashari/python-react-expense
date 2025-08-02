@@ -9,12 +9,15 @@ import pytesseract
 from PIL import Image
 import openpyxl
 from database import get_db
-from models.transactions import Transaction, TransactionType
+from models.transactions import Transaction
 from models.accounts import Account
 from models.payees import Payee
 from models.categories import Category
+from models.users import User
 from schemas.transactions import TransactionCreate
 from utils.color_generator import generate_unique_color
+from utils.slug import create_slug
+from utils.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -54,62 +57,64 @@ def parse_excel_data(file_content: bytes) -> pd.DataFrame:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading Excel: {str(e)}")
 
-def create_or_get_payee(db: Session, name: str) -> Optional[int]:
-    """Create a new payee or get existing one"""
+def create_or_get_payee(db: Session, name: str, user_id: uuid.UUID) -> Optional[uuid.UUID]:
+    """Create a new payee or get existing one for the current user"""
     if not name or name.strip() == "":
         return None
     
-    payee = db.query(Payee).filter(Payee.name == name.strip()).first()
+    payee = db.query(Payee).filter(
+        Payee.name == name.strip(),
+        Payee.user_id == user_id
+    ).first()
     if not payee:
-        payee = Payee(name=name.strip())
+        slug = create_slug(name.strip())
+        payee = Payee(
+            name=name.strip(),
+            slug=slug,
+            user_id=user_id
+        )
         db.add(payee)
         db.commit()
         db.refresh(payee)
     return payee.id
 
-def create_or_get_category(db: Session, name: str) -> Optional[int]:
-    """Create a new category or get existing one"""
+def create_or_get_category(db: Session, name: str, user_id: uuid.UUID) -> Optional[uuid.UUID]:
+    """Create a new category or get existing one for the current user"""
     if not name or name.strip() == "":
         return None
     
-    category = db.query(Category).filter(Category.name == name.strip()).first()
+    category = db.query(Category).filter(
+        Category.name == name.strip(),
+        Category.user_id == user_id
+    ).first()
     if not category:
-        color = generate_unique_color(db)
-        category = Category(name=name.strip(), color=color)
+        slug = create_slug(name.strip())
+        color = generate_unique_color(db, name.strip(), str(user_id))
+        category = Category(
+            name=name.strip(),
+            slug=slug,
+            color=color,
+            user_id=user_id
+        )
         db.add(category)
         db.commit()
         db.refresh(category)
     return category.id
 
-@router.post("/csv")
-async def import_csv(
-    file: UploadFile = File(...),
-    account_id: uuid.UUID = Form(...),
-    date_column: str = Form("date"),
-    amount_column: str = Form("amount"),
-    description_column: str = Form("description"),
-    payee_column: Optional[str] = Form(None),
-    category_column: Optional[str] = Form(None),
-    transaction_type_column: Optional[str] = Form(None),
-    default_transaction_type: TransactionType = Form(TransactionType.WITHDRAWAL),
-    db: Session = Depends(get_db)
-):
-    """Import transactions from CSV file"""
-    
-    # Verify account exists
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    
-    content = await file.read()
-    df = parse_csv_data(content)
-    
-    # Validate required columns exist
-    required_columns = [date_column, amount_column, description_column]
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
-    
+def process_transactions_data(
+    df: pd.DataFrame,
+    db: Session,
+    current_user: User,
+    account_id: uuid.UUID,
+    date_column: str,
+    amount_column: str,
+    description_column: str,
+    payee_column: Optional[str] = None,
+    category_column: Optional[str] = None,
+    transaction_type_column: Optional[str] = None,
+    default_transaction_type: str = "expense"
+) -> tuple[int, List[str]]:
+    """Process DataFrame rows and create transactions"""
     transactions_created = 0
     errors = []
     
@@ -121,23 +126,25 @@ async def import_csv(
             description = str(row[description_column]) if pd.notna(row[description_column]) else ""
             
             # Determine transaction type
+            transaction_type = default_transaction_type
             if transaction_type_column and transaction_type_column in df.columns:
-                try:
-                    transaction_type = TransactionType(row[transaction_type_column].lower())
-                except (ValueError, AttributeError):
-                    transaction_type = default_transaction_type
-            else:
-                transaction_type = default_transaction_type
+                type_value = str(row[transaction_type_column]).lower().strip()
+                if type_value in ['income', 'expense', 'transfer']:
+                    transaction_type = type_value
+            
+            # Validate transaction type
+            if transaction_type not in ['income', 'expense', 'transfer']:
+                transaction_type = 'expense'  # Default fallback
             
             # Handle payee
             payee_id = None
             if payee_column and payee_column in df.columns and pd.notna(row[payee_column]):
-                payee_id = create_or_get_payee(db, str(row[payee_column]))
+                payee_id = create_or_get_payee(db, str(row[payee_column]), current_user.id)
             
             # Handle category
             category_id = None
             if category_column and category_column in df.columns and pd.notna(row[category_column]):
-                category_id = create_or_get_category(db, str(row[category_column]))
+                category_id = create_or_get_category(db, str(row[category_column]), current_user.id)
             
             # Create transaction
             transaction_data = TransactionCreate(
@@ -150,12 +157,62 @@ async def import_csv(
                 category_id=category_id
             )
             
-            db_transaction = Transaction(**transaction_data.dict())
+            db_transaction = Transaction(**transaction_data.model_dump(), user_id=current_user.id)
             db.add(db_transaction)
             transactions_created += 1
             
         except Exception as e:
             errors.append(f"Row {index + 1}: {str(e)}")
+    
+    return transactions_created, errors
+
+@router.post("/csv")
+async def import_csv(
+    file: UploadFile = File(...),
+    account_id: uuid.UUID = Form(...),
+    date_column: str = Form("date"),
+    amount_column: str = Form("amount"),
+    description_column: str = Form("description"),
+    payee_column: Optional[str] = Form(None),
+    category_column: Optional[str] = Form(None),
+    transaction_type_column: Optional[str] = Form(None),
+    default_transaction_type: str = Form("expense"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Import transactions from CSV file"""
+    
+    # Verify account exists and belongs to current user
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.user_id == current_user.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    content = await file.read()
+    df = parse_csv_data(content)
+    
+    # Validate required columns exist
+    required_columns = [date_column, amount_column, description_column]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
+    
+    # Process transactions using common utility function
+    transactions_created, errors = process_transactions_data(
+        df=df,
+        db=db,
+        current_user=current_user,
+        account_id=account_id,
+        date_column=date_column,
+        amount_column=amount_column,
+        description_column=description_column,
+        payee_column=payee_column,
+        category_column=category_column,
+        transaction_type_column=transaction_type_column,
+        default_transaction_type=default_transaction_type
+    )
     
     try:
         db.commit()
@@ -180,13 +237,17 @@ async def import_excel(
     payee_column: Optional[str] = Form(None),
     category_column: Optional[str] = Form(None),
     transaction_type_column: Optional[str] = Form(None),
-    default_transaction_type: TransactionType = Form(TransactionType.WITHDRAWAL),
-    db: Session = Depends(get_db)
+    default_transaction_type: str = Form("expense"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Import transactions from Excel file"""
     
-    # Verify account exists
-    account = db.query(Account).filter(Account.id == account_id).first()
+    # Verify account exists and belongs to current user
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.user_id == current_user.id
+    ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
@@ -200,54 +261,26 @@ async def import_excel(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading Excel file: {str(e)}")
     
-    # Use same logic as CSV import
-    # (This could be refactored into a common function)
+    # Validate required columns exist
     required_columns = [date_column, amount_column, description_column]
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
-    transactions_created = 0
-    errors = []
-    
-    for index, row in df.iterrows():
-        try:
-            transaction_date = pd.to_datetime(row[date_column]).date()
-            amount = float(row[amount_column])
-            description = str(row[description_column]) if pd.notna(row[description_column]) else ""
-            
-            if transaction_type_column and transaction_type_column in df.columns:
-                try:
-                    transaction_type = TransactionType(row[transaction_type_column].lower())
-                except (ValueError, AttributeError):
-                    transaction_type = default_transaction_type
-            else:
-                transaction_type = default_transaction_type
-            
-            payee_id = None
-            if payee_column and payee_column in df.columns and pd.notna(row[payee_column]):
-                payee_id = create_or_get_payee(db, str(row[payee_column]))
-            
-            category_id = None
-            if category_column and category_column in df.columns and pd.notna(row[category_column]):
-                category_id = create_or_get_category(db, str(row[category_column]))
-            
-            transaction_data = TransactionCreate(
-                date=transaction_date,
-                amount=abs(amount),
-                description=description,
-                type=transaction_type,
-                account_id=account_id,
-                payee_id=payee_id,
-                category_id=category_id
-            )
-            
-            db_transaction = Transaction(**transaction_data.dict())
-            db.add(db_transaction)
-            transactions_created += 1
-            
-        except Exception as e:
-            errors.append(f"Row {index + 1}: {str(e)}")
+    # Process transactions using common utility function
+    transactions_created, errors = process_transactions_data(
+        df=df,
+        db=db,
+        current_user=current_user,
+        account_id=account_id,
+        date_column=date_column,
+        amount_column=amount_column,
+        description_column=description_column,
+        payee_column=payee_column,
+        category_column=category_column,
+        transaction_type_column=transaction_type_column,
+        default_transaction_type=default_transaction_type
+    )
     
     try:
         db.commit()
@@ -265,12 +298,16 @@ async def import_excel(
 async def import_pdf_with_ocr(
     file: UploadFile = File(...),
     account_id: uuid.UUID = Form(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Extract text from PDF using OCR (basic implementation)"""
     
-    # Verify account exists
-    account = db.query(Account).filter(Account.id == account_id).first()
+    # Verify account exists and belongs to current user
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.user_id == current_user.id
+    ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
@@ -296,10 +333,12 @@ async def import_pdf_with_ocr(
         "note": "This is raw extracted text. In production, an LLM would parse this into structured transaction data."
     }
 
-@router.get("/column-mapping/{file_type}")
+@router.post("/column-mapping/{file_type}")
 async def get_suggested_column_mapping(
+    file_type: str,
     file: UploadFile = File(...),
-    file_type: str = "csv"
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Analyze uploaded file and suggest column mappings"""
     

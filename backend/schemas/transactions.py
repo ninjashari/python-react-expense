@@ -1,11 +1,37 @@
 from pydantic import BaseModel
-from datetime import date, datetime
+from datetime import date as DateType, datetime
 from typing import Optional
 from decimal import Decimal
 import uuid
 
+# Import related schemas
+class AccountSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    type: str
+    
+    class Config:
+        from_attributes = True
+
+class PayeeSummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    
+    class Config:
+        from_attributes = True
+
+class CategorySummary(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    color: str
+    
+    class Config:
+        from_attributes = True
+
 class TransactionBase(BaseModel):
-    date: date
+    date: DateType
     amount: Decimal
     type: str
     description: Optional[str] = None
@@ -19,7 +45,7 @@ class TransactionCreate(TransactionBase):
     pass
 
 class TransactionUpdate(BaseModel):
-    date: Optional[date] = None
+    date: Optional[DateType] = None
     amount: Optional[Decimal] = None
     type: Optional[str] = None
     description: Optional[str] = None
@@ -34,6 +60,12 @@ class TransactionResponse(TransactionBase):
     user_id: uuid.UUID
     created_at: datetime
     updated_at: Optional[datetime]
+    
+    # Related objects
+    account: Optional[AccountSummary] = None
+    to_account: Optional[AccountSummary] = None
+    payee: Optional[PayeeSummary] = None
+    category: Optional[CategorySummary] = None
     
     class Config:
         from_attributes = True
