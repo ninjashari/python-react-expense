@@ -10,8 +10,10 @@ passlib[bcrypt]==1.7.4
 pandas==2.1.4
 openpyxl==3.1.2
 PyPDF2==3.0.1
+pymupdf==1.23.8
 pytesseract==0.3.10
 Pillow==10.1.0
+ollama==0.2.1
 transformers==4.36.2
 torch==2.2.0
 sentence-transformers==2.2.2

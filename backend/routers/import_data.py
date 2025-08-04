@@ -15,6 +15,12 @@ from models.payees import Payee
 from models.categories import Category
 from models.users import User
 from schemas.transactions import TransactionCreate
+from schemas.import_schemas import (
+    PDFLLMImportRequest, PDFLLMImportResponse, 
+    PDFLLMPreviewResponse, PDFLLMSystemStatusResponse,
+    LLMTransactionData
+)
+from services.pdf_llm_processor import PDFLLMProcessor
 from utils.color_generator import generate_unique_color
 from utils.slug import create_slug
 from utils.auth import get_current_active_user
@@ -383,3 +389,128 @@ async def get_suggested_column_mapping(
         "sample_data": sample_data,
         "suggested_mappings": suggestions
     }
+
+
+@router.get("/pdf-llm/status")
+async def get_pdf_llm_status(
+    current_user: User = Depends(get_current_active_user)
+) -> PDFLLMSystemStatusResponse:
+    """Get status of PDF-LLM processing system"""
+    try:
+        processor = PDFLLMProcessor()
+        status = processor.get_system_status()
+        return PDFLLMSystemStatusResponse(**status)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error checking system status: {str(e)}")
+
+
+@router.post("/pdf-llm/preview")
+async def preview_pdf_llm_extraction(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user)
+) -> PDFLLMPreviewResponse:
+    """Preview PDF text extraction without full LLM processing"""
+    
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    
+    try:
+        content = await file.read()
+        processor = PDFLLMProcessor()
+        preview_result = processor.preview_extraction(content)
+        return PDFLLMPreviewResponse(**preview_result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error previewing PDF: {str(e)}")
+
+
+@router.post("/pdf-llm")
+async def import_pdf_with_llm(
+    file: UploadFile = File(...),
+    account_id: uuid.UUID = Form(...),
+    llm_model: Optional[str] = Form("llama3.1"),
+    preview_only: bool = Form(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+) -> PDFLLMImportResponse:
+    """Import transactions from PDF using LLM extraction"""
+    
+    # Verify account exists and belongs to current user
+    account = db.query(Account).filter(
+        Account.id == account_id,
+        Account.user_id == current_user.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    
+    try:
+        content = await file.read()
+        processor = PDFLLMProcessor(llm_model)
+        
+        # Process PDF and extract transactions
+        result = processor.process_pdf_file(content)
+        
+        if preview_only or result["status"] != "success":
+            return PDFLLMImportResponse(**result)
+        
+        # Import transactions to database
+        transactions_created = 0
+        errors = []
+        
+        for transaction_data in result["transactions"]:
+            try:
+                # Convert LLM data to database format
+                llm_transaction = LLMTransactionData(**transaction_data)
+                
+                # Handle payee
+                payee_id = None
+                if llm_transaction.payee:
+                    payee_id = create_or_get_payee(db, llm_transaction.payee, current_user.id)
+                
+                # Handle category
+                category_id = None
+                if llm_transaction.category:
+                    category_id = create_or_get_category(db, llm_transaction.category, current_user.id)
+                
+                # Create transaction
+                transaction_create = TransactionCreate(
+                    date=llm_transaction.date,
+                    amount=llm_transaction.amount,
+                    description=llm_transaction.description,
+                    type=llm_transaction.transaction_type,
+                    account_id=account_id,
+                    payee_id=payee_id,
+                    category_id=category_id
+                )
+                
+                db_transaction = Transaction(**transaction_create.model_dump(), user_id=current_user.id)
+                db.add(db_transaction)
+                
+                # Update account balance
+                update_account_balance(db, account_id, llm_transaction.amount, llm_transaction.transaction_type)
+                
+                transactions_created += 1
+                
+            except Exception as e:
+                errors.append(f"Transaction {transactions_created + 1}: {str(e)}")
+        
+        # Commit all transactions
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        
+        # Update result with import statistics
+        result["transactions_created"] = transactions_created
+        result["import_errors"] = errors
+        result["message"] = f"Successfully imported {transactions_created} transactions from PDF using LLM"
+        
+        return PDFLLMImportResponse(**result)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing PDF with LLM: {str(e)}")

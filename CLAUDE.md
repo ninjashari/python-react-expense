@@ -120,7 +120,7 @@ All endpoints except `/auth/register` and `/auth/login` require JWT token in Aut
 - **Categories**: `/categories/` (GET, POST), `/categories/{id}` (PUT, DELETE)
 - **Payees**: `/payees/` (GET, POST), `/payees/{id}` (PUT, DELETE)
 - **Reports**: `/reports/summary`, `/reports/by-category`, `/reports/by-payee`, `/reports/by-account`, `/reports/monthly-trend`
-- **Import**: `/import/csv`, `/import/excel`, `/import/pdf-ocr`, `/import/column-mapping/{file_type}`
+- **Import**: `/import/csv`, `/import/excel`, `/import/pdf-ocr`, `/import/pdf-llm`, `/import/pdf-llm/status`, `/import/pdf-llm/preview`, `/import/column-mapping/{file_type}`
 
 ## Frontend State Management
 
@@ -169,6 +169,11 @@ SECRET_KEY=your-secret-key-here
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,https://yourdomain.com
+
+# PDF LLM Import (Optional)
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_TIMEOUT=60
+TESSERACT_CMD=/usr/bin/tesseract
 ```
 
 ### Frontend Environment Variables (.env)
@@ -244,5 +249,38 @@ npm run build  # Creates optimized build in build/ folder
 - `services/`: API service layer
 - `types/`: TypeScript type definitions
 - `utils/`: Utility functions (formatters)
+
+## PDF LLM Import Feature
+
+### Overview
+The PDF LLM import feature uses local Large Language Models (via Ollama) to automatically extract transaction data from PDF documents. It supports both text-based and scanned PDFs with OCR fallback.
+
+### Architecture
+- **PDF Processing**: PyMuPDF for text extraction, Tesseract for OCR
+- **LLM Integration**: Local Ollama server with multiple model support
+- **Backend Services**: `services/pdf_llm_processor.py`, `services/llm_service.py`, `services/pdf_processor.py`
+- **Frontend Components**: `PDFLLMStep.tsx` for configuration UI
+
+### Setup Requirements
+1. **Install Ollama**: Run `./setup_ollama.sh` or follow `PDF_LLM_SETUP.md`
+2. **Install Dependencies**: `pip install pymupdf ollama` (already in requirements.txt)
+3. **Download Models**: `ollama pull llama3.1` (recommended)
+
+### API Endpoints
+- `GET /import/pdf-llm/status` - Check system status
+- `POST /import/pdf-llm/preview` - Preview extraction without import
+- `POST /import/pdf-llm` - Full import with LLM processing
+
+### Usage Flow
+1. Upload PDF file
+2. System detects if text extraction or OCR is needed
+3. LLM extracts structured transaction data
+4. User reviews and confirms import
+
+### Important Notes
+- **Local Processing**: All LLM processing happens locally via Ollama
+- **No External APIs**: No data sent to external services
+- **Model Selection**: llama3.1 (best accuracy), mistral (balanced), gemma (fast)
+- **Performance**: Processing takes 5-30 seconds depending on PDF size and model
 
 This documentation should be updated as the application evolves. Always verify field names, database constraints, and authentication requirements when making changes.
