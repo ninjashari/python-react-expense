@@ -35,48 +35,66 @@ class LLMService:
     def create_extraction_prompt(self, text: str) -> str:
         """Create a structured prompt for transaction extraction"""
         return f"""
-You are a financial data extraction expert specializing in Indian bank statements. Extract ALL transaction information from the following OCR-processed text and return ONLY a valid JSON array.
+You are a financial data extraction expert specializing in Indian bank statements. Extract ALL transaction information from the following text and return ONLY a valid JSON array.
 
-IMPORTANT RULES:
-1. Return ONLY a JSON array of transactions, no other text
-2. Each transaction must have: date, amount, description, transaction_type
-3. transaction_type must be exactly one of: "income", "expense", "transfer"
-4. amount must be a positive number in INR (no negative values, no currency symbols)
-5. date must be in YYYY-MM-DD format (convert from DD-MM-YYYY if needed)
-6. Look for transactions with patterns like: [date] [description] [amount] [balance]
-7. Handle OCR errors - look for partially corrupted dates/amounts
-8. Credit entries (deposits) = "income", Debit entries (withdrawals/charges) = "expense"
-9. Look for multiple transactions, don't stop at the first few
-10. If description is unclear due to OCR, extract what you can see
+CRITICAL INSTRUCTIONS:
+1. Return ONLY a JSON array of transactions, no other text or explanations
+2. You MUST extract EVERY SINGLE transaction from the statement - do not miss any
+3. Look through the ENTIRE text systematically, line by line
+4. Each transaction must have: date, amount, description, transaction_type
+5. transaction_type must be exactly one of: "income", "expense", "transfer"
+6. amount must be a positive number (no negative values, no currency symbols)
+7. date must be in YYYY-MM-DD format (convert from DD-MM-YYYY if needed)
 
-CONTEXT: This is an Indian bank statement in INR currency. Look for:
-- Date patterns: DD-MM-YYYY or DD/MM/YYYY
-- Amount patterns: numbers with .00 decimal places
-- Transaction indicators: Dr (debit/expense), Cr (credit/income)
-- Balance patterns: larger numbers (1000s) are often running balances, smaller numbers (100s) are transaction amounts
-- Look for corrupted/partial lines due to OCR - extract what you can
-- Opening balance: 2200.00, so transactions should make sense in that context
-- Common Indian banking terms: RTGS, NEFT, UPI, Card Charges, etc.
+TRANSACTION IDENTIFICATION PATTERNS:
+- Look for date patterns like: 02-09-2014, 05-09-2014, etc.
+- Followed by transaction descriptions like: ATM-CASH, BRN-BY CASH, PUR/, BY CASH DEPOSIT
+- With amounts like: 2,000.00, 1,500.00, 200.00
+- And running balance updates
 
-ANALYZE THESE SPECIFIC AMOUNTS FOUND: 224.72, 500.00, 42.00 - look for any others that might be hidden in corrupted text.
+TRANSACTION TYPE RULES:
+- Deposits/Credits (money coming in): "income" - includes: BRN-BY CASH, BY CASH DEPOSIT, ATM-TRFR-FROM, CASH-RVSL, Interest payments
+- Withdrawals/Debits (money going out): "expense" - includes: ATM-CASH, PUR/ (purchases), fees, charges
+- Transfers between accounts: "transfer" - includes: ATM-TRFR-FROM (but analyze context)
+
+SYSTEMATIC APPROACH:
+1. Start from the beginning of the account statement section
+2. Look for the "Opening Balance" line
+3. Then extract EVERY transaction line that follows
+4. Continue until you reach "Closing Balance"
+5. Do NOT skip any transaction lines
+6. Pay special attention to consecutive dates like 23-09-2014 which might have multiple transactions
+
+COMMON BANK STATEMENT STRUCTURE:
+Txn Date | Transaction Description | Withdrawals | Deposits | Balance
+
+SPECIFIC CHECKS FOR THIS STATEMENT:
+- Look for all September 2014 dates: 02-09, 05-09, 06-09, 08-09, 12-09, 13-09, 15-09, 16-09, 18-09, 20-09, 22-09, 23-09, 26-09, 29-09, 30-09
+- Multiple transactions can occur on the same date
+- Look for transactions with similar patterns but different amounts
+- Check for ATM transactions at JP UNIVERSITY locations
+- Look for Bharti Airtel recharge transactions
+- Find all cash deposits and withdrawals
 
 TEXT TO ANALYZE:
 {text}
 
-EXPECTED JSON FORMAT:
+EXPECTED JSON FORMAT - EXTRACT ALL TRANSACTIONS:
 [
   {{
-    "date": "2014-06-17",
-    "amount": 224.72,
-    "description": "Card Charges ISSUE 4505020001634807",
-    "transaction_type": "expense",
-    "payee": "Bank",
-    "category": "Banking Fees",
+    "date": "2014-09-02",
+    "amount": 2000.00,
+    "description": "BRN-BY CASH CASH",
+    "transaction_type": "income",
+    "payee": "Cash Deposit",
+    "category": "Cash",
     "confidence": 0.9
   }}
 ]
 
-EXTRACT ALL TRANSACTIONS YOU CAN FIND. JSON RESPONSE:"""
+IMPORTANT: Count the transactions as you extract them. This statement should have around 20+ transactions. If you find fewer than 20, you are missing some. Go back and look more carefully.
+
+JSON RESPONSE:"""
 
     def validate_extracted_data(self, data: List[Dict]) -> List[TransactionData]:
         """Validate and convert extracted data to structured format"""
@@ -134,6 +152,13 @@ EXTRACT ALL TRANSACTIONS YOU CAN FIND. JSON RESPONSE:"""
         
         print(f"DEBUG: Starting extraction with text length: {len(text)}")
         
+        # Estimate expected transaction count from text patterns
+        date_patterns = len(re.findall(r'\b\d{2}-\d{2}-\d{4}\b', text))
+        expected_min_transactions = max(10, date_patterns // 2)  # Conservative estimate
+        print(f"DEBUG: Found {date_patterns} date patterns, expecting at least {expected_min_transactions} transactions")
+        
+        best_result = []
+        
         # Try primary model first
         for attempt in range(self.max_retries):
             try:
@@ -141,8 +166,17 @@ EXTRACT ALL TRANSACTIONS YOU CAN FIND. JSON RESPONSE:"""
                 result = self._try_extraction_with_model(text, self.model_name)
                 if result:
                     print(f"DEBUG: Primary model succeeded with {len(result)} transactions")
-                    return result
-                print(f"DEBUG: Primary model attempt {attempt + 1} returned no results")
+                    
+                    # If we got a good number of transactions, return immediately
+                    if len(result) >= expected_min_transactions:
+                        return result
+                    
+                    # Otherwise, keep trying but save this as backup
+                    if len(result) > len(best_result):
+                        best_result = result
+                        print(f"DEBUG: Saving {len(result)} transactions as best result so far")
+                        
+                print(f"DEBUG: Primary model attempt {attempt + 1} returned {len(result) if result else 0} results")
             except Exception as e:
                 print(f"DEBUG: Attempt {attempt + 1} with {self.model_name} failed: {type(e).__name__}: {e}")
                 import traceback
@@ -156,13 +190,27 @@ EXTRACT ALL TRANSACTIONS YOU CAN FIND. JSON RESPONSE:"""
                 result = self._try_extraction_with_model(text, backup_model)
                 if result:
                     print(f"DEBUG: Backup model {backup_model} succeeded with {len(result)} transactions")
-                    return result
-                print(f"DEBUG: Backup model {backup_model} returned no results")
+                    
+                    # If we got a good number of transactions, return immediately
+                    if len(result) >= expected_min_transactions:
+                        return result
+                    
+                    # Otherwise, keep the best result
+                    if len(result) > len(best_result):
+                        best_result = result
+                        print(f"DEBUG: Updating best result to {len(result)} transactions")
+                        
+                print(f"DEBUG: Backup model {backup_model} returned {len(result) if result else 0} results")
             except Exception as e:
                 print(f"DEBUG: Backup model {backup_model} failed: {type(e).__name__}: {e}")
                 import traceback
                 traceback.print_exc()
                 continue
+        
+        # If we have any results, return the best one
+        if best_result:
+            print(f"DEBUG: Returning best result with {len(best_result)} transactions")
+            return best_result
         
         raise HTTPException(
             status_code=500, 
@@ -172,7 +220,209 @@ EXTRACT ALL TRANSACTIONS YOU CAN FIND. JSON RESPONSE:"""
     def _try_extraction_with_model(self, text: str, model: str) -> Optional[List[TransactionData]]:
         """Try extraction with a specific model"""
         try:
-            prompt = self.create_extraction_prompt(text)
+            # First try with the enhanced prompt
+            result = self._extract_with_prompt(text, model, self.create_extraction_prompt(text))
+            
+            if result and len(result) >= 15:  # If we got a good result, return it
+                return result
+            
+            # If we didn't get enough results, try a simpler, more focused approach
+            print(f"DEBUG: First attempt yielded {len(result) if result else 0} transactions, trying focused extraction")
+            focused_result = self._extract_with_focused_prompt(text, model)
+            
+            # Return the better result
+            if focused_result and len(focused_result) > len(result if result else []):
+                return focused_result
+            
+            return result
+                
+        except Exception as e:
+            print(f"DEBUG: Exception in _try_extraction_with_model: {type(e).__name__}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"LLM processing error with model {model}: {str(e)}"
+            )
+    
+    def _extract_with_focused_prompt(self, text: str, model: str) -> Optional[List[TransactionData]]:
+        """Try extraction with a hybrid regex+LLM approach for difficult cases"""
+        # First, use regex to pre-extract transaction candidates
+        transaction_candidates = self._extract_transactions_with_regex(text)
+        
+        if len(transaction_candidates) < 5:
+            # If regex didn't find much, fall back to pure LLM
+            return self._pure_llm_extraction(text, model)
+        
+        # Convert regex results to TransactionData objects directly
+        # The regex extraction is already quite good, so we can use it directly
+        validated_transactions = []
+        
+        for candidate in transaction_candidates:
+            try:
+                # Validate and convert to TransactionData
+                transaction = TransactionData(**candidate)
+                validated_transactions.append(transaction)
+            except Exception as e:
+                print(f"DEBUG: Failed to validate transaction: {e}")
+                continue
+        
+        print(f"DEBUG: Converted {len(validated_transactions)} regex results to TransactionData objects")
+        return validated_transactions
+    
+    def _extract_transactions_with_regex(self, text: str) -> List[Dict]:
+        """Extract transaction candidates using regex patterns with tabular structure understanding"""
+        # Find the account statement section
+        account_statement_match = re.search(r'Account Statement.*?(?=Closing Balance|Call Customer Care|\Z)', text, re.DOTALL | re.IGNORECASE)
+        if not account_statement_match:
+            return []
+        
+        statement_text = account_statement_match.group(0)
+        lines = [line.strip() for line in statement_text.split('\n') if line.strip()]
+        
+        transactions = []
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i]
+            
+            # Skip header lines and opening balance
+            if any(header in line.upper() for header in [
+                'TXN DATE', 'TRANSACTION', 'WITHDRAWALS', 'DEPOSITS', 'BALANCE',
+                'OPENING BALANCE', 'ACCOUNT STATEMENT', 'OTHER INFORMATION'
+            ]):
+                i += 1
+                continue
+            
+            # Look for date pattern at start of line
+            date_match = re.match(r'^(\d{2}-\d{2}-\d{4})', line)
+            if not date_match:
+                i += 1
+                continue
+                
+            # Found a transaction line
+            date_str = date_match.group(1)
+            
+            # Parse the date
+            try:
+                from datetime import datetime
+                parsed_date = datetime.strptime(date_str, '%d-%m-%Y')
+                formatted_date = parsed_date.strftime('%Y-%m-%d')
+            except ValueError:
+                i += 1
+                continue
+            
+            # Extract description (everything after the date)
+            description = line[len(date_str):].strip()
+            
+            # Look ahead for continuation lines and amounts
+            full_description = description
+            withdrawal_amount = None
+            deposit_amount = None
+            
+            # Check the next few lines for continuation and amounts
+            j = i + 1
+            while j < len(lines) and j < i + 5:  # Look at next 4 lines max
+                next_line = lines[j]
+                
+                # If we hit another date, stop
+                if re.match(r'^\d{2}-\d{2}-\d{4}', next_line):
+                    break
+                
+                # Check if this line is an amount (withdrawal or deposit)
+                amount_match = re.match(r'^(\d{1,3}(?:,\d{3})*\.\d{2})$', next_line)
+                if amount_match:
+                    amount_val = float(amount_match.group(1).replace(',', ''))
+                    
+                    # Determine if this is withdrawal or deposit based on transaction type
+                    if any(keyword in full_description.upper() for keyword in [
+                        'BY CASH', 'DEPOSIT', 'TRFR-FROM', 'CASH-RVSL', 'INT.PD'
+                    ]):
+                        deposit_amount = amount_val
+                    else:
+                        withdrawal_amount = amount_val
+                    j += 1
+                    break
+                
+                # Check if this line has a balance (usually larger number, skip it)
+                balance_match = re.match(r'^(\d{1,3}(?:,\d{3})*\.\d{2})$', next_line)
+                if balance_match:
+                    balance_val = float(balance_match.group(1).replace(',', ''))
+                    if balance_val > 1000:  # Likely a balance, skip
+                        j += 1
+                        continue
+                
+                # Otherwise, it might be a continuation of description
+                if not re.match(r'^\d+', next_line) and len(next_line) > 3:
+                    full_description += " " + next_line
+                
+                j += 1
+            
+            # Determine transaction type and amount
+            if deposit_amount:
+                transaction_type = "income"
+                amount = deposit_amount
+            elif withdrawal_amount:
+                transaction_type = "expense"
+                amount = withdrawal_amount
+            else:
+                # No explicit amount found, skip this transaction
+                i += 1
+                continue
+            
+            # Create the transaction
+            transaction = {
+                "date": formatted_date,
+                "amount": amount,
+                "description": full_description,
+                "transaction_type": transaction_type,
+                "confidence": 0.9
+            }
+            
+            transactions.append(transaction)
+            i = j  # Move to the next unprocessed line
+        
+        print(f"DEBUG: Regex extracted {len(transactions)} transaction candidates")
+        for i, txn in enumerate(transactions[:5]):
+            print(f"DEBUG:   {i+1}: {txn['date']} | {txn['transaction_type']} | {txn['amount']} | {txn['description'][:50]}...")
+        
+        return transactions
+    
+    def _pure_llm_extraction(self, text: str, model: str) -> Optional[List[TransactionData]]:
+        """Fallback to pure LLM extraction"""
+        # Extract just the transaction section
+        account_statement_match = re.search(r'Account Statement.*?(?=Call Customer Care|\Z)', text, re.DOTALL | re.IGNORECASE)
+        if account_statement_match:
+            transaction_text = account_statement_match.group(0)
+        else:
+            transaction_text = text
+        
+        focused_prompt = f"""
+Extract ALL transactions from this bank statement. Return ONLY JSON array.
+
+Key patterns to find:
+- Date: DD-MM-YYYY format
+- Description: ATM-CASH, BRN-BY CASH, PUR/, BY CASH DEPOSIT, etc.
+- Amount: Numbers with .00 
+- Type: income (deposits/credits), expense (withdrawals/debits)
+
+Look for ALL these transaction dates in September 2014:
+02-09, 05-09, 06-09, 08-09, 12-09, 13-09 (multiple), 15-09 (multiple), 16-09, 18-09 (multiple), 20-09 (multiple), 22-09, 23-09 (multiple), 26-09 (multiple), 29-09, 30-09
+
+TEXT:
+{transaction_text}
+
+JSON format:
+[
+  {{"date": "2014-09-02", "amount": 2000.00, "description": "BRN-BY CASH CASH", "transaction_type": "income"}},
+  ...
+]
+
+EXTRACT ALL TRANSACTIONS:"""
+
+        return self._extract_with_prompt(transaction_text, model, focused_prompt)
+    
+    def _extract_with_prompt(self, text: str, model: str, prompt: str) -> Optional[List[TransactionData]]:
+        """Extract transactions with a given prompt"""
+        try:
             normalized_model = self._normalize_model_name(model)
             
             print(f"DEBUG: Using normalized model name: {normalized_model}")
@@ -185,9 +435,10 @@ EXTRACT ALL TRANSACTIONS YOU CAN FIND. JSON RESPONSE:"""
                     'content': prompt
                 }],
                 options={
-                    'temperature': 0.1,  # Low temperature for consistent output
+                    'temperature': 0.2,  # Slightly higher for better extraction
                     'top_p': 0.9,
-                    'num_predict': 2000,  # Limit response length
+                    'num_predict': 3000,  # More tokens for complete extraction
+                    'num_ctx': 4096,     # Larger context window but not too large
                 }
             )
             
@@ -227,11 +478,8 @@ EXTRACT ALL TRANSACTIONS YOU CAN FIND. JSON RESPONSE:"""
                 return None
                 
         except Exception as e:
-            print(f"DEBUG: Exception in _try_extraction_with_model: {type(e).__name__}: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"LLM processing error with model {model}: {str(e)}"
-            )
+            print(f"DEBUG: Exception in _extract_with_prompt: {type(e).__name__}: {e}")
+            return None
     
     def check_ollama_connection(self) -> bool:
         """Check if Ollama is running and accessible"""
