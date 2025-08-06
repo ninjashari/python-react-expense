@@ -16,11 +16,7 @@ import {
   TableRow,
   Chip,
   Paper,
-  Alert,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
+  Divider,
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { MultiValue } from 'react-select';
@@ -30,17 +26,15 @@ import { formatCurrency } from '../utils/formatters';
 import { useUserInteractionNotifications } from '../hooks/useUserInteractionNotifications';
 import { useToast } from '../contexts/ToastContext';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
-import { Transaction } from '../types';
 
 const Reports: React.FC = () => {
-  usePageTitle(getPageTitle('reports', 'Transaction Filters & Analysis'));
+  usePageTitle(getPageTitle('reports', 'Financial Analytics'));
   
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedAccounts, setSelectedAccounts] = useState<MultiValue<Option>>([]);
   const [selectedCategories, setSelectedCategories] = useState<MultiValue<Option>>([]);
   const [selectedPayees, setSelectedPayees] = useState<MultiValue<Option>>([]);
-  const [selectedTransactionType, setSelectedTransactionType] = useState<string>('');
   
   const toast = useToast();
   const userNotifications = useUserInteractionNotifications();
@@ -68,10 +62,39 @@ const Reports: React.FC = () => {
     account_ids: selectedAccounts.length > 0 ? selectedAccounts.map(acc => acc.value) : undefined,
     category_ids: selectedCategories.length > 0 ? selectedCategories.map(cat => cat.value) : undefined,
     payee_ids: selectedPayees.length > 0 ? selectedPayees.map(payee => payee.value) : undefined,
-    transaction_type: selectedTransactionType || undefined,
   });
 
-  // Get filtered transactions
+  // Reports queries
+  const { data: summary, isLoading: summaryLoading, refetch: refetchSummary } = useQuery({
+    queryKey: ['reports', 'summary', getFilterParams()],
+    queryFn: () => reportsApi.getSummary(getFilterParams()),
+    enabled: false,
+  });
+
+  const { data: categoryReport, isLoading: categoryLoading, refetch: refetchCategory } = useQuery({
+    queryKey: ['reports', 'category', getFilterParams()],
+    queryFn: () => reportsApi.getByCategory(getFilterParams()),
+    enabled: false,
+  });
+
+  const { data: payeeReport, isLoading: payeeLoading, refetch: refetchPayee } = useQuery({
+    queryKey: ['reports', 'payee', getFilterParams()],
+    queryFn: () => reportsApi.getByPayee(getFilterParams()),
+    enabled: false,
+  });
+
+  const { data: accountReport, isLoading: accountLoading, refetch: refetchAccount } = useQuery({
+    queryKey: ['reports', 'account', getFilterParams()],
+    queryFn: () => reportsApi.getByAccount(getFilterParams()),
+    enabled: false,
+  });
+
+  const { data: monthlyTrend, isLoading: trendLoading, refetch: refetchTrend } = useQuery({
+    queryKey: ['reports', 'trend', getFilterParams()],
+    queryFn: () => reportsApi.getMonthlyTrend(getFilterParams()),
+    enabled: false,
+  });
+
   const { data: filteredTransactions, isLoading: transactionsLoading, refetch: refetchTransactions } = useQuery({
     queryKey: ['reports', 'filtered-transactions', getFilterParams()],
     queryFn: () => reportsApi.getFilteredTransactions(getFilterParams()),
@@ -95,15 +118,29 @@ const Reports: React.FC = () => {
     label: payee.name,
   })) || [];
 
-
-  const handleGenerateReport = async () => {
-    toast.showInfo('Loading filtered transactions...');
+  const handleGenerateReports = async () => {
+    toast.showInfo('Generating reports...');
     
     try {
-      await refetchTransactions();
-      toast.showSuccess('Transactions loaded successfully!');
+      const results = await Promise.allSettled([
+        refetchSummary(),
+        refetchCategory(),
+        refetchPayee(),
+        refetchAccount(),
+        refetchTrend(),
+        refetchTransactions(),
+      ]);
+      
+      const successCount = results.filter(result => result.status === 'fulfilled').length;
+      const errorCount = results.filter(result => result.status === 'rejected').length;
+      
+      if (errorCount === 0) {
+        toast.showSuccess(`All ${successCount} reports generated successfully!`);
+      } else {
+        toast.showWarning(`Reports generated: ${successCount} successful, ${errorCount} failed`);
+      }
     } catch (error) {
-      toast.showError('Failed to load transactions. Please try again.');
+      toast.showError('Failed to generate reports. Please try again.');
     }
   };
 
@@ -113,66 +150,20 @@ const Reports: React.FC = () => {
     setSelectedAccounts([]);
     setSelectedCategories([]);
     setSelectedPayees([]);
-    setSelectedTransactionType('');
     userNotifications.showFiltersCleared();
   };
-
-  // Calculate summary from filtered transactions
-  const calculateSummary = (transactions: Transaction[] | undefined) => {
-    if (!transactions || transactions.length === 0) {
-      return {
-        totalIncome: 0,
-        totalExpense: 0,
-        totalTransfer: 0,
-        netAmount: 0,
-        transactionCount: 0,
-      };
-    }
-
-    let totalIncome = 0;
-    let totalExpense = 0;
-    let totalTransfer = 0;
-
-    transactions.forEach(transaction => {
-      const amount = Number(transaction.amount);
-      switch (transaction.type) {
-        case 'income':
-          totalIncome += amount;
-          break;
-        case 'expense':
-          totalExpense += amount;
-          break;
-        case 'transfer':
-          totalTransfer += amount;
-          break;
-      }
-    });
-
-    return {
-      totalIncome,
-      totalExpense,
-      totalTransfer,
-      netAmount: totalIncome - totalExpense,
-      transactionCount: transactions.length,
-    };
-  };
-
-  const summary = calculateSummary(filteredTransactions);
 
   return (
     <Box>
       <Typography variant="h4" gutterBottom>
-        Transaction Reports
-      </Typography>
-      <Typography variant="body1" color="text.secondary" gutterBottom>
-        Apply filters to view and analyze your transactions
+        Reports
       </Typography>
 
       {/* Filters */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            Filter Transactions
+            Filters
           </Typography>
           
           <Grid container spacing={3}>
@@ -229,29 +220,13 @@ const Reports: React.FC = () => {
             </Grid>
 
             <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Transaction Type</InputLabel>
-                <Select
-                  value={selectedTransactionType}
-                  label="Transaction Type"
-                  onChange={(e) => setSelectedTransactionType(e.target.value)}
-                >
-                  <MenuItem value="">All Types</MenuItem>
-                  <MenuItem value="income">Income</MenuItem>
-                  <MenuItem value="expense">Expense</MenuItem>
-                  <MenuItem value="transfer">Transfer</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-
-            <Grid item xs={12}>
               <Box display="flex" gap={2}>
                 <Button
                   variant="contained"
-                  onClick={handleGenerateReport}
-                  disabled={transactionsLoading}
+                  onClick={handleGenerateReports}
+                  disabled={summaryLoading || categoryLoading || payeeLoading || accountLoading || trendLoading || transactionsLoading}
                 >
-                  {transactionsLoading ? 'Loading...' : 'Apply Filters'}
+                  Generate Reports
                 </Button>
                 <Button
                   variant="outlined"
@@ -265,18 +240,18 @@ const Reports: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Summary */}
-      {filteredTransactions && (
+      {/* Summary Report */}
+      {summary && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>
-              Summary ({summary.transactionCount} transactions)
+              Summary
             </Typography>
             <Grid container spacing={3}>
               <Grid item xs={12} sm={6} md={3}>
                 <Box textAlign="center">
                   <Typography variant="h4" color="success.main">
-                    {formatCurrency(summary.totalIncome)}
+                    {formatCurrency(summary.total_income)}
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
                     Total Income
@@ -286,7 +261,7 @@ const Reports: React.FC = () => {
               <Grid item xs={12} sm={6} md={3}>
                 <Box textAlign="center">
                   <Typography variant="h4" color="error.main">
-                    {formatCurrency(summary.totalExpense)}
+                    {formatCurrency(summary.total_expenses)}
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
                     Total Expenses
@@ -296,7 +271,7 @@ const Reports: React.FC = () => {
               <Grid item xs={12} sm={6} md={3}>
                 <Box textAlign="center">
                   <Typography variant="h4" color="info.main">
-                    {formatCurrency(summary.totalTransfer)}
+                    {formatCurrency(summary.total_transfers)}
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
                     Total Transfers
@@ -307,12 +282,12 @@ const Reports: React.FC = () => {
                 <Box textAlign="center">
                   <Typography
                     variant="h4"
-                    color={summary.netAmount >= 0 ? 'success.main' : 'error.main'}
+                    color={summary.net_income >= 0 ? 'success.main' : 'error.main'}
                   >
-                    {formatCurrency(summary.netAmount)}
+                    {formatCurrency(summary.net_income)}
                   </Typography>
                   <Typography variant="body2" color="textSecondary">
-                    Net Amount
+                    Net Income
                   </Typography>
                 </Box>
               </Grid>
@@ -321,14 +296,14 @@ const Reports: React.FC = () => {
         </Card>
       )}
 
-      {/* Filtered Transactions Table */}
+      {/* Filtered Transactions */}
       {filteredTransactions && filteredTransactions.length > 0 && (
-        <Card>
+        <Card sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>
               Filtered Transactions ({filteredTransactions.length})
             </Typography>
-            <TableContainer component={Paper} sx={{ maxHeight: 600 }}>
+            <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
@@ -397,15 +372,185 @@ const Reports: React.FC = () => {
         </Card>
       )}
 
-      {/* No Results */}
-      {filteredTransactions && filteredTransactions.length === 0 && (
-        <Alert severity="info">
-          No transactions found matching the selected filters. Try adjusting your filter criteria.
-        </Alert>
-      )}
+      <Grid container spacing={3}>
+        {/* Category Report */}
+        {categoryReport && categoryReport.length > 0 && (
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  By Category
+                </Typography>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Category</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                        <TableCell align="right">Count</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {categoryReport.map((item, index) => (
+                        <TableRow key={index}>
+                          <TableCell>
+                            <Chip
+                              label={item.category_name}
+                              size="small"
+                              sx={{
+                                backgroundColor: item.category_color,
+                                color: 'white',
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatCurrency(item.total_amount)}
+                          </TableCell>
+                          <TableCell align="right">
+                            {item.transaction_count}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* Payee Report */}
+        {payeeReport && payeeReport.length > 0 && (
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  By Payee
+                </Typography>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Payee</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                        <TableCell align="right">Count</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {payeeReport.map((item, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{item.payee_name}</TableCell>
+                          <TableCell align="right">
+                            {formatCurrency(item.total_amount)}
+                          </TableCell>
+                          <TableCell align="right">
+                            {item.transaction_count}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* Account Report */}
+        {accountReport && accountReport.length > 0 && (
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  By Account
+                </Typography>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Account</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                        <TableCell align="right">Count</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {accountReport.map((item, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{item.account_name}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={item.account_type}
+                              size="small"
+                              variant="outlined"
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatCurrency(item.total_amount)}
+                          </TableCell>
+                          <TableCell align="right">
+                            {item.transaction_count}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* Monthly Trend */}
+        {monthlyTrend && monthlyTrend.length > 0 && (
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Monthly Trend
+                </Typography>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Month</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {monthlyTrend.map((item, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{item.month}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={item.transaction_type}
+                              size="small"
+                              color={
+                                item.transaction_type === 'deposit'
+                                  ? 'success'
+                                  : item.transaction_type === 'withdrawal'
+                                  ? 'error'
+                                  : 'info'
+                              }
+                            />
+                          </TableCell>
+                          <TableCell align="right">
+                            {formatCurrency(item.total_amount)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+      </Grid>
 
       {/* Loading indicator */}
-      {transactionsLoading && (
+      {(summaryLoading || categoryLoading || payeeLoading || accountLoading || trendLoading || transactionsLoading) && (
         <Box display="flex" justifyContent="center" mt={3}>
           <CircularProgress />
         </Box>

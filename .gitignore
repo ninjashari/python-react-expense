@@ -200,6 +200,7 @@ validate_*.py
 
 # PDF files (except documentation)
 *.pdf
+*.PDF
 
 # Test data
 test_data/

@@ -15,19 +15,89 @@ class PDFProcessor:
         self.ocr_confidence_threshold = 30  # Minimum OCR confidence percentage
     
     def extract_text_with_pymupdf(self, pdf_bytes: bytes) -> str:
-        """Extract text from PDF using PyMuPDF (fitz)"""
+        """Extract text from PDF using PyMuPDF (fitz) with better structure preservation"""
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             text = ""
             
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
-                text += page.get_text() + "\n"
+                page_text = page.get_text()
+                
+                # Post-process to better preserve transaction table structure
+                page_text = self._improve_transaction_extraction(page_text)
+                text += page_text + "\n"
             
             doc.close()
             return text.strip()
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error extracting text from PDF: {str(e)}")
+    
+    def _improve_transaction_extraction(self, text: str) -> str:
+        """Improve transaction extraction by restructuring the text"""
+        lines = text.split('\n')
+        improved_lines = []
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            
+            # Look for transaction date pattern
+            if re.match(r'\d{2}-\d{2}-\d{4}', line):
+                # This might be a transaction line
+                transaction_parts = [line]
+                
+                # Collect related lines (description, amount, balance)
+                j = i + 1
+                while j < len(lines) and j < i + 6:  # Look ahead max 6 lines
+                    next_line = lines[j].strip()
+                    if not next_line:
+                        j += 1
+                        continue
+                    
+                    # If we hit another date, stop
+                    if re.match(r'\d{2}-\d{2}-\d{4}', next_line):
+                        break
+                        
+                    # Collect transaction description and amounts
+                    transaction_parts.append(next_line)
+                    j += 1
+                
+                # Reconstruct transaction line
+                if len(transaction_parts) >= 3:  # Date + Description + Amount
+                    # Combine into a more structured format
+                    date = transaction_parts[0]
+                    description_parts = []
+                    amounts = []
+                    
+                    for part in transaction_parts[1:]:
+                        # Check if it's an amount (contains numbers with decimals)
+                        if re.search(r'\d+[,.]?\d{2,}', part) and len(part.split()) <= 2:
+                            amounts.append(part)
+                        else:
+                            description_parts.append(part)
+                    
+                    # Reconstruct as: DATE | DESCRIPTION | AMOUNT | BALANCE
+                    description = ' '.join(description_parts).strip()
+                    if amounts:
+                        if len(amounts) >= 2:
+                            # First amount is usually transaction amount, second is balance
+                            reconstructed = f"{date} | {description} | {amounts[0]} | {amounts[1]}"
+                        else:
+                            reconstructed = f"{date} | {description} | {amounts[0]}"
+                    else:
+                        reconstructed = f"{date} | {description}"
+                    
+                    improved_lines.append(reconstructed)
+                    i = j - 1  # Skip processed lines
+                else:
+                    improved_lines.append(line)
+            else:
+                improved_lines.append(line)
+            
+            i += 1
+        
+        return '\n'.join(improved_lines)
     
     def needs_ocr(self, extracted_text: str) -> bool:
         """Determine if PDF needs OCR based on extracted text quality"""

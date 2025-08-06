@@ -39,6 +39,7 @@ import {
   Info,
 } from '@mui/icons-material';
 import { LLMTransactionData, Account } from '../types';
+import { formatCurrency } from '../utils/formatters';
 
 interface TransactionReviewStepProps {
   transactions: LLMTransactionData[];
@@ -257,7 +258,7 @@ const TransactionReviewStep: React.FC<TransactionReviewStepProps> = ({
             </Grid>
             <Grid item xs={12} sm={3}>
               <Typography variant="h4" color={totalAmount >= 0 ? 'success.main' : 'error.main'}>
-                ${Math.abs(totalAmount).toFixed(2)}
+                {formatCurrency(Math.abs(totalAmount))}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 Net {totalAmount >= 0 ? 'Income' : 'Expense'}
@@ -347,7 +348,7 @@ const TransactionReviewStep: React.FC<TransactionReviewStepProps> = ({
                     variant="body2" 
                     color={transaction.transaction_type === 'income' ? 'success.main' : 'text.primary'}
                   >
-                    ${transaction.amount.toFixed(2)}
+                    {formatCurrency(transaction.amount)}
                   </Typography>
                 </TableCell>
                 <TableCell>

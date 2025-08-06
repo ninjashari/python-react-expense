@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, or_
 from typing import List, Optional
 from datetime import date, datetime
@@ -9,6 +9,9 @@ from models.transactions import Transaction, TransactionType
 from models.accounts import Account
 from models.categories import Category
 from models.payees import Payee
+from models.users import User
+from utils.auth import get_current_active_user
+from schemas.transactions import TransactionResponse
 
 router = APIRouter()
 
@@ -19,24 +22,25 @@ def get_summary(
     account_ids: List[uuid.UUID] = Query(default=[]),
     category_ids: List[uuid.UUID] = Query(default=[]),
     payee_ids: List[uuid.UUID] = Query(default=[]),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Get summary statistics for transactions"""
-    query = db.query(Transaction)
+    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
     
     # Apply filters
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
         query = query.filter(Transaction.date <= end_date)
-    if account_ids:
+    if account_ids and len(account_ids) > 0:
         query = query.filter(Transaction.account_id.in_(account_ids))
-    if category_ids:
+    if category_ids and len(category_ids) > 0:
         query = query.filter(Transaction.category_id.in_(category_ids))
-    if payee_ids:
+    if payee_ids and len(payee_ids) > 0:
         query = query.filter(Transaction.payee_id.in_(payee_ids))
     
-    # Calculate summaries
+    # Calculate summaries using correct transaction types
     total_income = query.filter(Transaction.type == TransactionType.DEPOSIT).with_entities(func.sum(Transaction.amount)).scalar() or 0
     total_expenses = query.filter(Transaction.type == TransactionType.WITHDRAWAL).with_entities(func.sum(Transaction.amount)).scalar() or 0
     total_transfers = query.filter(Transaction.type == TransactionType.TRANSFER).with_entities(func.sum(Transaction.amount)).scalar() or 0
@@ -201,3 +205,41 @@ def get_monthly_trend(
         }
         for result in results
     ]
+
+@router.get("/filtered-transactions", response_model=List[TransactionResponse])
+def get_filtered_transactions(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    account_ids: List[uuid.UUID] = Query(default=[]),
+    category_ids: List[uuid.UUID] = Query(default=[]),
+    payee_ids: List[uuid.UUID] = Query(default=[]),
+    transaction_type: Optional[TransactionType] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get filtered list of transactions with no limit"""
+    query = db.query(Transaction).options(
+        joinedload(Transaction.account),
+        joinedload(Transaction.to_account),
+        joinedload(Transaction.category),
+        joinedload(Transaction.payee)
+    ).filter(Transaction.user_id == current_user.id)
+    
+    # Apply filters
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
+    if account_ids and len(account_ids) > 0:
+        query = query.filter(Transaction.account_id.in_(account_ids))
+    if category_ids and len(category_ids) > 0:
+        query = query.filter(Transaction.category_id.in_(category_ids))
+    if payee_ids and len(payee_ids) > 0:
+        query = query.filter(Transaction.payee_id.in_(payee_ids))
+    if transaction_type:
+        query = query.filter(Transaction.type == transaction_type)
+    
+    # Order by date desc for most recent first
+    transactions = query.order_by(Transaction.date.desc(), Transaction.created_at.desc()).all()
+    
+    return transactions

@@ -1,0 +1,23 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="96" cy="96" r="96" fill="#1976d2"/>
+  
+  <!-- Outer ring -->
+  <circle cx="96" cy="96" r="80" stroke="white" stroke-width="2" fill="none" opacity="0.2"/>
+  
+  <!-- Main currency symbol (₹) -->
+  <g transform="translate(96, 96)">
+    <!-- Rupee symbol -->
+    <path d="M-20 -20h32M-20 -8h32M-12 8h20l-16 24h8l16-24" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  
+  <!-- Chart/graph elements around the symbol -->
+  <path d="M40 150l12-12 12 8 16-16 8 4" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+  <path d="M152 150l-12-12-12 8-16-16-8 4" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+  
+  <!-- Small dots for additional financial elements -->
+  <circle cx="60" cy="60" r="3" fill="white" opacity="0.5"/>
+  <circle cx="132" cy="60" r="3" fill="white" opacity="0.5"/>
+  <circle cx="60" cy="132" r="3" fill="white" opacity="0.5"/>
+  <circle cx="132" cy="132" r="3" fill="white" opacity="0.5"/>
+</svg>

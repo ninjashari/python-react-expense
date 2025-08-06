@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -27,6 +28,7 @@ import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../servi
 import { Transaction, CreateTransactionDto } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
+import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 
 const transactionTypes = [
   { value: 'income', label: 'Income' },
@@ -35,6 +37,8 @@ const transactionTypes = [
 ];
 
 const Transactions: React.FC = () => {
+  usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const queryClient = useQueryClient();
@@ -184,6 +188,7 @@ const Transactions: React.FC = () => {
             variant="outlined"
             startIcon={<Upload />}
             sx={{ mr: 2 }}
+            onClick={() => navigate('/import')}
           >
             Import
           </Button>

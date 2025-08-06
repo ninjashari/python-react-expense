@@ -47,15 +47,16 @@ CRITICAL INSTRUCTIONS:
 7. date must be in YYYY-MM-DD format (convert from DD-MM-YYYY if needed)
 
 TRANSACTION IDENTIFICATION PATTERNS:
-- Look for date patterns like: 02-09-2014, 05-09-2014, etc.
-- Followed by transaction descriptions like: ATM-CASH, BRN-BY CASH, PUR/, BY CASH DEPOSIT
-- With amounts like: 2,000.00, 1,500.00, 200.00
+- Look for date patterns like: 07-10-2014, 09-10-2014, etc. (any month/year)
+- Followed by transaction descriptions like: ATM-CASH, BY CASH DEPOSIT, PUR/, Service Tax, Consolidated Charges
+- With amounts like: 20,000.00, 400.00, 16.69, 135.00
 - And running balance updates
+- Structured format: DATE | DESCRIPTION | AMOUNT | BALANCE (if available)
 
 TRANSACTION TYPE RULES:
-- Deposits/Credits (money coming in): "income" - includes: BRN-BY CASH, BY CASH DEPOSIT, ATM-TRFR-FROM, CASH-RVSL, Interest payments
-- Withdrawals/Debits (money going out): "expense" - includes: ATM-CASH, PUR/ (purchases), fees, charges
-- Transfers between accounts: "transfer" - includes: ATM-TRFR-FROM (but analyze context)
+- Deposits/Credits (money coming in): "income" - includes: "BY CASH DEPOSIT", "By Clg/" (cheque deposits), salary credits, interest payments
+- Withdrawals/Debits (money going out): "expense" - includes: "ATM-CASH", "PUR/" (purchases/payments), "Service Tax", "Consolidated Charges", mobile recharges, fees
+- Transfers between accounts: "transfer" - includes: account-to-account transfers, NEFT, IMPS (but analyze context carefully)
 
 SYSTEMATIC APPROACH:
 1. Start from the beginning of the account statement section
@@ -68,13 +69,14 @@ SYSTEMATIC APPROACH:
 COMMON BANK STATEMENT STRUCTURE:
 Txn Date | Transaction Description | Withdrawals | Deposits | Balance
 
-SPECIFIC CHECKS FOR THIS STATEMENT:
-- Look for all September 2014 dates: 02-09, 05-09, 06-09, 08-09, 12-09, 13-09, 15-09, 16-09, 18-09, 20-09, 22-09, 23-09, 26-09, 29-09, 30-09
-- Multiple transactions can occur on the same date
-- Look for transactions with similar patterns but different amounts
-- Check for ATM transactions at JP UNIVERSITY locations
-- Look for Bharti Airtel recharge transactions
+SPECIFIC CHECKS FOR ANY STATEMENT:
+- Scan through ALL dates in the statement (could be any month/year)
+- Multiple transactions can occur on the same date - don't miss any
+- Look for transaction patterns: ATM-CASH, PUR/, BY CASH DEPOSIT, BRN-BY CASH, etc.
+- Check for mobile recharge transactions (Bharti Airtel, TATA DOCOMO, etc.)
 - Find all cash deposits and withdrawals
+- Include service charges, fees, and tax deductions as transactions
+- Look for transfer transactions (TRFR, NEFT, IMPS, etc.)
 
 TEXT TO ANALYZE:
 {text}
@@ -82,17 +84,26 @@ TEXT TO ANALYZE:
 EXPECTED JSON FORMAT - EXTRACT ALL TRANSACTIONS:
 [
   {{
-    "date": "2014-09-02",
-    "amount": 2000.00,
-    "description": "BRN-BY CASH CASH",
+    "date": "2014-10-07",
+    "amount": 20000.00,
+    "description": "By Clg/061193/PNB /CHANDIGARH",
     "transaction_type": "income",
-    "payee": "Cash Deposit",
-    "category": "Cash",
+    "payee": "PNB Bank",
+    "category": "Bank Transfer",
+    "confidence": 0.9
+  }},
+  {{
+    "date": "2014-10-09",
+    "amount": 400.00,
+    "description": "ATM-CASH/JP UNIVERSITY,WAKH/SOLAN/091014",
+    "transaction_type": "expense",
+    "payee": "JP University ATM",
+    "category": "Cash Withdrawal",
     "confidence": 0.9
   }}
 ]
 
-IMPORTANT: Count the transactions as you extract them. This statement should have around 20+ transactions. If you find fewer than 20, you are missing some. Go back and look more carefully.
+IMPORTANT: Count the transactions as you extract them. Look for ALL lines with dates and amounts. If you see multiple consecutive dates, there are likely multiple transactions. Each line with a date and transaction description should be a separate transaction. Do not skip any transaction line.
 
 JSON RESPONSE:"""
 

@@ -8,10 +8,12 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
+import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import { accountsApi, reportsApi, transactionsApi } from '../services/api';
 import { formatCurrency } from '../utils/formatters';
 
 const Dashboard: React.FC = () => {
+  usePageTitle(getPageTitle('dashboard', 'Financial Overview'));
   const { data: accounts, isLoading: accountsLoading } = useQuery({
     queryKey: ['accounts'],
     queryFn: accountsApi.getAll,

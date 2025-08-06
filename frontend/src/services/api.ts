@@ -183,6 +183,15 @@ export const reportsApi = {
     end_date?: string;
     account_ids?: number[];
   }): Promise<MonthlyTrend[]> => api.get('/reports/monthly-trend', { params }).then(res => res.data),
+  
+  getFilteredTransactions: (params?: {
+    start_date?: string;
+    end_date?: string;
+    account_ids?: number[];
+    category_ids?: number[];
+    payee_ids?: number[];
+    transaction_type?: string;
+  }): Promise<Transaction[]> => api.get('/reports/filtered-transactions', { params }).then(res => res.data),
 };
 
 // Import API
