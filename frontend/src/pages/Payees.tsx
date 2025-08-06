@@ -51,7 +51,7 @@ const Payees: React.FC = () => {
   });
 
   const updateMutation = useUpdateWithToast(
-    ({ id, data }: { id: number; data: Partial<CreatePayeeDto> }) =>
+    ({ id, data }: { id: string; data: Partial<CreatePayeeDto> }) =>
       payeesApi.update(id, data),
     {
       resourceName: 'Payee',
@@ -98,7 +98,7 @@ const Payees: React.FC = () => {
     }
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     if (window.confirm('Are you sure you want to delete this payee?')) {
       deleteMutation.mutate(id);
     }

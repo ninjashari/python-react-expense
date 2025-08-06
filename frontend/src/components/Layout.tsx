@@ -20,7 +20,6 @@ import {
   Receipt,
   Person,
   Category,
-  Assessment,
   Upload,
   AccountCircle,
   Logout,
@@ -41,7 +40,6 @@ const menuItems = [
   { text: 'Import', icon: <Upload />, path: '/import' },
   { text: 'Payees', icon: <Person />, path: '/payees' },
   { text: 'Categories', icon: <Category />, path: '/categories' },
-  { text: 'Reports', icon: <Assessment />, path: '/reports' },
 ];
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {

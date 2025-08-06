@@ -9,7 +9,7 @@ import {
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
-import { accountsApi, reportsApi, transactionsApi } from '../services/api';
+import { accountsApi, transactionsApi } from '../services/api';
 import { formatCurrency } from '../utils/formatters';
 
 const Dashboard: React.FC = () => {
@@ -19,15 +19,44 @@ const Dashboard: React.FC = () => {
     queryFn: accountsApi.getAll,
   });
 
-  const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ['reports', 'summary'],
-    queryFn: () => reportsApi.getSummary(),
+  // Get all transactions for accurate totals
+  const { data: allTransactions, isLoading: allTransactionsLoading } = useQuery({
+    queryKey: ['transactions', 'all'],
+    queryFn: () => transactionsApi.getAll(), // Get all transactions for accurate totals
   });
 
-  const { data: recentTransactions, isLoading: transactionsLoading } = useQuery({
+  // Get recent transactions for display
+  const { data: recentTransactions, isLoading: recentTransactionsLoading } = useQuery({
     queryKey: ['transactions', 'recent'],
-    queryFn: () => transactionsApi.getAll({ limit: 5 }),
+    queryFn: () => transactionsApi.getAll({ limit: 10 }), // Just for recent transactions display
   });
+
+  // Calculate summary from ALL transactions
+  const calculateSummary = () => {
+    if (!allTransactions || allTransactions.length === 0) return null;
+    
+    const total_income = allTransactions
+      .filter(t => t.type === 'income')
+      .reduce((sum, t) => {
+        const amount = parseFloat(String(t.amount || '0'));
+        return sum + (isNaN(amount) ? 0 : amount);
+      }, 0);
+    
+    const total_expenses = allTransactions
+      .filter(t => t.type === 'expense')
+      .reduce((sum, t) => {
+        const amount = parseFloat(String(t.amount || '0'));
+        return sum + (isNaN(amount) ? 0 : amount);
+      }, 0);
+    
+    return { 
+      total_income,
+      total_expenses,
+      net_income: total_income - total_expenses 
+    };
+  };
+  const summary = calculateSummary();
+  const summaryLoading = allTransactionsLoading;
 
   // Calculate total net worth (assets - debts)
   const totalBalance = accounts?.reduce((sum, account) => {
@@ -41,7 +70,7 @@ const Dashboard: React.FC = () => {
     }
   }, 0) || 0;
 
-  if (accountsLoading || summaryLoading || transactionsLoading) {
+  if (accountsLoading || summaryLoading || recentTransactionsLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="400px">
         <CircularProgress />

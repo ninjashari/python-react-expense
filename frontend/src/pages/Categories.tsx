@@ -53,7 +53,7 @@ const Categories: React.FC = () => {
   });
 
   const updateMutation = useUpdateWithToast(
-    ({ id, data }: { id: number; data: Partial<CreateCategoryDto> }) =>
+    ({ id, data }: { id: string; data: Partial<CreateCategoryDto> }) =>
       categoriesApi.update(id, data),
     {
       resourceName: 'Category',
@@ -107,7 +107,7 @@ const Categories: React.FC = () => {
     }
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     if (window.confirm('Are you sure you want to delete this category?')) {
       deleteMutation.mutate(id);
     }

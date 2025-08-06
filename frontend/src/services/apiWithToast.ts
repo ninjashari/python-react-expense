@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { accountsApi, payeesApi, categoriesApi, transactionsApi, reportsApi, importApi } from './api';
+import { accountsApi, payeesApi, categoriesApi, transactionsApi, importApi } from './api';
 import { authService } from './authApi';
 
 // Enhanced API functions that work with toast notifications
@@ -28,7 +28,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      update: async (id: number, data: any) => {
+      update: async (id: string, data: any) => {
         try {
           const result = await accountsApi.update(id, data);
           toast.showSuccess(`Account updated successfully`);
@@ -39,7 +39,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      delete: async (id: number) => {
+      delete: async (id: string) => {
         try {
           const result = await accountsApi.delete(id);
           toast.showSuccess('Account deleted successfully');
@@ -75,7 +75,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      update: async (id: number, data: any) => {
+      update: async (id: string, data: any) => {
         try {
           const result = await transactionsApi.update(id, data);
           toast.showSuccess('Transaction updated successfully');
@@ -86,7 +86,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      delete: async (id: number) => {
+      delete: async (id: string) => {
         try {
           const result = await transactionsApi.delete(id);
           toast.showSuccess('Transaction deleted successfully');
@@ -97,7 +97,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      bulkDelete: async (ids: number[]) => {
+      bulkDelete: async (ids: string[]) => {
         try {
           await Promise.all(ids.map(id => transactionsApi.delete(id)));
           toast.showSuccess(`${ids.length} transactions deleted successfully`);
@@ -130,7 +130,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      update: async (id: number, data: any) => {
+      update: async (id: string, data: any) => {
         try {
           const result = await categoriesApi.update(id, data);
           toast.showSuccess('Category updated successfully');
@@ -141,7 +141,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      delete: async (id: number) => {
+      delete: async (id: string) => {
         try {
           const result = await categoriesApi.delete(id);
           toast.showSuccess('Category deleted successfully');
@@ -175,7 +175,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      update: async (id: number, data: any) => {
+      update: async (id: string, data: any) => {
         try {
           const result = await payeesApi.update(id, data);
           toast.showSuccess('Payee updated successfully');
@@ -186,7 +186,7 @@ export const createEnhancedApi = (toast: any) => {
         }
       },
 
-      delete: async (id: number) => {
+      delete: async (id: string) => {
         try {
           const result = await payeesApi.delete(id);
           toast.showSuccess('Payee deleted successfully');
@@ -198,53 +198,6 @@ export const createEnhancedApi = (toast: any) => {
       },
     },
 
-    // Reports API with toast notifications
-    reports: {
-      getSummary: async (params?: any) => {
-        try {
-          return await reportsApi.getSummary(params);
-        } catch (error) {
-          toast.showError(`Failed to generate summary report: ${(error as Error).message}`);
-          throw error;
-        }
-      },
-
-      getByCategory: async (params?: any) => {
-        try {
-          return await reportsApi.getByCategory(params);
-        } catch (error) {
-          toast.showError(`Failed to generate category report: ${(error as Error).message}`);
-          throw error;
-        }
-      },
-
-      getByPayee: async (params?: any) => {
-        try {
-          return await reportsApi.getByPayee(params);
-        } catch (error) {
-          toast.showError(`Failed to generate payee report: ${(error as Error).message}`);
-          throw error;
-        }
-      },
-
-      getByAccount: async (params?: any) => {
-        try {
-          return await reportsApi.getByAccount(params);
-        } catch (error) {
-          toast.showError(`Failed to generate account report: ${(error as Error).message}`);
-          throw error;
-        }
-      },
-
-      getMonthlyTrend: async (params?: any) => {
-        try {
-          return await reportsApi.getMonthlyTrend(params);
-        } catch (error) {
-          toast.showError(`Failed to generate monthly trend report: ${(error as Error).message}`);
-          throw error;
-        }
-      },
-    },
 
     // Import API with toast notifications
     import: {

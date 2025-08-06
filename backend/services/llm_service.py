@@ -105,6 +105,14 @@ EXPECTED JSON FORMAT - EXTRACT ALL TRANSACTIONS:
 
 IMPORTANT: Count the transactions as you extract them. Look for ALL lines with dates and amounts. If you see multiple consecutive dates, there are likely multiple transactions. Each line with a date and transaction description should be a separate transaction. Do not skip any transaction line.
 
+CRITICAL: If you find fewer than 20 transactions in a typical bank statement, you are likely missing some. Go back and look more carefully. Indian bank statements often have 20+ transactions per month. Make sure you capture:
+- ALL ATM withdrawals (multiple per day possible)  
+- ALL cash deposits (often multiple)
+- ALL purchases and payments (PUR/ entries)
+- ALL service charges and fees
+- ALL mobile recharges and bill payments
+- ALL transfer transactions
+
 JSON RESPONSE:"""
 
     def validate_extracted_data(self, data: List[Dict]) -> List[TransactionData]:
@@ -231,10 +239,17 @@ JSON RESPONSE:"""
     def _try_extraction_with_model(self, text: str, model: str) -> Optional[List[TransactionData]]:
         """Try extraction with a specific model"""
         try:
+            # Estimate expected transaction count
+            date_patterns = len(re.findall(r'\b\d{2}-\d{2}-\d{4}\b', text))
+            expected_min_transactions = max(10, date_patterns // 2)  # Conservative estimate
+            good_result_threshold = min(expected_min_transactions, 15)  # Don't be too greedy initially
+            
+            print(f"DEBUG: Expected min {expected_min_transactions} transactions, good result threshold: {good_result_threshold}")
+            
             # First try with the enhanced prompt
             result = self._extract_with_prompt(text, model, self.create_extraction_prompt(text))
             
-            if result and len(result) >= 15:  # If we got a good result, return it
+            if result and len(result) >= good_result_threshold:  # If we got a good result, return it
                 return result
             
             # If we didn't get enough results, try a simpler, more focused approach
@@ -289,6 +304,9 @@ JSON RESPONSE:"""
         statement_text = account_statement_match.group(0)
         lines = [line.strip() for line in statement_text.split('\n') if line.strip()]
         
+        print(f"DEBUG: Regex extraction processing {len(lines)} lines from account statement")
+        date_pattern_count = 0
+        
         transactions = []
         i = 0
         
@@ -308,6 +326,8 @@ JSON RESPONSE:"""
             if not date_match:
                 i += 1
                 continue
+            
+            date_pattern_count += 1
                 
             # Found a transaction line
             date_str = date_match.group(1)
@@ -391,7 +411,7 @@ JSON RESPONSE:"""
             transactions.append(transaction)
             i = j  # Move to the next unprocessed line
         
-        print(f"DEBUG: Regex extracted {len(transactions)} transaction candidates")
+        print(f"DEBUG: Found {date_pattern_count} date patterns, extracted {len(transactions)} transaction candidates")
         for i, txn in enumerate(transactions[:5]):
             print(f"DEBUG:   {i+1}: {txn['date']} | {txn['transaction_type']} | {txn['amount']} | {txn['description'][:50]}...")
         
@@ -448,8 +468,8 @@ EXTRACT ALL TRANSACTIONS:"""
                 options={
                     'temperature': 0.2,  # Slightly higher for better extraction
                     'top_p': 0.9,
-                    'num_predict': 3000,  # More tokens for complete extraction
-                    'num_ctx': 4096,     # Larger context window but not too large
+                    'num_predict': 8000,  # Increased for more complete extraction
+                    'num_ctx': 8192,     # Increased context window for longer PDFs
                 }
             )
             

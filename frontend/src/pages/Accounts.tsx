@@ -92,7 +92,7 @@ const Accounts: React.FC = () => {
   });
 
   const updateMutation = useUpdateWithToast(
-    ({ id, data }: { id: number; data: Partial<CreateAccountDto> }) =>
+    ({ id, data }: { id: string; data: Partial<CreateAccountDto> }) =>
       accountsApi.update(id, data),
     {
       resourceName: 'Account',

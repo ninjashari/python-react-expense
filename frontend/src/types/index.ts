@@ -1,5 +1,5 @@
 export interface Account {
-  id: number;
+  id: string;
   name: string;
   type: 'checking' | 'savings' | 'credit' | 'cash' | 'investment';
   balance: number;
@@ -12,14 +12,14 @@ export interface Account {
 }
 
 export interface Payee {
-  id: number;
+  id: string;
   name: string;
   created_at: string;
   updated_at?: string;
 }
 
 export interface Category {
-  id: number;
+  id: string;
   name: string;
   color: string;
   created_at: string;
@@ -27,15 +27,15 @@ export interface Category {
 }
 
 export interface Transaction {
-  id: number;
+  id: string;
   date: string;
   amount: number;
   description?: string;
   type: 'income' | 'expense' | 'transfer';
-  account_id: number;
-  to_account_id?: number;
-  payee_id?: number;
-  category_id?: number;
+  account_id: string;
+  to_account_id?: string;
+  payee_id?: string;
+  category_id?: string;
   created_at: string;
   updated_at?: string;
   account?: Account;
@@ -68,45 +68,12 @@ export interface CreateTransactionDto {
   amount: number;
   description?: string;
   type: Transaction['type'];
-  account_id: number;
-  to_account_id?: number;
-  payee_id?: number;
-  category_id?: number;
+  account_id: string;
+  to_account_id?: string;
+  payee_id?: string;
+  category_id?: string;
 }
 
-export interface ReportSummary {
-  total_income: number;
-  total_expenses: number;
-  total_transfers: number;
-  net_income: number;
-  transaction_count: number;
-}
-
-export interface CategoryReport {
-  category_name: string;
-  category_color: string;
-  total_amount: number;
-  transaction_count: number;
-}
-
-export interface PayeeReport {
-  payee_name: string;
-  total_amount: number;
-  transaction_count: number;
-}
-
-export interface AccountReport {
-  account_name: string;
-  account_type: string;
-  total_amount: number;
-  transaction_count: number;
-}
-
-export interface MonthlyTrend {
-  month: string;
-  transaction_type: string;
-  total_amount: number;
-}
 
 // PDF LLM Import Types
 export interface LLMTransactionData {

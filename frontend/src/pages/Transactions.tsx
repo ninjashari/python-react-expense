@@ -44,7 +44,7 @@ const transactionTypes = [
 interface TransactionFilters {
   startDate?: string;
   endDate?: string;
-  accountId?: number;
+  accountId?: string;
 }
 
 const Transactions: React.FC = () => {
@@ -62,7 +62,7 @@ const Transactions: React.FC = () => {
       amount: 0,
       description: '',
       type: 'expense',
-      account_id: 0,
+      account_id: '',
     },
   });
 
@@ -103,7 +103,7 @@ const Transactions: React.FC = () => {
   });
 
   const updateMutation = useUpdateWithToast(
-    ({ id, data }: { id: number; data: Partial<CreateTransactionDto> }) =>
+    ({ id, data }: { id: string; data: Partial<CreateTransactionDto> }) =>
       transactionsApi.update(id, data),
     {
       resourceName: 'Transaction',
@@ -143,7 +143,7 @@ const Transactions: React.FC = () => {
         amount: 0,
         description: '',
         type: 'expense',
-        account_id: 0,
+        account_id: '',
       });
     }
     setDialogOpen(true);
@@ -170,7 +170,7 @@ const Transactions: React.FC = () => {
     }
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     if (window.confirm('Are you sure you want to delete this transaction?')) {
       deleteMutation.mutate(id);
     }
@@ -274,7 +274,7 @@ const Transactions: React.FC = () => {
                   select
                   label="Account"
                   value={filters.accountId || ''}
-                  onChange={(e) => handleFilterChange('accountId', e.target.value ? parseInt(e.target.value) : undefined)}
+                  onChange={(e) => handleFilterChange('accountId', e.target.value || undefined)}
                   fullWidth
                   size="small"
                 >
