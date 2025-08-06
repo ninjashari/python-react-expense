@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 import uuid
 from decimal import Decimal
+from datetime import date
 from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
@@ -86,6 +87,8 @@ def get_transactions(
     category_id: Optional[uuid.UUID] = None,
     payee_id: Optional[uuid.UUID] = None,
     transaction_type: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -104,6 +107,10 @@ def get_transactions(
         query = query.filter(Transaction.payee_id == payee_id)
     if transaction_type:
         query = query.filter(Transaction.type == transaction_type)
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
     
     # Filter by current user
     query = query.filter(Transaction.user_id == current_user.id)

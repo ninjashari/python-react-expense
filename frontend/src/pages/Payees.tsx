@@ -135,7 +135,7 @@ const Payees: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {payees?.map((payee) => (
+            {payees?.sort((a, b) => a.name.localeCompare(b.name)).map((payee) => (
               <TableRow key={payee.id}>
                 <TableCell>
                   <Typography variant="body1">{payee.name}</Typography>

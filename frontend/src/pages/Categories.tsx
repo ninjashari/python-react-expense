@@ -145,7 +145,7 @@ const Categories: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {categories?.map((category) => (
+            {categories?.sort((a, b) => a.name.localeCompare(b.name)).map((category) => (
               <TableRow key={category.id}>
                 <TableCell>
                   <Typography variant="body1">{category.name}</Typography>

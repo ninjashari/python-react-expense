@@ -186,7 +186,7 @@ const Accounts: React.FC = () => {
       </Box>
 
       <Grid container spacing={3}>
-        {accounts?.map((account) => (
+        {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
           <Grid item xs={12} sm={6} md={4} key={account.id}>
             <Card>
               <CardContent>

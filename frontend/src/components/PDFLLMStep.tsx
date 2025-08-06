@@ -114,7 +114,7 @@ const PDFLLMStep: React.FC<PDFLLMStepProps> = ({
               if (account) onAccountChange(account);
             }}
           >
-            {accounts.map((account) => (
+            {accounts.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
               <MenuItem key={account.id} value={account.id}>
                 {account.name} ({account.type})
               </MenuItem>

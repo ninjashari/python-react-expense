@@ -79,18 +79,18 @@ const Reports: React.FC = () => {
   });
 
   // Convert data to options for multi-select
-  const accountOptions: Option[] = accounts?.map(acc => ({
+  const accountOptions: Option[] = accounts?.sort((a, b) => a.name.localeCompare(b.name)).map(acc => ({
     value: acc.id,
     label: acc.name,
   })) || [];
 
-  const categoryOptions: Option[] = categories?.map(cat => ({
+  const categoryOptions: Option[] = categories?.sort((a, b) => a.name.localeCompare(b.name)).map(cat => ({
     value: cat.id,
     label: cat.name,
     color: cat.color,
   })) || [];
 
-  const payeeOptions: Option[] = payees?.map(payee => ({
+  const payeeOptions: Option[] = payees?.sort((a, b) => a.name.localeCompare(b.name)).map(payee => ({
     value: payee.id,
     label: payee.name,
   })) || [];

@@ -28,6 +28,7 @@ import {
   Grid,
   Card,
   CardContent,
+  CircularProgress,
 } from '@mui/material';
 import {
   Edit,
@@ -35,8 +36,6 @@ import {
   Add,
   ExpandMore,
   CheckCircle,
-  Warning,
-  Info,
 } from '@mui/icons-material';
 import { LLMTransactionData, Account } from '../types';
 import { formatCurrency } from '../utils/formatters';
@@ -48,6 +47,7 @@ interface TransactionReviewStepProps {
   onConfirm: () => void;
   extractionMethod: string;
   processingNotes: string[];
+  isImporting?: boolean;
 }
 
 interface EditTransactionDialogProps {
@@ -173,6 +173,7 @@ const TransactionReviewStep: React.FC<TransactionReviewStepProps> = ({
   onConfirm,
   extractionMethod,
   processingNotes,
+  isImporting = false,
 }) => {
   const [editingTransaction, setEditingTransaction] = useState<LLMTransactionData | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -400,10 +401,10 @@ const TransactionReviewStep: React.FC<TransactionReviewStepProps> = ({
           variant="contained"
           size="large"
           onClick={onConfirm}
-          disabled={transactions.length === 0}
-          startIcon={<CheckCircle />}
+          disabled={transactions.length === 0 || isImporting}
+          startIcon={isImporting ? <CircularProgress size={20} /> : <CheckCircle />}
         >
-          Confirm & Import {transactions.length} Transactions
+          {isImporting ? 'Importing...' : `Confirm & Import ${transactions.length} Transactions`}
         </Button>
       </Box>
 

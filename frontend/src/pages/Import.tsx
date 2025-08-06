@@ -26,7 +26,7 @@ import {
 import { useDropzone } from 'react-dropzone';
 import { useQuery } from '@tanstack/react-query';
 import { accountsApi, importApi } from '../services/api';
-import { Account, PDFLLMSystemStatus, PDFLLMPreviewResponse, PDFLLMImportResponse } from '../types';
+import { Account, PDFLLMPreviewResponse, PDFLLMImportResponse } from '../types';
 import FileUploadZone from '../components/FileUploadZone';
 import ColumnMappingStep from '../components/ColumnMappingStep';
 import PDFLLMStep from '../components/PDFLLMStep';
@@ -432,6 +432,7 @@ const Import: React.FC = () => {
                 onConfirm={handleImport}
                 extractionMethod={importData.llmResults.extraction_method}
                 processingNotes={importData.llmResults.processing_notes || []}
+                isImporting={isProcessing}
               />
             );
           }

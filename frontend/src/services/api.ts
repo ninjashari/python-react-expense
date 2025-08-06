@@ -137,6 +137,8 @@ export const transactionsApi = {
     category_id?: number;
     payee_id?: number;
     transaction_type?: string;
+    start_date?: string;
+    end_date?: string;
   }): Promise<Transaction[]> => api.get('/transactions', { params }).then(res => res.data),
   getById: (id: number): Promise<Transaction> => api.get(`/transactions/${id}`).then(res => res.data),
   create: (data: CreateTransactionDto): Promise<Transaction> => 

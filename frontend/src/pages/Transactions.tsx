@@ -20,8 +20,11 @@ import {
   IconButton,
   Chip,
   CircularProgress,
+  Card,
+  CardContent,
+  Grid,
 } from '@mui/material';
-import { Add, Edit, Delete, Upload } from '@mui/icons-material';
+import { Add, Edit, Delete, Upload, FilterList, Clear } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
@@ -29,6 +32,8 @@ import { Transaction, CreateTransactionDto } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
+import PayeeSelect from '../components/PayeeSelect';
+import CategorySelect from '../components/CategorySelect';
 
 const transactionTypes = [
   { value: 'income', label: 'Income' },
@@ -36,11 +41,19 @@ const transactionTypes = [
   { value: 'transfer', label: 'Transfer' },
 ];
 
+interface TransactionFilters {
+  startDate?: string;
+  endDate?: string;
+  accountId?: number;
+}
+
 const Transactions: React.FC = () => {
   usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
   const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [filters, setFilters] = useState<TransactionFilters>({});
+  const [showFilters, setShowFilters] = useState(false);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -56,8 +69,13 @@ const Transactions: React.FC = () => {
   const watchTransactionType = watch('type');
 
   const { data: transactions, isLoading: transactionsLoading } = useQuery({
-    queryKey: ['transactions'],
-    queryFn: () => transactionsApi.getAll({ limit: 100 }),
+    queryKey: ['transactions', filters],
+    queryFn: () => transactionsApi.getAll({ 
+      limit: 100,
+      start_date: filters.startDate,
+      end_date: filters.endDate,
+      account_id: filters.accountId,
+    }),
   });
 
   const { data: accounts } = useQuery({
@@ -158,6 +176,19 @@ const Transactions: React.FC = () => {
     }
   };
 
+  const handleFilterChange = (field: keyof TransactionFilters, value: any) => {
+    setFilters(prev => ({
+      ...prev,
+      [field]: value === '' ? undefined : value
+    }));
+  };
+
+  const clearFilters = () => {
+    setFilters({});
+  };
+
+  const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId;
+
   const getTransactionTypeColor = (type: string) => {
     switch (type) {
       case 'income':
@@ -186,6 +217,15 @@ const Transactions: React.FC = () => {
         <Box>
           <Button
             variant="outlined"
+            startIcon={<FilterList />}
+            sx={{ mr: 2 }}
+            onClick={() => setShowFilters(!showFilters)}
+            color={hasActiveFilters ? 'primary' : 'inherit'}
+          >
+            Filters
+          </Button>
+          <Button
+            variant="outlined"
             startIcon={<Upload />}
             sx={{ mr: 2 }}
             onClick={() => navigate('/import')}
@@ -201,6 +241,66 @@ const Transactions: React.FC = () => {
           </Button>
         </Box>
       </Box>
+
+      {/* Filters Card */}
+      {showFilters && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  label="Start Date"
+                  type="date"
+                  value={filters.startDate || ''}
+                  onChange={(e) => handleFilterChange('startDate', e.target.value)}
+                  fullWidth
+                  size="small"
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={3}>
+                <TextField
+                  label="End Date"
+                  type="date"
+                  value={filters.endDate || ''}
+                  onChange={(e) => handleFilterChange('endDate', e.target.value)}
+                  fullWidth
+                  size="small"
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <TextField
+                  select
+                  label="Account"
+                  value={filters.accountId || ''}
+                  onChange={(e) => handleFilterChange('accountId', e.target.value ? parseInt(e.target.value) : undefined)}
+                  fullWidth
+                  size="small"
+                >
+                  <MenuItem value="">All Accounts</MenuItem>
+                  {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
+                    <MenuItem key={account.id} value={account.id}>
+                      {account.name}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={2}>
+                <Button
+                  onClick={clearFilters}
+                  disabled={!hasActiveFilters}
+                  startIcon={<Clear />}
+                  fullWidth
+                  size="small"
+                >
+                  Clear
+                </Button>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      )}
 
       <TableContainer component={Paper}>
         <Table>
@@ -371,7 +471,7 @@ const Transactions: React.FC = () => {
                   error={!!errors.account_id}
                   helperText={errors.account_id?.message}
                 >
-                  {accounts?.map((account) => (
+                  {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
                     <MenuItem key={account.id} value={account.id}>
                       {account.name}
                     </MenuItem>
@@ -395,7 +495,7 @@ const Transactions: React.FC = () => {
                     error={!!errors.to_account_id}
                     helperText={errors.to_account_id?.message}
                   >
-                    {accounts?.map((account) => (
+                    {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
                       <MenuItem key={account.id} value={account.id}>
                         {account.name}
                       </MenuItem>
@@ -409,20 +509,11 @@ const Transactions: React.FC = () => {
               name="payee_id"
               control={control}
               render={({ field }) => (
-                <TextField
-                  {...field}
-                  select
-                  label="Payee (Optional)"
-                  fullWidth
-                  margin="normal"
-                >
-                  <MenuItem value="">None</MenuItem>
-                  {payees?.map((payee) => (
-                    <MenuItem key={payee.id} value={payee.id}>
-                      {payee.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
+                <PayeeSelect
+                  value={field.value || ''}
+                  onChange={field.onChange}
+                  payees={payees || []}
+                />
               )}
             />
 
@@ -430,20 +521,11 @@ const Transactions: React.FC = () => {
               name="category_id"
               control={control}
               render={({ field }) => (
-                <TextField
-                  {...field}
-                  select
-                  label="Category (Optional)"
-                  fullWidth
-                  margin="normal"
-                >
-                  <MenuItem value="">None</MenuItem>
-                  {categories?.map((category) => (
-                    <MenuItem key={category.id} value={category.id}>
-                      {category.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
+                <CategorySelect
+                  value={field.value || ''}
+                  onChange={field.onChange}
+                  categories={categories || []}
+                />
               )}
             />
           </DialogContent>
