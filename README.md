@@ -1,10 +1,18 @@
-# Expense Manager Application
+# 💰 Expense Manager
 
-A comprehensive expense management application built with React frontend and Python FastAPI backend, featuring PostgreSQL database integration, advanced reporting, and state-of-the-art file import capabilities.
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://reactjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791.svg)](https://www.postgresql.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## Features
+A modern, full-stack expense management application designed for personal financial tracking and analysis. Built with React 19 and FastAPI, featuring comprehensive transaction management, intelligent file imports, and advanced reporting capabilities.
 
-### Core Functionality
+![Dashboard Preview](https://via.placeholder.com/800x400/f0f0f0/333333?text=Expense+Manager+Dashboard)
+
+## ✨ Features
+
+### 🎯 Core Functionality
 - **Dashboard**: Overview of accounts, recent transactions, and financial summaries
 - **Account Management**: Support for multiple account types (checking, savings, credit card, cash, investment, loan)
 - **Transaction Management**: Handle deposits, withdrawals, and transfers with automatic balance updates
@@ -12,7 +20,7 @@ A comprehensive expense management application built with React frontend and Pyt
 - **Category Management**: Categorize transactions with unique color coding
 - **Advanced Reports**: Comprehensive filtering and analytics with multiple report types
 
-### Advanced Features
+### 🚀 Advanced Features
 - **Credit Card Support**: Specific fields for credit limit, bill generation date, and payment tracking
 - **Transfer Handling**: Seamless money transfers between accounts with proper balance tracking
 - **Multi-Select Dropdowns**: Advanced UI components with search and reset functionality
@@ -20,7 +28,7 @@ A comprehensive expense management application built with React frontend and Pyt
 - **Unique Color Generation**: Automatic generation of distinct colors for categories
 - **Comprehensive Filtering**: Multi-dimensional filtering across all data entities
 
-## Technology Stack
+## 🛠 Technology Stack
 
 ### Backend
 - **Python 3.8+** with FastAPI framework
@@ -39,92 +47,82 @@ A comprehensive expense management application built with React frontend and Pyt
 - **React Hook Form** for form management
 - **React Select** for advanced dropdowns
 
-## Setup Instructions
+## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 16+ and npm
-- Python 3.8+
-- PostgreSQL 12+
-- Tesseract OCR (for PDF text extraction)
 
-### Database Setup
-1. Install PostgreSQL and create a database:
+Make sure you have the following installed:
+- [Node.js](https://nodejs.org/) (v16 or higher)
+- [Python](https://www.python.org/) (v3.8 or higher) 
+- [PostgreSQL](https://www.postgresql.org/) (v12 or higher)
+- [Tesseract OCR](https://tesseract-ocr.github.io/) (optional, for PDF processing)
+
+## 📦 Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/yourusername/expense-manager.git
+cd expense-manager
+```
+
+### 2. Database Setup
+
+Create a PostgreSQL database:
+
 ```sql
 CREATE DATABASE expense_manager;
 CREATE USER expense_user WITH PASSWORD 'your_password';
 GRANT ALL PRIVILEGES ON DATABASE expense_manager TO expense_user;
 ```
 
-### Backend Setup
-1. Navigate to the backend directory:
-```bash
-cd backend
-```
+### 3. Backend Setup
 
-2. Create and activate a virtual environment:
 ```bash
+# Navigate to backend directory
+cd backend
+
+# Create and activate virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
 
-3. Install Python dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-4. Create environment file:
-```bash
+# Create environment file (update with your database credentials)
 cp .env.example .env
-```
 
-5. Update the `.env` file with your database credentials:
-```
-DATABASE_URL=postgresql://expense_user:your_password@localhost:5432/expense_manager
-DEBUG=True
-```
+# Run database migrations
+alembic upgrade head
 
-6. Run database migrations:
-```bash
-python -m alembic upgrade head
-```
-
-7. Start the backend server:
-```bash
+# Start the development server
 python -m uvicorn main:app --reload --port 8000
 ```
 
-The API will be available at `http://localhost:8000` with interactive documentation at `http://localhost:8000/docs`.
+🎉 **Backend is now running at:** `http://localhost:8000`  
+📚 **API Documentation:** `http://localhost:8000/docs`
 
-### Frontend Setup
-1. Navigate to the frontend directory:
+### 4. Frontend Setup
+
 ```bash
+# Navigate to frontend directory (in a new terminal)
 cd frontend
-```
 
-2. Install dependencies:
-```bash
+# Install dependencies
 npm install
-```
 
-3. Create environment file:
-```bash
+# Create environment file (optional - defaults work for local development)
 cp .env.example .env
-```
 
-4. Update the `.env` file if needed:
-```
-REACT_APP_API_URL=http://localhost:8000
-```
-
-5. Start the development server:
-```bash
+# Start the development server
 npm start
 ```
 
-The application will be available at `http://localhost:3000`.
+🎉 **Frontend is now running at:** `http://localhost:3000`
 
-### OCR Setup (Optional, for PDF import)
-Install Tesseract OCR:
+### 5. Optional: PDF Processing Setup
+
+For PDF import functionality, install Tesseract OCR:
 
 **Ubuntu/Debian:**
 ```bash
@@ -137,9 +135,21 @@ brew install tesseract
 ```
 
 **Windows:**
-Download and install from: https://github.com/UB-Mannheim/tesseract/wiki
+- Download from [UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki)
 
-## API Documentation
+### 6. LLM Setup (Optional)
+
+For advanced PDF processing with local LLMs:
+
+```bash
+# Install and setup Ollama
+./setup_ollama.sh
+
+# Or if Ollama is already installed
+./setup_ollama_existing.sh
+```
+
+## 🔗 API Reference
 
 The backend provides a comprehensive REST API with the following endpoints:
 
@@ -188,7 +198,7 @@ The backend provides a comprehensive REST API with the following endpoints:
 - `POST /import/excel` - Import transactions from Excel file
 - `POST /import/pdf` - Extract text from PDF using OCR
 
-## Usage Guide
+## 📖 Usage Guide
 
 ### Adding Accounts
 1. Navigate to the Accounts page
@@ -225,7 +235,7 @@ The backend provides a comprehensive REST API with the following endpoints:
 4. Review and confirm import
 5. For PDFs, OCR will extract text for manual processing
 
-## File Import Features
+## 📄 Import Features
 
 ### Supported Formats
 - **CSV**: Standard comma-separated values
@@ -244,7 +254,35 @@ The system provides intelligent column mapping suggestions:
 - Payees and categories are automatically created if they don't exist
 - Each new category gets a unique color assigned
 
-## Development
+## 🧪 Development
+
+### Running Tests
+
+**Frontend:**
+```bash
+cd frontend
+npm test
+```
+
+**Backend:**
+```bash
+cd backend
+pytest  # If test suite is configured
+```
+
+### Building for Production
+
+**Frontend:**
+```bash
+cd frontend
+npm run build
+```
+
+**Backend:**
+```bash
+cd backend
+gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
+```
 
 ### Project Structure
 ```
@@ -278,18 +316,113 @@ The system provides intelligent column mapping suggestions:
 - **Multi-Select UI**: Custom component with search and reset functionality
 - **File Processing**: Robust parsing with error handling and validation
 
-## Contributing
+## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
-## License
+1. 🍴 Fork the repository
+2. 🌟 Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. 💾 Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. 📤 Push to the branch (`git push origin feature/amazing-feature`)
+5. 🔄 Open a Pull Request
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Development Setup
 
-## Support
+For detailed development instructions, see:
+- [Backend README](backend/README.md)
+- [Frontend README](frontend/README.md)
 
-For issues and feature requests, please create an issue in the project repository.
+## 📸 Screenshots
+
+<details>
+<summary>Click to view screenshots</summary>
+
+### Dashboard
+![Dashboard](https://via.placeholder.com/600x400/f8f9fa/343a40?text=Dashboard+View)
+
+### Transaction Management
+![Transactions](https://via.placeholder.com/600x400/f8f9fa/343a40?text=Transaction+Management)
+
+### Import Features
+![Import](https://via.placeholder.com/600x400/f8f9fa/343a40?text=File+Import+System)
+
+</details>
+
+## 🔒 Environment Variables
+
+### Backend (.env)
+```bash
+DATABASE_URL=postgresql://username:password@localhost/expense_manager
+SECRET_KEY=your-secret-key-here
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+CORS_ORIGINS=http://localhost:3000
+
+# Optional: PDF LLM Import
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_TIMEOUT=60
+TESSERACT_CMD=/usr/bin/tesseract
+```
+
+### Frontend (.env)
+```bash
+REACT_APP_API_BASE_URL=http://localhost:8000/api
+```
+
+## 🐛 Troubleshooting
+
+<details>
+<summary>Common Issues</summary>
+
+### Database Connection Issues
+- Ensure PostgreSQL is running
+- Check database credentials in `.env` file
+- Verify database exists and user has permissions
+
+### Import Module Errors
+- Activate virtual environment: `source venv/bin/activate`
+- Install requirements: `pip install -r requirements.txt`
+
+### Port Already in Use
+- Backend: Change port with `--port 8001` flag
+- Frontend: Set `PORT=3001` in environment or use different terminal
+
+### OCR Not Working
+- Install Tesseract OCR system-wide
+- Update `TESSERACT_CMD` path in `.env` file
+
+</details>
+
+## 📊 Roadmap
+
+- [ ] Mobile responsive design improvements
+- [ ] Advanced analytics and charts
+- [ ] Budget planning and alerts
+- [ ] Multi-currency support
+- [ ] Bank integration APIs
+- [ ] Export to various formats
+- [ ] Docker containerization
+- [ ] Cloud deployment guides
+
+## 🙏 Acknowledgments
+
+- Built with [FastAPI](https://fastapi.tiangolo.com/) and [React](https://reactjs.org/)
+- UI components from [Material-UI](https://mui.com/)
+- OCR powered by [Tesseract](https://tesseract-ocr.github.io/)
+- Local LLM integration via [Ollama](https://ollama.ai/)
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 💬 Support
+
+- 📫 Create an [issue](https://github.com/yourusername/expense-manager/issues) for bug reports
+- 💡 Start a [discussion](https://github.com/yourusername/expense-manager/discussions) for feature requests
+- ⭐ Star this repo if you find it helpful!
+
+---
+
+<div align="center">
+  Made with ❤️ by developers, for financial clarity
+</div>
