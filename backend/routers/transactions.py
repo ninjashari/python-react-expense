@@ -90,7 +90,7 @@ def create_transaction(
 @router.get("/", response_model=PaginatedTransactionsResponse)
 def get_transactions(
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
+    size: int = Query(50, ge=1, le=500, description="Page size"),
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
     payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs"),

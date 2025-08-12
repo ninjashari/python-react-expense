@@ -19,14 +19,20 @@ import {
   TextField,
   MenuItem,
   Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  Autocomplete,
+  CircularProgress as MuiCircularProgress,
 } from '@mui/material';
 import { Clear } from '@mui/icons-material';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
 import { Transaction, PaginatedResponse, Account, Category, Payee } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import MultiSelectDropdown, { Option } from '../components/MultiSelectDropdown';
+import { useUpdateWithToast } from '../hooks/useApiWithToast';
 
 interface FilteredTransactionFilters {
   startDate?: string;
@@ -46,6 +52,14 @@ const transactionTypes = [
   { value: 'transfer', label: 'Transfer' },
 ];
 
+const pageSizeOptions = [
+  { value: 10, label: '10 per page' },
+  { value: 20, label: '20 per page' },
+  { value: 50, label: '50 per page' },
+  { value: 100, label: '100 per page' },
+  { value: 200, label: '200 per page' },
+];
+
 const FilteredTransactions: React.FC = () => {
   usePageTitle(getPageTitle('filtered-transactions', 'Transaction Analysis'));
   
@@ -54,8 +68,11 @@ const FilteredTransactions: React.FC = () => {
     categoryIds: [],
     payeeIds: [],
     page: 1,
-    size: 20
+    size: 50
   });
+  
+  const [savingTransactions, setSavingTransactions] = useState<Set<string>>(new Set());
+  const queryClient = useQueryClient();
 
   // Fetch reference data
   const { data: accounts } = useQuery({
@@ -108,6 +125,48 @@ const FilteredTransactions: React.FC = () => {
     enabled: !!hasActiveFilters(),
   });
 
+  // Mutation for inline updates
+  const updateMutation = useUpdateWithToast(
+    ({ id, data }: { id: string; data: Partial<any> }) =>
+      transactionsApi.update(id, data),
+    {
+      resourceName: 'Transaction',
+      onSuccess: () => {
+        // Invalidate both filtered transactions and summary
+        queryClient.invalidateQueries({ queryKey: ['filtered-transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['transaction-summary'] });
+      },
+    }
+  );
+
+  // Inline editing functions
+  const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id', value: string | null) => {
+    setSavingTransactions(prev => new Set(prev).add(transactionId));
+    
+    try {
+      await updateMutation.mutateAsync({
+        id: transactionId,
+        data: { [field]: value || undefined }
+      });
+    } catch (error) {
+      // Error handling is already done by the mutation hook
+    } finally {
+      setSavingTransactions(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(transactionId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleInlineCategoryChange = (transactionId: string, categoryId: string | null) => {
+    handleInlineUpdate(transactionId, 'category_id', categoryId);
+  };
+
+  const handleInlinePayeeChange = (transactionId: string, payeeId: string | null) => {
+    handleInlineUpdate(transactionId, 'payee_id', payeeId);
+  };
+
   const handleFilterChange = (field: keyof FilteredTransactionFilters, value: any) => {
     setFilters(prev => ({
       ...prev,
@@ -120,13 +179,21 @@ const FilteredTransactions: React.FC = () => {
     setFilters(prev => ({ ...prev, page: newPage }));
   };
 
+  const handlePageSizeChange = (event: any) => {
+    setFilters(prev => ({ 
+      ...prev, 
+      size: event.target.value,
+      page: 1 // Reset to first page when changing page size
+    }));
+  };
+
   const clearFilters = () => {
     setFilters({
       accountIds: [],
       categoryIds: [],
       payeeIds: [],
       page: 1,
-      size: 20
+      size: 50
     });
   };
 
@@ -349,21 +416,178 @@ const FilteredTransactions: React.FC = () => {
                   <TableCell>{formatDate(transaction.date)}</TableCell>
                   <TableCell>{transaction.description || '-'}</TableCell>
                   <TableCell>{transaction.account?.name}</TableCell>
-                  <TableCell>{transaction.payee?.name || '-'}</TableCell>
-                  <TableCell>
-                    {transaction.category ? (
-                      <Chip
-                        label={transaction.category.name}
-                        size="small"
-                        sx={{
-                          backgroundColor: transaction.category.color,
-                          color: 'white',
+                  <TableCell sx={{ minWidth: 150 }}>
+                  <Box sx={{ position: 'relative' }}>
+                    <Autocomplete
+                      size="small"
+                      value={payees?.find(p => p.id === transaction.payee_id) || null}
+                      onChange={(_, newValue) => handleInlinePayeeChange(transaction.id, newValue?.id || null)}
+                      options={payees?.sort((a, b) => a.name.localeCompare(b.name)) || []}
+                      getOptionLabel={(option) => option.name}
+                      renderInput={(params) => {
+                        return (
+                          <TextField
+                            {...params}
+                            variant="standard"
+                            placeholder=""
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                              sx: { 
+                                fontSize: '0.875rem',
+                                cursor: 'pointer',
+                                '&:hover': {
+                                  backgroundColor: 'action.hover'
+                                },
+                                '& .MuiInputBase-input': {
+                                  cursor: 'pointer',
+                                  padding: '6px 8px !important',
+                                  color: 'transparent !important',
+                                  caretColor: 'text.primary'
+                                }
+                              }
+                            }}
+                          />
+                        );
+                      }}
+                      sx={{
+                        '& .MuiAutocomplete-endAdornment': {
+                          display: 'none'
+                        },
+                        '& .MuiAutocomplete-input': {
+                          fontSize: '0.875rem'
+                        }
+                      }}
+                    />
+                    {!savingTransactions.has(transaction.id) && (
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          position: 'absolute',
+                          left: 8,
+                          top: 6,
+                          pointerEvents: 'none',
+                          color: 'text.primary'
                         }}
-                      />
-                    ) : (
-                      '-'
+                      >
+                        {payees?.find(p => p.id === transaction.payee_id)?.name || '-'}
+                      </Typography>
                     )}
-                  </TableCell>
+                    {savingTransactions.has(transaction.id) && (
+                      <MuiCircularProgress 
+                        size={16} 
+                        sx={{ 
+                          position: 'absolute', 
+                          right: 8, 
+                          top: '50%', 
+                          transform: 'translateY(-50%)' 
+                        }} 
+                      />
+                    )}
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ minWidth: 150 }}>
+                  <Box sx={{ position: 'relative' }}>
+                    <Autocomplete
+                      size="small"
+                      value={categories?.find(c => c.id === transaction.category_id) || null}
+                      onChange={(_, newValue) => handleInlineCategoryChange(transaction.id, newValue?.id || null)}
+                      options={categories?.sort((a, b) => a.name.localeCompare(b.name)) || []}
+                      getOptionLabel={(option) => option.name}
+                      renderInput={(params) => {
+                        return (
+                          <TextField
+                            {...params}
+                            variant="standard"
+                            placeholder=""
+                            InputProps={{
+                              ...params.InputProps,
+                              disableUnderline: true,
+                              sx: { 
+                                fontSize: '0.875rem',
+                                cursor: 'pointer',
+                                '&:hover': {
+                                  backgroundColor: 'action.hover'
+                                },
+                                '& .MuiInputBase-input': {
+                                  cursor: 'pointer',
+                                  padding: '6px 8px !important',
+                                  color: 'transparent !important',
+                                  caretColor: 'text.primary'
+                                }
+                              }
+                            }}
+                          />
+                        );
+                      }}
+                      renderOption={(props, option) => (
+                        <li {...props}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Box
+                              sx={{
+                                width: 12,
+                                height: 12,
+                                borderRadius: '50%',
+                                backgroundColor: option.color,
+                              }}
+                            />
+                            {option.name}
+                          </Box>
+                        </li>
+                      )}
+                      sx={{
+                        '& .MuiAutocomplete-endAdornment': {
+                          display: 'none'
+                        },
+                        '& .MuiAutocomplete-input': {
+                          fontSize: '0.875rem'
+                        }
+                      }}
+                    />
+                    {!savingTransactions.has(transaction.id) && (
+                      <Box sx={{ 
+                        position: 'absolute',
+                        left: 8,
+                        top: 6,
+                        pointerEvents: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1
+                      }}>
+                        {categories?.find(c => c.id === transaction.category_id) ? (
+                          <>
+                            <Box
+                              sx={{
+                                width: 12,
+                                height: 12,
+                                borderRadius: '50%',
+                                backgroundColor: categories.find(c => c.id === transaction.category_id)?.color,
+                              }}
+                            />
+                            <Typography variant="body2">
+                              {categories.find(c => c.id === transaction.category_id)?.name}
+                            </Typography>
+                          </>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            -
+                          </Typography>
+                        )}
+                      </Box>
+                    )}
+                    {savingTransactions.has(transaction.id) && (
+                      <MuiCircularProgress 
+                        size={16} 
+                        sx={{ 
+                          position: 'absolute', 
+                          right: 8, 
+                          top: '50%', 
+                          transform: 'translateY(-50%)' 
+                        }} 
+                      />
+                    )}
+                  </Box>
+                </TableCell>
                   <TableCell>
                     <Chip
                       label={transaction.type}
@@ -389,19 +613,37 @@ const FilteredTransactions: React.FC = () => {
           </Table>
           
           {/* Pagination */}
-          {transactionData && transactionData.pages > 1 && (
-            <Box display="flex" justifyContent="space-between" alignItems="center" p={2}>
-              <Typography variant="body2" color="textSecondary">
-                Showing {((transactionData.page - 1) * transactionData.size) + 1} to {Math.min(transactionData.page * transactionData.size, transactionData.total)} of {transactionData.total} transactions
-              </Typography>
-              <Pagination
-                count={transactionData.pages}
-                page={transactionData.page}
-                onChange={handlePageChange}
-                color="primary"
-                showFirstButton
-                showLastButton
-              />
+          {transactionData && (
+            <Box display="flex" justifyContent="space-between" alignItems="center" p={2} flexWrap="wrap" gap={2}>
+              <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                <Typography variant="body2" color="textSecondary">
+                  Showing {((transactionData.page - 1) * transactionData.size) + 1} to {Math.min(transactionData.page * transactionData.size, transactionData.total)} of {transactionData.total} transactions
+                </Typography>
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <InputLabel>Per page</InputLabel>
+                  <Select
+                    value={filters.size}
+                    label="Per page"
+                    onChange={handlePageSizeChange}
+                  >
+                    {pageSizeOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+              {transactionData.pages > 1 && (
+                <Pagination
+                  count={transactionData.pages}
+                  page={transactionData.page}
+                  onChange={handlePageChange}
+                  color="primary"
+                  showFirstButton
+                  showLastButton
+                />
+              )}
             </Box>
           )}
         </TableContainer>
