@@ -73,9 +73,10 @@ class TransactionLearningService:
             return
         
         # Find existing pattern or create new one
+        from sqlalchemy import text
         existing_pattern = db.query(UserTransactionPattern).filter(
             UserTransactionPattern.user_id == selection.user_id,
-            UserTransactionPattern.description_keywords.overlap(keywords)
+            text("description_keywords && CAST(:keywords AS varchar[])").params(keywords=keywords)
         ).first()
         
         if selection.field_type == 'payee' and selection.selected_value_id:
@@ -249,10 +250,11 @@ class TransactionLearningService:
         if not keywords:
             return {"payee_suggestions": [], "category_suggestions": []}
         
-        # Find matching patterns
+        # Find matching patterns using PostgreSQL array overlap operator
+        from sqlalchemy import text
         patterns = db.query(UserTransactionPattern).filter(
             UserTransactionPattern.user_id == user_id,
-            UserTransactionPattern.description_keywords.overlap(keywords)
+            text("description_keywords && CAST(:keywords AS varchar[])").params(keywords=keywords)
         ).order_by(
             UserTransactionPattern.confidence_score.desc(),
             UserTransactionPattern.usage_frequency.desc()

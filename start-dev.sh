@@ -40,8 +40,8 @@ fi
 (
     source venv/bin/activate
     echo "✅ Backend virtual environment activated"
-    echo "🌐 Starting FastAPI server on http://localhost:8000"
-    python -m uvicorn main:app --reload --port 8000
+    echo "🌐 Starting FastAPI server on http://localhost:8001"
+    python -m uvicorn main:app --reload --port 8001
 ) &
 BACKEND_PID=$!
 
@@ -58,7 +58,7 @@ if [ ! -d "node_modules" ]; then
 fi
 
 (
-    echo "🌐 Starting React development server on http://localhost:3000"
+    echo "🌐 Starting React development server on http://localhost:3001"
     npm start
 ) &
 FRONTEND_PID=$!
@@ -69,9 +69,9 @@ echo ""
 echo "🎉 Development environment started successfully!"
 echo ""
 echo "📍 Services running:"
-echo "   • Backend (FastAPI):  http://localhost:8000"
-echo "   • Frontend (React):   http://localhost:3000"
-echo "   • API Documentation:  http://localhost:8000/docs"
+echo "   • Backend (FastAPI):  http://localhost:8001"
+echo "   • Frontend (React):   http://localhost:3001"
+echo "   • API Documentation:  http://localhost:8001/docs"
 echo ""
 echo "Press Ctrl+C to stop all servers"
 echo ""
