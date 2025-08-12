@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import List, Optional
 import uuid
 import math
 from decimal import Decimal
-from datetime import date
+from datetime import date, datetime
 from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
@@ -18,6 +18,7 @@ from schemas.transactions import (
     TransactionSummary
 )
 from utils.auth import get_current_active_user
+from services.learning_service import TransactionLearningService
 
 router = APIRouter()
 
@@ -49,8 +50,9 @@ def update_account_balance(db: Session, account_id: uuid.UUID, amount: float, tr
     return account
 
 @router.post("/", response_model=TransactionResponse)
-def create_transaction(
+async def create_transaction(
     transaction: TransactionCreate, 
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -84,6 +86,37 @@ def create_transaction(
         update_account_balance(db, transaction.account_id, transaction.amount, "expense")
         # Credit to destination account
         update_account_balance(db, transaction.to_account_id, transaction.amount, "income")
+    
+    # 🧠 LEARNING TRIGGER for new transactions - Run asynchronously  
+    if transaction.payee_id:
+        background_tasks.add_task(
+            TransactionLearningService.record_user_selection,
+            db=db,
+            user_id=str(current_user.id),
+            transaction_id=str(db_transaction.id),
+            field_type='payee',
+            selected_value_id=str(transaction.payee_id),
+            selected_value_name="",  # Will be looked up in service
+            transaction_description=transaction.description,
+            transaction_amount=float(transaction.amount),
+            account_type=account.type,
+            selection_method='form_create'
+        )
+    
+    if transaction.category_id:
+        background_tasks.add_task(
+            TransactionLearningService.record_user_selection,
+            db=db,
+            user_id=str(current_user.id),
+            transaction_id=str(db_transaction.id),
+            field_type='category',
+            selected_value_id=str(transaction.category_id),
+            selected_value_name="",  # Will be looked up in service
+            transaction_description=transaction.description,
+            transaction_amount=float(transaction.amount),
+            account_type=account.type,
+            selection_method='form_create'
+        )
     
     return db_transaction
 
@@ -220,9 +253,10 @@ def get_transaction(
     return transaction
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
-def update_transaction(
+async def update_transaction(
     transaction_id: uuid.UUID, 
     transaction_update: TransactionUpdate, 
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -238,7 +272,16 @@ def update_transaction(
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
     
-    # Store original values for balance reversal
+    # Store original values for balance reversal and learning
+    original_values = {
+        'amount': transaction.amount,
+        'type': transaction.type,
+        'account_id': transaction.account_id,
+        'to_account_id': transaction.to_account_id,
+        'description': transaction.description,
+        'payee_id': transaction.payee_id,
+        'category_id': transaction.category_id
+    }
     original_amount = transaction.amount
     original_type = transaction.type
     original_account_id = transaction.account_id
@@ -268,6 +311,23 @@ def update_transaction(
             update_account_balance(db, transaction.to_account_id, transaction.amount, "income")
     
     db.refresh(transaction)
+    
+    # 🧠 LEARNING TRIGGER - Run asynchronously
+    new_values = transaction_update.dict(exclude_unset=True)
+    background_tasks.add_task(
+        TransactionLearningService.learn_from_transaction_update,
+        db=db,
+        user_id=str(current_user.id),
+        transaction_id=str(transaction_id),
+        old_values=original_values,
+        new_values=new_values,
+        update_context={
+            'account_type': transaction.account.type,
+            'update_method': 'inline_edit',  # vs 'form_edit'
+            'timestamp': datetime.now()
+        }
+    )
+    
     return transaction
 
 @router.delete("/{transaction_id}")

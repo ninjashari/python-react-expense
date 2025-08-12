@@ -18,13 +18,13 @@ A full-stack expense management application with a FastAPI backend and React Typ
 ```bash
 cd backend
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-python -m uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8001
 ```
 
 ### Frontend Development  
 ```bash
 cd frontend
-npm start  # Runs on http://localhost:3000
+npm start  # Runs on http://localhost:3001
 ```
 
 ### Database Operations
@@ -42,7 +42,7 @@ alembic revision --autogenerate -m "Description"  # Create migration
 
 ### Running the Full Stack
 1. Start PostgreSQL database
-2. Backend: `cd backend && python -m uvicorn main:app --reload --port 8000`
+2. Backend: `cd backend && python -m uvicorn main:app --reload --port 8001`
 3. Frontend: `cd frontend && npm start`
 
 ## Critical Architecture Patterns
@@ -168,7 +168,7 @@ DATABASE_URL=postgresql://username:password@localhost/expense_manager
 SECRET_KEY=your-secret-key-here
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,https://yourdomain.com
+CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001,https://yourdomain.com
 
 # PDF LLM Import (Optional)
 OLLAMA_HOST=http://localhost:11434
@@ -178,7 +178,7 @@ TESSERACT_CMD=/usr/bin/tesseract
 
 ### Frontend Environment Variables (.env)
 ```env
-REACT_APP_API_BASE_URL=http://localhost:8000/api
+REACT_APP_API_BASE_URL=http://localhost:8001/api
 ```
 
 ## Testing

@@ -16,6 +16,8 @@ import FilteredTransactions from './pages/FilteredTransactions';
 import Payees from './pages/Payees';
 import Categories from './pages/Categories';
 import Import from './pages/Import';
+import LearningDashboard from './pages/LearningDashboard';
+import AdvancedInsights from './pages/AdvancedInsights';
 import { useAppNotifications } from './hooks/useAppNotifications';
 
 const queryClient = new QueryClient({
@@ -70,6 +72,8 @@ const AppContent: React.FC = () => {
           <Route path="/payees" element={<Payees />} />
           <Route path="/categories" element={<Categories />} />
           <Route path="/import" element={<Import />} />
+          <Route path="/learning" element={<LearningDashboard />} />
+          <Route path="/insights" element={<AdvancedInsights />} />
         </Routes>
       </Layout>
     </ErrorBoundary>

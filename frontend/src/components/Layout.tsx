@@ -24,6 +24,8 @@ import {
   AccountCircle,
   Logout,
   Analytics,
+  Psychology,
+  Insights,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -39,6 +41,8 @@ const menuItems = [
   { text: 'Accounts', icon: <AccountBalance />, path: '/accounts' },
   { text: 'Transactions', icon: <Receipt />, path: '/transactions' },
   { text: 'Analysis', icon: <Analytics />, path: '/transactions/analysis' },
+  { text: 'Learning', icon: <Psychology />, path: '/learning' },
+  { text: 'Advanced Insights', icon: <Insights />, path: '/insights' },
   { text: 'Import', icon: <Upload />, path: '/import' },
   { text: 'Payees', icon: <Person />, path: '/payees' },
   { text: 'Categories', icon: <Category />, path: '/categories' },

@@ -4,3 +4,4 @@ export { default as Transactions } from './Transactions';
 export { default as FilteredTransactions } from './FilteredTransactions';
 export { default as Payees } from './Payees';
 export { default as Categories } from './Categories';
+export { default as LearningDashboard } from './LearningDashboard';

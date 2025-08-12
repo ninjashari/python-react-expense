@@ -27,8 +27,6 @@ import {
   FormControl,
   InputLabel,
   Select,
-  Autocomplete,
-  CircularProgress as MuiCircularProgress,
 } from '@mui/material';
 import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -38,8 +36,10 @@ import { Transaction, CreateTransactionDto, PaginatedResponse } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
-import PayeeSelect from '../components/PayeeSelect';
-import CategorySelect from '../components/CategorySelect';
+import SmartInlineEdit from '../components/SmartInlineEdit';
+import SmartAutocomplete from '../components/SmartAutocomplete';
+import SmartAutomation from '../components/SmartAutomation';
+import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 
 const transactionTypes = [
   { value: 'income', label: 'Income' },
@@ -74,6 +74,7 @@ const Transactions: React.FC = () => {
   });
   const [showFilters, setShowFilters] = useState(false);
   const [savingTransactions, setSavingTransactions] = useState<Set<string>>(new Set());
+  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -113,6 +114,25 @@ const Transactions: React.FC = () => {
     queryKey: ['categories'],
     queryFn: () => categoriesApi.getAll(),
   });
+
+  // Smart suggestions state
+  const [formDescription, setFormDescription] = useState('');
+  const [formAmount, setFormAmount] = useState<number | undefined>();
+  const [selectedAccount, setSelectedAccount] = useState<any>(null);
+  const { trackSuggestionShown, trackSuggestionAccepted } = useLearningMetrics();
+  
+  // Get enhanced suggestions for form
+  const {
+    data: formSuggestions,
+    isLoading: suggestionsLoading
+  } = useEnhancedSuggestions(
+    formDescription,
+    formAmount,
+    selectedAccount?.id,
+    selectedAccount?.type,
+    payees || [],
+    categories || []
+  );
 
   const createMutation = useCreateWithToast(transactionsApi.create, {
     resourceName: 'Transaction',
@@ -164,12 +184,12 @@ const Transactions: React.FC = () => {
     }
   };
 
-  const handleInlineCategoryChange = (transactionId: string, categoryId: string | null) => {
-    handleInlineUpdate(transactionId, 'category_id', categoryId);
+  const handleInlineCategoryChange = async (transactionId: string, categoryId: string | null) => {
+    await handleInlineUpdate(transactionId, 'category_id', categoryId);
   };
 
-  const handleInlinePayeeChange = (transactionId: string, payeeId: string | null) => {
-    handleInlineUpdate(transactionId, 'payee_id', payeeId);
+  const handleInlinePayeeChange = async (transactionId: string, payeeId: string | null) => {
+    await handleInlineUpdate(transactionId, 'payee_id', payeeId);
   };
 
   const handleOpenDialog = (transaction?: Transaction) => {
@@ -253,6 +273,11 @@ const Transactions: React.FC = () => {
   };
 
   const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId;
+  
+  // Calculate uncategorized transactions count
+  const uncategorizedCount = transactionData?.items?.filter(
+    t => !t.payee_id || !t.category_id
+  ).length || 0;
 
   const getTransactionTypeColor = (type: string) => {
     switch (type) {
@@ -305,6 +330,14 @@ const Transactions: React.FC = () => {
           >
             Import
           </Button>
+          <SmartAutomation 
+            uncategorizedCount={uncategorizedCount}
+            selectedTransactionIds={Array.from(selectedTransactions)}
+            onAutomationComplete={() => {
+              // Refresh data after automation
+              queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            }}
+          />
           <Button
             variant="contained"
             startIcon={<Add />}
@@ -396,176 +429,38 @@ const Transactions: React.FC = () => {
                 <TableCell>{transaction.description || '-'}</TableCell>
                 <TableCell>{transaction.account?.name}</TableCell>
                 <TableCell sx={{ minWidth: 150 }}>
-                  <Box sx={{ position: 'relative' }}>
-                    <Autocomplete
-                      size="small"
-                      value={payees?.find(p => p.id === transaction.payee_id) || null}
-                      onChange={(_, newValue) => handleInlinePayeeChange(transaction.id, newValue?.id || null)}
-                      options={payees?.sort((a, b) => a.name.localeCompare(b.name)) || []}
-                      getOptionLabel={(option) => option.name}
-                      renderInput={(params) => {
-                        return (
-                          <TextField
-                            {...params}
-                            variant="standard"
-                            placeholder=""
-                            InputProps={{
-                              ...params.InputProps,
-                              disableUnderline: true,
-                              sx: { 
-                                fontSize: '0.875rem',
-                                cursor: 'pointer',
-                                '&:hover': {
-                                  backgroundColor: 'action.hover'
-                                },
-                                '& .MuiInputBase-input': {
-                                  cursor: 'pointer',
-                                  padding: '6px 8px !important',
-                                  color: 'transparent !important',
-                                  caretColor: 'text.primary'
-                                }
-                              }
-                            }}
-                          />
-                        );
-                      }}
-                      sx={{
-                        '& .MuiAutocomplete-endAdornment': {
-                          display: 'none'
-                        },
-                        '& .MuiAutocomplete-input': {
-                          fontSize: '0.875rem'
-                        }
-                      }}
-                    />
-                    {!savingTransactions.has(transaction.id) && (
-                      <Typography 
-                        variant="body2" 
-                        sx={{ 
-                          position: 'absolute',
-                          left: 8,
-                          top: 6,
-                          pointerEvents: 'none',
-                          color: 'text.primary'
-                        }}
-                      >
-                        {payees?.find(p => p.id === transaction.payee_id)?.name || '-'}
-                      </Typography>
-                    )}
-                    {savingTransactions.has(transaction.id) && (
-                      <MuiCircularProgress 
-                        size={16} 
-                        sx={{ 
-                          position: 'absolute', 
-                          right: 8, 
-                          top: '50%', 
-                          transform: 'translateY(-50%)' 
-                        }} 
-                      />
-                    )}
-                  </Box>
+                  <SmartInlineEdit
+                    transactionId={transaction.id}
+                    transactionDescription={transaction.description || ''}
+                    transactionAmount={Number(transaction.amount)}
+                    accountType={transaction.account?.type}
+                    fieldType="payee"
+                    currentValue={payees?.find(p => p.id === transaction.payee_id) || null}
+                    allOptions={payees || []}
+                    onSelectionChange={async (newValue) => {
+                      await handleInlinePayeeChange(transaction.id, newValue?.id || null);
+                    }}
+                    isSaving={savingTransactions.has(transaction.id)}
+                    placeholder="Select payee..."
+                    emptyDisplay="-"
+                  />
                 </TableCell>
                 <TableCell sx={{ minWidth: 150 }}>
-                  <Box sx={{ position: 'relative' }}>
-                    <Autocomplete
-                      size="small"
-                      value={categories?.find(c => c.id === transaction.category_id) || null}
-                      onChange={(_, newValue) => handleInlineCategoryChange(transaction.id, newValue?.id || null)}
-                      options={categories?.sort((a, b) => a.name.localeCompare(b.name)) || []}
-                      getOptionLabel={(option) => option.name}
-                      renderInput={(params) => {
-                        return (
-                          <TextField
-                            {...params}
-                            variant="standard"
-                            placeholder=""
-                            InputProps={{
-                              ...params.InputProps,
-                              disableUnderline: true,
-                              sx: { 
-                                fontSize: '0.875rem',
-                                cursor: 'pointer',
-                                '&:hover': {
-                                  backgroundColor: 'action.hover'
-                                },
-                                '& .MuiInputBase-input': {
-                                  cursor: 'pointer',
-                                  padding: '6px 8px !important',
-                                  color: 'transparent !important',
-                                  caretColor: 'text.primary'
-                                }
-                              }
-                            }}
-                          />
-                        );
-                      }}
-                      renderOption={(props, option) => (
-                        <li {...props}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Box
-                              sx={{
-                                width: 12,
-                                height: 12,
-                                borderRadius: '50%',
-                                backgroundColor: option.color,
-                              }}
-                            />
-                            {option.name}
-                          </Box>
-                        </li>
-                      )}
-                      sx={{
-                        '& .MuiAutocomplete-endAdornment': {
-                          display: 'none'
-                        },
-                        '& .MuiAutocomplete-input': {
-                          fontSize: '0.875rem'
-                        }
-                      }}
-                    />
-                    {!savingTransactions.has(transaction.id) && (
-                      <Box sx={{ 
-                        position: 'absolute',
-                        left: 8,
-                        top: 6,
-                        pointerEvents: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1
-                      }}>
-                        {categories?.find(c => c.id === transaction.category_id) ? (
-                          <>
-                            <Box
-                              sx={{
-                                width: 12,
-                                height: 12,
-                                borderRadius: '50%',
-                                backgroundColor: categories.find(c => c.id === transaction.category_id)?.color,
-                              }}
-                            />
-                            <Typography variant="body2">
-                              {categories.find(c => c.id === transaction.category_id)?.name}
-                            </Typography>
-                          </>
-                        ) : (
-                          <Typography variant="body2" color="text.secondary">
-                            -
-                          </Typography>
-                        )}
-                      </Box>
-                    )}
-                    {savingTransactions.has(transaction.id) && (
-                      <MuiCircularProgress 
-                        size={16} 
-                        sx={{ 
-                          position: 'absolute', 
-                          right: 8, 
-                          top: '50%', 
-                          transform: 'translateY(-50%)' 
-                        }} 
-                      />
-                    )}
-                  </Box>
+                  <SmartInlineEdit
+                    transactionId={transaction.id}
+                    transactionDescription={transaction.description || ''}
+                    transactionAmount={Number(transaction.amount)}
+                    accountType={transaction.account?.type}
+                    fieldType="category"
+                    currentValue={categories?.find(c => c.id === transaction.category_id) || null}
+                    allOptions={categories || []}
+                    onSelectionChange={async (newValue) => {
+                      await handleInlineCategoryChange(transaction.id, newValue?.id || null);
+                    }}
+                    isSaving={savingTransactions.has(transaction.id)}
+                    placeholder="Select category..."
+                    emptyDisplay="-"
+                  />
                 </TableCell>
                 <TableCell>
                   <Chip
@@ -680,6 +575,10 @@ const Transactions: React.FC = () => {
                   margin="normal"
                   error={!!errors.amount}
                   helperText={errors.amount?.message}
+                  onChange={(e) => {
+                    field.onChange(e);
+                    setFormAmount(parseFloat(e.target.value) || undefined);
+                  }}
                 />
               )}
             />
@@ -695,6 +594,10 @@ const Transactions: React.FC = () => {
                   margin="normal"
                   multiline
                   rows={2}
+                  onChange={(e) => {
+                    field.onChange(e);
+                    setFormDescription(e.target.value);
+                  }}
                 />
               )}
             />
@@ -735,6 +638,11 @@ const Transactions: React.FC = () => {
                   margin="normal"
                   error={!!errors.account_id}
                   helperText={errors.account_id?.message}
+                  onChange={(e) => {
+                    field.onChange(e);
+                    const account = accounts?.find(a => a.id === e.target.value);
+                    setSelectedAccount(account);
+                  }}
                 >
                   {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
                     <MenuItem key={account.id} value={account.id}>
@@ -774,10 +682,20 @@ const Transactions: React.FC = () => {
               name="payee_id"
               control={control}
               render={({ field }) => (
-                <PayeeSelect
-                  value={field.value || ''}
-                  onChange={field.onChange}
-                  payees={payees || []}
+                <SmartAutocomplete
+                  value={payees?.find(p => p.id === field.value) || null}
+                  onChange={(event, newValue) => field.onChange(newValue?.id || '')}
+                  options={formSuggestions?.payee_suggestions || []}
+                  getOptionLabel={(option) => option?.name || ''}
+                  loading={suggestionsLoading}
+                  placeholder="Select or search payee..."
+                  label="Payee"
+                  fieldType="payee"
+                  variant="outlined"
+                  size="medium"
+                  onSuggestionShown={trackSuggestionShown}
+                  onSuggestionAccepted={trackSuggestionAccepted}
+                  sx={{ mt: 2 }}
                 />
               )}
             />
@@ -786,10 +704,20 @@ const Transactions: React.FC = () => {
               name="category_id"
               control={control}
               render={({ field }) => (
-                <CategorySelect
-                  value={field.value || ''}
-                  onChange={field.onChange}
-                  categories={categories || []}
+                <SmartAutocomplete
+                  value={categories?.find(c => c.id === field.value) || null}
+                  onChange={(event, newValue) => field.onChange(newValue?.id || '')}
+                  options={formSuggestions?.category_suggestions || []}
+                  getOptionLabel={(option) => option?.name || ''}
+                  loading={suggestionsLoading}
+                  placeholder="Select or search category..."
+                  label="Category"
+                  fieldType="category"
+                  variant="outlined"
+                  size="medium"
+                  onSuggestionShown={trackSuggestionShown}
+                  onSuggestionAccepted={trackSuggestionAccepted}
+                  sx={{ mt: 2 }}
                 />
               )}
             />
