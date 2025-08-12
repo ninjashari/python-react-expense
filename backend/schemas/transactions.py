@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import date as DateType, datetime
-from typing import Optional
+from typing import Optional, List
 from decimal import Decimal
 import uuid
 
@@ -69,3 +69,16 @@ class TransactionResponse(TransactionBase):
     
     class Config:
         from_attributes = True
+
+class PaginatedTransactionsResponse(BaseModel):
+    items: List[TransactionResponse]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+class TransactionSummary(BaseModel):
+    total_income: Decimal
+    total_expense: Decimal
+    net_amount: Decimal
+    transaction_count: int

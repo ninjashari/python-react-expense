@@ -23,6 +23,7 @@ import {
   Upload,
   AccountCircle,
   Logout,
+  Analytics,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,6 +38,7 @@ const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/' },
   { text: 'Accounts', icon: <AccountBalance />, path: '/accounts' },
   { text: 'Transactions', icon: <Receipt />, path: '/transactions' },
+  { text: 'Analysis', icon: <Analytics />, path: '/transactions/analysis' },
   { text: 'Import', icon: <Upload />, path: '/import' },
   { text: 'Payees', icon: <Person />, path: '/payees' },
   { text: 'Categories', icon: <Category />, path: '/categories' },

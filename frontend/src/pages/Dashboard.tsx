@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import { accountsApi, transactionsApi } from '../services/api';
 import { formatCurrency } from '../utils/formatters';
+import { Transaction } from '../types';
 
 const Dashboard: React.FC = () => {
   usePageTitle(getPageTitle('dashboard', 'Financial Overview'));
@@ -20,31 +21,32 @@ const Dashboard: React.FC = () => {
   });
 
   // Get all transactions for accurate totals
-  const { data: allTransactions, isLoading: allTransactionsLoading } = useQuery({
+  const { data: allTransactionData, isLoading: allTransactionsLoading } = useQuery({
     queryKey: ['transactions', 'all'],
-    queryFn: () => transactionsApi.getAll(), // Get all transactions for accurate totals
+    queryFn: () => transactionsApi.getAll({ size: 1000 }), // Get a large number for totals
   });
 
   // Get recent transactions for display
-  const { data: recentTransactions, isLoading: recentTransactionsLoading } = useQuery({
+  const { data: recentTransactionData, isLoading: recentTransactionsLoading } = useQuery({
     queryKey: ['transactions', 'recent'],
-    queryFn: () => transactionsApi.getAll({ limit: 10 }), // Just for recent transactions display
+    queryFn: () => transactionsApi.getAll({ size: 10 }), // Just for recent transactions display
   });
 
   // Calculate summary from ALL transactions
   const calculateSummary = () => {
+    const allTransactions = allTransactionData?.items;
     if (!allTransactions || allTransactions.length === 0) return null;
     
     const total_income = allTransactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => {
+      .filter((t: Transaction) => t.type === 'income')
+      .reduce((sum: number, t: Transaction) => {
         const amount = parseFloat(String(t.amount || '0'));
         return sum + (isNaN(amount) ? 0 : amount);
       }, 0);
     
     const total_expenses = allTransactions
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => {
+      .filter((t: Transaction) => t.type === 'expense')
+      .reduce((sum: number, t: Transaction) => {
         const amount = parseFloat(String(t.amount || '0'));
         return sum + (isNaN(amount) ? 0 : amount);
       }, 0);
@@ -182,7 +184,7 @@ const Dashboard: React.FC = () => {
               <Typography variant="h6" gutterBottom>
                 Recent Transactions
               </Typography>
-              {recentTransactions?.map((transaction) => (
+              {recentTransactionData?.items?.map((transaction: Transaction) => (
                 <Box key={transaction.id} sx={{ mb: 2 }}>
                   <Box display="flex" justifyContent="space-between" alignItems="center">
                     <Box>

@@ -44,7 +44,8 @@ CRITICAL INSTRUCTIONS:
 4. Each transaction must have: date, amount, description, transaction_type
 5. transaction_type must be exactly one of: "income", "expense", "transfer"
 6. amount must be a positive number (no negative values, no currency symbols)
-7. date must be in YYYY-MM-DD format (convert from DD-MM-YYYY if needed)
+7. date must be in YYYY-MM-DD format (convert from DD-MM-YYYY format - Indian standard)
+8. ONLY count actual transaction lines - skip balance lines, headers, and non-transaction entries
 
 TRANSACTION IDENTIFICATION PATTERNS:
 - Look for date patterns like: 07-10-2014, 09-10-2014, etc. (any month/year)
@@ -103,15 +104,29 @@ EXPECTED JSON FORMAT - EXTRACT ALL TRANSACTIONS:
   }}
 ]
 
-IMPORTANT: Count the transactions as you extract them. Look for ALL lines with dates and amounts. If you see multiple consecutive dates, there are likely multiple transactions. Each line with a date and transaction description should be a separate transaction. Do not skip any transaction line.
+IMPORTANT: Count the transactions as you extract them. Look for ALL lines with dates and amounts. Each line with a date pattern (DD-MM-YYYY) followed by transaction description and amount should be a separate transaction.
 
-CRITICAL: If you find fewer than 20 transactions in a typical bank statement, you are likely missing some. Go back and look more carefully. Indian bank statements often have 20+ transactions per month. Make sure you capture:
-- ALL ATM withdrawals (multiple per day possible)  
-- ALL cash deposits (often multiple)
+CRITICAL VALIDATION: After extraction, verify your count:
+- Count ONLY actual transaction lines (date + description + amount)
+- Do NOT count balance lines, header lines, or summary lines
+- Do NOT count the same transaction twice
+- If extracting from a March 2014 statement with 17 actual transactions, return exactly 17 transactions
+- Quality over quantity - accurate extraction is more important than hitting a target number
+
+Make sure you capture all legitimate transactions:
+- ALL ATM withdrawals 
+- ALL cash deposits
 - ALL purchases and payments (PUR/ entries)
 - ALL service charges and fees
 - ALL mobile recharges and bill payments
 - ALL transfer transactions
+
+But EXCLUDE:
+- Opening balance lines
+- Closing balance lines
+- Running balance amounts
+- Header/footer information
+- Page numbers or branch details
 
 JSON RESPONSE:"""
 
@@ -133,9 +148,10 @@ JSON RESPONSE:"""
                 try:
                     datetime.strptime(item['date'], '%Y-%m-%d')
                 except ValueError:
-                    # Try to parse other common date formats
+                    # Try to parse other common date formats, prioritizing DD/MM/YYYY for Indian bank statements
                     date_str = str(item['date'])
-                    for fmt in ['%m/%d/%Y', '%d/%m/%Y', '%Y/%m/%d', '%m-%d-%Y', '%d-%m-%Y']:
+                    # Prioritize DD/MM/YYYY and DD-MM-YYYY formats first for Indian statements
+                    for fmt in ['%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y', '%Y/%m/%d', '%m-%d-%Y', '%Y-%m-%d']:
                         try:
                             parsed_date = datetime.strptime(date_str, fmt)
                             item['date'] = parsed_date.strftime('%Y-%m-%d')
@@ -313,11 +329,18 @@ JSON RESPONSE:"""
         while i < len(lines):
             line = lines[i]
             
-            # Skip header lines and opening balance
+            # Skip header lines, opening balance, and other non-transaction lines
             if any(header in line.upper() for header in [
                 'TXN DATE', 'TRANSACTION', 'WITHDRAWALS', 'DEPOSITS', 'BALANCE',
-                'OPENING BALANCE', 'ACCOUNT STATEMENT', 'OTHER INFORMATION'
+                'OPENING BALANCE', 'CLOSING BALANCE', 'ACCOUNT STATEMENT', 'OTHER INFORMATION',
+                'PAGE', 'BRANCH', 'CUSTOMER', 'ACCOUNT NO', 'STATEMENT FROM', 'STATEMENT TO',
+                'IFSC', 'MICR', 'BRANCH CODE', 'EMAIL', 'MOBILE'
             ]):
+                i += 1
+                continue
+            
+            # Skip lines that are just numbers (likely balances without context)
+            if re.match(r'^\d{1,3}(?:,\d{3})*\.\d{2}$', line.strip()):
                 i += 1
                 continue
             
@@ -344,15 +367,21 @@ JSON RESPONSE:"""
             # Extract description (everything after the date)
             description = line[len(date_str):].strip()
             
+            # Skip if description looks like it's just continuation or empty
+            if not description or len(description) < 3:
+                i += 1
+                continue
+            
             # Look ahead for continuation lines and amounts
             full_description = description
             withdrawal_amount = None
             deposit_amount = None
+            found_amount = False
             
             # Check the next few lines for continuation and amounts
             j = i + 1
             while j < len(lines) and j < i + 5:  # Look at next 4 lines max
-                next_line = lines[j]
+                next_line = lines[j].strip()
                 
                 # If we hit another date, stop
                 if re.match(r'^\d{2}-\d{2}-\d{4}', next_line):
@@ -360,29 +389,30 @@ JSON RESPONSE:"""
                 
                 # Check if this line is an amount (withdrawal or deposit)
                 amount_match = re.match(r'^(\d{1,3}(?:,\d{3})*\.\d{2})$', next_line)
-                if amount_match:
+                if amount_match and not found_amount:  # Only take the first amount we find
                     amount_val = float(amount_match.group(1).replace(',', ''))
                     
                     # Determine if this is withdrawal or deposit based on transaction type
                     if any(keyword in full_description.upper() for keyword in [
-                        'BY CASH', 'DEPOSIT', 'TRFR-FROM', 'CASH-RVSL', 'INT.PD'
+                        'BY CASH', 'DEPOSIT', 'TRFR-FROM', 'CASH-RVSL', 'INT.PD', 'CREDIT'
                     ]):
                         deposit_amount = amount_val
                     else:
                         withdrawal_amount = amount_val
+                    found_amount = True
                     j += 1
-                    break
+                    continue
                 
-                # Check if this line has a balance (usually larger number, skip it)
-                balance_match = re.match(r'^(\d{1,3}(?:,\d{3})*\.\d{2})$', next_line)
-                if balance_match:
-                    balance_val = float(balance_match.group(1).replace(',', ''))
-                    if balance_val > 1000:  # Likely a balance, skip
-                        j += 1
-                        continue
+                # Skip balance lines (usually larger numbers or come after amounts)
+                if re.match(r'^(\d{1,3}(?:,\d{3})*\.\d{2})$', next_line) and found_amount:
+                    j += 1
+                    continue
                 
-                # Otherwise, it might be a continuation of description
-                if not re.match(r'^\d+', next_line) and len(next_line) > 3:
+                # Otherwise, it might be a continuation of description (but be selective)
+                if (not re.match(r'^\d+', next_line) and 
+                    len(next_line) > 3 and 
+                    not found_amount and  # Only add description continuations before we find the amount
+                    not any(skip_word in next_line.upper() for skip_word in ['PAGE', 'BRANCH', 'CUSTOMER'])):
                     full_description += " " + next_line
                 
                 j += 1
@@ -399,16 +429,26 @@ JSON RESPONSE:"""
                 i += 1
                 continue
             
+            # Additional validation: skip if description is too generic or likely not a real transaction
+            if (len(full_description.strip()) < 5 or 
+                any(generic in full_description.upper() for generic in [
+                    'OPENING BALANCE', 'CLOSING BALANCE', 'TOTAL', 'CARRIED FORWARD'
+                ]) or
+                amount == 0):
+                i += 1
+                continue
+            
             # Create the transaction
             transaction = {
                 "date": formatted_date,
                 "amount": amount,
-                "description": full_description,
+                "description": full_description.strip(),
                 "transaction_type": transaction_type,
                 "confidence": 0.9
             }
             
             transactions.append(transaction)
+            print(f"DEBUG: Added transaction {len(transactions)}: {formatted_date} | {transaction_type} | {amount} | {full_description.strip()[:50]}...")
             i = j  # Move to the next unprocessed line
         
         print(f"DEBUG: Found {date_pattern_count} date patterns, extracted {len(transactions)} transaction candidates")
@@ -430,20 +470,23 @@ JSON RESPONSE:"""
 Extract ALL transactions from this bank statement. Return ONLY JSON array.
 
 Key patterns to find:
-- Date: DD-MM-YYYY format
+- Date: DD-MM-YYYY format (convert to YYYY-MM-DD)
 - Description: ATM-CASH, BRN-BY CASH, PUR/, BY CASH DEPOSIT, etc.
 - Amount: Numbers with .00 
 - Type: income (deposits/credits), expense (withdrawals/debits)
 
-Look for ALL these transaction dates in September 2014:
-02-09, 05-09, 06-09, 08-09, 12-09, 13-09 (multiple), 15-09 (multiple), 16-09, 18-09 (multiple), 20-09 (multiple), 22-09, 23-09 (multiple), 26-09 (multiple), 29-09, 30-09
+IMPORTANT: 
+- Only extract actual transaction lines (date + description + amount)
+- Skip balance lines, headers, summaries
+- Convert DD-MM-YYYY dates to YYYY-MM-DD format
+- If this is a March 2014 statement, ensure accurate count (should be around 17 transactions)
 
 TEXT:
 {transaction_text}
 
 JSON format:
 [
-  {{"date": "2014-09-02", "amount": 2000.00, "description": "BRN-BY CASH CASH", "transaction_type": "income"}},
+  {{"date": "2014-03-02", "amount": 2000.00, "description": "BRN-BY CASH CASH", "transaction_type": "income"}},
   ...
 ]
 

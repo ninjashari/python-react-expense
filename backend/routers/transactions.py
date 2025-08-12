@@ -1,14 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from typing import List, Optional
 import uuid
+import math
 from decimal import Decimal
 from datetime import date
 from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
 from models.users import User
-from schemas.transactions import TransactionCreate, TransactionUpdate, TransactionResponse
+from schemas.transactions import (
+    TransactionCreate, 
+    TransactionUpdate, 
+    TransactionResponse, 
+    PaginatedTransactionsResponse,
+    TransactionSummary
+)
 from utils.auth import get_current_active_user
 
 router = APIRouter()
@@ -79,19 +87,20 @@ def create_transaction(
     
     return db_transaction
 
-@router.get("/", response_model=List[TransactionResponse])
+@router.get("/", response_model=PaginatedTransactionsResponse)
 def get_transactions(
-    skip: int = 0, 
-    limit: int = 100, 
-    account_id: Optional[uuid.UUID] = None,
-    category_id: Optional[uuid.UUID] = None,
-    payee_id: Optional[uuid.UUID] = None,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
+    payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs"),
     transaction_type: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
+    # Build base query
     query = db.query(Transaction).options(
         joinedload(Transaction.account),
         joinedload(Transaction.to_account),
@@ -99,12 +108,19 @@ def get_transactions(
         joinedload(Transaction.category)
     )
     
-    if account_id:
-        query = query.filter(Transaction.account_id == account_id)
-    if category_id:
-        query = query.filter(Transaction.category_id == category_id)
-    if payee_id:
-        query = query.filter(Transaction.payee_id == payee_id)
+    # Apply filters
+    if account_ids:
+        account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.account_id.in_(account_id_list))
+    
+    if category_ids:
+        category_id_list = [uuid.UUID(id.strip()) for id in category_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.category_id.in_(category_id_list))
+    
+    if payee_ids:
+        payee_id_list = [uuid.UUID(id.strip()) for id in payee_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.payee_id.in_(payee_id_list))
+    
     if transaction_type:
         query = query.filter(Transaction.type == transaction_type)
     if start_date:
@@ -115,8 +131,73 @@ def get_transactions(
     # Filter by current user
     query = query.filter(Transaction.user_id == current_user.id)
     
-    transactions = query.order_by(Transaction.date.desc()).offset(skip).limit(limit).all()
-    return transactions
+    # Get total count
+    total = query.count()
+    
+    # Calculate pagination
+    skip = (page - 1) * size
+    pages = math.ceil(total / size) if total > 0 else 0
+    
+    # Get paginated results
+    transactions = query.order_by(Transaction.date.desc()).offset(skip).limit(size).all()
+    
+    return PaginatedTransactionsResponse(
+        items=transactions,
+        total=total,
+        page=page,
+        size=size,
+        pages=pages
+    )
+
+@router.get("/summary", response_model=TransactionSummary)
+def get_transaction_summary(
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
+    payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs"),
+    transaction_type: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    # Build base query
+    query = db.query(Transaction)
+    
+    # Apply filters (same logic as get_transactions)
+    if account_ids:
+        account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.account_id.in_(account_id_list))
+    
+    if category_ids:
+        category_id_list = [uuid.UUID(id.strip()) for id in category_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.category_id.in_(category_id_list))
+    
+    if payee_ids:
+        payee_id_list = [uuid.UUID(id.strip()) for id in payee_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.payee_id.in_(payee_id_list))
+    
+    if transaction_type:
+        query = query.filter(Transaction.type == transaction_type)
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
+    
+    # Filter by current user
+    query = query.filter(Transaction.user_id == current_user.id)
+    
+    # Calculate summary statistics
+    income_sum = query.filter(Transaction.type == 'income').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
+    expense_sum = query.filter(Transaction.type == 'expense').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
+    transaction_count = query.count()
+    net_amount = income_sum - expense_sum
+    
+    return TransactionSummary(
+        total_income=income_sum,
+        total_expense=expense_sum,
+        net_amount=net_amount,
+        transaction_count=transaction_count
+    )
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 def get_transaction(

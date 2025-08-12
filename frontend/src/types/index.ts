@@ -74,6 +74,21 @@ export interface CreateTransactionDto {
   category_id?: string;
 }
 
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+}
+
+export interface TransactionSummary {
+  total_income: number;
+  total_expense: number;
+  net_amount: number;
+  transaction_count: number;
+}
+
 
 // PDF LLM Import Types
 export interface LLMTransactionData {

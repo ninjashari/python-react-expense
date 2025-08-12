@@ -12,6 +12,7 @@ import AuthPage from './pages/AuthPage';
 import Dashboard from './pages/Dashboard';
 import Accounts from './pages/Accounts';
 import Transactions from './pages/Transactions';
+import FilteredTransactions from './pages/FilteredTransactions';
 import Payees from './pages/Payees';
 import Categories from './pages/Categories';
 import Import from './pages/Import';
@@ -65,6 +66,7 @@ const AppContent: React.FC = () => {
           <Route path="/" element={<Dashboard />} />
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/transactions" element={<Transactions />} />
+          <Route path="/transactions/analysis" element={<FilteredTransactions />} />
           <Route path="/payees" element={<Payees />} />
           <Route path="/categories" element={<Categories />} />
           <Route path="/import" element={<Import />} />

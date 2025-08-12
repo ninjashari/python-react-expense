@@ -126,15 +126,23 @@ export const categoriesApi = {
 // Transactions API
 export const transactionsApi = {
   getAll: (params?: {
-    skip?: number;
-    limit?: number;
-    account_id?: string;
-    category_id?: string;
-    payee_id?: string;
+    page?: number;
+    size?: number;
+    account_ids?: string;
+    category_ids?: string;
+    payee_ids?: string;
     transaction_type?: string;
     start_date?: string;
     end_date?: string;
-  }): Promise<Transaction[]> => api.get('/transactions', { params }).then(res => res.data),
+  }) => api.get('/transactions', { params }).then(res => res.data),
+  getSummary: (params?: {
+    account_ids?: string;
+    category_ids?: string;
+    payee_ids?: string;
+    transaction_type?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<any> => api.get('/transactions/summary', { params }).then(res => res.data),
   getById: (id: string): Promise<Transaction> => api.get(`/transactions/${id}`).then(res => res.data),
   create: (data: CreateTransactionDto): Promise<Transaction> => 
     api.post('/transactions', data).then(res => res.data),

@@ -23,12 +23,13 @@ import {
   Card,
   CardContent,
   Grid,
+  Pagination,
 } from '@mui/material';
-import { Add, Edit, Delete, Upload, FilterList, Clear } from '@mui/icons-material';
+import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
-import { Transaction, CreateTransactionDto } from '../types';
+import { Transaction, CreateTransactionDto, PaginatedResponse } from '../types';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
@@ -45,6 +46,8 @@ interface TransactionFilters {
   startDate?: string;
   endDate?: string;
   accountId?: string;
+  page: number;
+  size: number;
 }
 
 const Transactions: React.FC = () => {
@@ -52,7 +55,10 @@ const Transactions: React.FC = () => {
   const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  const [filters, setFilters] = useState<TransactionFilters>({});
+  const [filters, setFilters] = useState<TransactionFilters>({
+    page: 1,
+    size: 20
+  });
   const [showFilters, setShowFilters] = useState(false);
   const queryClient = useQueryClient();
 
@@ -68,13 +74,14 @@ const Transactions: React.FC = () => {
 
   const watchTransactionType = watch('type');
 
-  const { data: transactions, isLoading: transactionsLoading } = useQuery({
+  const { data: transactionData, isLoading: transactionsLoading } = useQuery<PaginatedResponse<Transaction>>({
     queryKey: ['transactions', filters],
     queryFn: () => transactionsApi.getAll({ 
-      limit: 100,
+      page: filters.page,
+      size: filters.size,
       start_date: filters.startDate,
       end_date: filters.endDate,
-      account_id: filters.accountId,
+      account_ids: filters.accountId,
     }),
   });
 
@@ -179,12 +186,20 @@ const Transactions: React.FC = () => {
   const handleFilterChange = (field: keyof TransactionFilters, value: any) => {
     setFilters(prev => ({
       ...prev,
-      [field]: value === '' ? undefined : value
+      [field]: value === '' ? undefined : value,
+      page: field !== 'page' && field !== 'size' ? 1 : prev.page // Reset to first page when changing filters
     }));
   };
 
+  const handlePageChange = (event: React.ChangeEvent<unknown>, newPage: number) => {
+    setFilters(prev => ({ ...prev, page: newPage }));
+  };
+
   const clearFilters = () => {
-    setFilters({});
+    setFilters({
+      page: 1,
+      size: 20
+    });
   };
 
   const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId;
@@ -223,6 +238,14 @@ const Transactions: React.FC = () => {
             color={hasActiveFilters ? 'primary' : 'inherit'}
           >
             Filters
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<Analytics />}
+            sx={{ mr: 2 }}
+            onClick={() => navigate('/transactions/analysis')}
+          >
+            Analysis
           </Button>
           <Button
             variant="outlined"
@@ -317,7 +340,7 @@ const Transactions: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {transactions?.map((transaction) => (
+            {transactionData?.items?.map((transaction) => (
               <TableRow key={transaction.id}>
                 <TableCell>{formatDate(transaction.date)}</TableCell>
                 <TableCell>{transaction.description || '-'}</TableCell>
@@ -375,6 +398,23 @@ const Transactions: React.FC = () => {
             ))}
           </TableBody>
         </Table>
+        
+        {/* Pagination */}
+        {transactionData && transactionData.pages > 1 && (
+          <Box display="flex" justifyContent="space-between" alignItems="center" p={2}>
+            <Typography variant="body2" color="textSecondary">
+              Showing {((transactionData.page - 1) * transactionData.size) + 1} to {Math.min(transactionData.page * transactionData.size, transactionData.total)} of {transactionData.total} transactions
+            </Typography>
+            <Pagination
+              count={transactionData.pages}
+              page={transactionData.page}
+              onChange={handlePageChange}
+              color="primary"
+              showFirstButton
+              showLastButton
+            />
+          </Box>
+        )}
       </TableContainer>
 
       {/* Transaction Dialog */}
