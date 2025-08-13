@@ -444,14 +444,20 @@ class LearningApiService {
     });
     
     // Sort by confidence (AI suggestions first, then by relevance)
-    return suggestions.sort((a, b) => {
+    const sortedSuggestions = suggestions.sort((a, b) => {
       // AI suggestions always come first
       if (a.type === 'ai_suggestion' && b.type !== 'ai_suggestion') return -1;
       if (b.type === 'ai_suggestion' && a.type !== 'ai_suggestion') return 1;
       
       // Then sort by confidence
       return b.confidence - a.confidence;
-    }).slice(0, 10); // Limit to top 10 suggestions
+    });
+    
+    // Only limit AI suggestions to top 5, but keep all existing options
+    const topAiSuggestions = sortedSuggestions.filter(s => s.type === 'ai_suggestion').slice(0, 5); // Limit AI to 5
+    const otherSuggestions = sortedSuggestions.filter(s => s.type !== 'ai_suggestion'); // Keep all existing/historical
+    
+    return [...topAiSuggestions, ...otherSuggestions];
   }
 
   /**

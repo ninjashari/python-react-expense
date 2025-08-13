@@ -39,12 +39,20 @@ import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import SmartInlineEdit from '../components/SmartInlineEdit';
 import SmartAutocomplete from '../components/SmartAutocomplete';
 import SmartAutomation from '../components/SmartAutomation';
+import InlineTextEdit from '../components/InlineTextEdit';
+import InlineSelectEdit from '../components/InlineSelectEdit';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 
 const transactionTypes = [
   { value: 'income', label: 'Income' },
   { value: 'expense', label: 'Expense' },
   { value: 'transfer', label: 'Transfer' },
+];
+
+const transactionTypeOptions = [
+  { value: 'income', label: 'Income', color: 'success' as const },
+  { value: 'expense', label: 'Expense', color: 'error' as const },
+  { value: 'transfer', label: 'Transfer', color: 'info' as const },
 ];
 
 const pageSizeOptions = [
@@ -165,15 +173,20 @@ const Transactions: React.FC = () => {
   });
 
   // Inline editing functions
-  const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id', value: string | null) => {
+  const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id' | 'description' | 'type', value: string | null) => {
+    console.log('handleInlineUpdate called with:', { transactionId, field, value });
     setSavingTransactions(prev => new Set(prev).add(transactionId));
     
     try {
+      const updateData = { [field]: value || undefined };
+      console.log('Sending update data:', updateData);
       await updateMutation.mutateAsync({
         id: transactionId,
-        data: { [field]: value || undefined }
+        data: updateData
       });
+      console.log('Update completed successfully');
     } catch (error) {
+      console.error('handleInlineUpdate error:', error);
       // Error handling is already done by the mutation hook
     } finally {
       setSavingTransactions(prev => {
@@ -192,9 +205,22 @@ const Transactions: React.FC = () => {
     await handleInlineUpdate(transactionId, 'payee_id', payeeId);
   };
 
+  const handleInlineDescriptionChange = async (transactionId: string, description: string) => {
+    console.log('handleInlineDescriptionChange called with:', { transactionId, description });
+    await handleInlineUpdate(transactionId, 'description', description);
+  };
+
+  const handleInlineTypeChange = async (transactionId: string, type: string) => {
+    await handleInlineUpdate(transactionId, 'type', type);
+  };
+
   const handleOpenDialog = (transaction?: Transaction) => {
     if (transaction) {
       setEditingTransaction(transaction);
+      const account = accounts?.find(a => a.id === transaction.account_id);
+      setSelectedAccount(account);
+      setFormDescription(transaction.description || '');
+      setFormAmount(transaction.amount);
       reset({
         date: transaction.date,
         amount: transaction.amount,
@@ -207,6 +233,9 @@ const Transactions: React.FC = () => {
       });
     } else {
       setEditingTransaction(null);
+      setSelectedAccount(null);
+      setFormDescription('');
+      setFormAmount(undefined);
       reset({
         date: new Date().toISOString().split('T')[0],
         amount: 0,
@@ -221,6 +250,9 @@ const Transactions: React.FC = () => {
   const handleCloseDialog = () => {
     setDialogOpen(false);
     setEditingTransaction(null);
+    setSelectedAccount(null);
+    setFormDescription('');
+    setFormAmount(undefined);
     reset();
   };
 
@@ -279,18 +311,6 @@ const Transactions: React.FC = () => {
     t => !t.payee_id || !t.category_id
   ).length || 0;
 
-  const getTransactionTypeColor = (type: string) => {
-    switch (type) {
-      case 'income':
-        return 'success';
-      case 'expense':
-        return 'error';
-      case 'transfer':
-        return 'info';
-      default:
-        return 'default';
-    }
-  };
 
   if (transactionsLoading) {
     return (
@@ -426,7 +446,16 @@ const Transactions: React.FC = () => {
             {transactionData?.items?.map((transaction) => (
               <TableRow key={transaction.id}>
                 <TableCell>{formatDate(transaction.date)}</TableCell>
-                <TableCell>{transaction.description || '-'}</TableCell>
+                <TableCell sx={{ minWidth: 200 }}>
+                  <InlineTextEdit
+                    value={transaction.description || ''}
+                    onSave={(newValue) => handleInlineDescriptionChange(transaction.id, newValue)}
+                    placeholder="Enter description..."
+                    emptyDisplay="-"
+                    isSaving={savingTransactions.has(transaction.id)}
+                    maxLength={255}
+                  />
+                </TableCell>
                 <TableCell>{transaction.account?.name}</TableCell>
                 <TableCell sx={{ minWidth: 150 }}>
                   <SmartInlineEdit
@@ -462,11 +491,19 @@ const Transactions: React.FC = () => {
                     emptyDisplay="-"
                   />
                 </TableCell>
-                <TableCell>
-                  <Chip
-                    label={transaction.type}
-                    size="small"
-                    color={getTransactionTypeColor(transaction.type) as any}
+                <TableCell sx={{ minWidth: 120 }}>
+                  <InlineSelectEdit
+                    value={transaction.type}
+                    options={transactionTypeOptions}
+                    onSave={(newValue) => handleInlineTypeChange(transaction.id, newValue)}
+                    getDisplayValue={(value) => (
+                      <Chip
+                        label={transactionTypeOptions.find(opt => opt.value === value)?.label || value}
+                        size="small"
+                        color={transactionTypeOptions.find(opt => opt.value === value)?.color || 'default'}
+                      />
+                    )}
+                    isSaving={savingTransactions.has(transaction.id)}
                   />
                 </TableCell>
                 <TableCell align="right">
@@ -685,7 +722,17 @@ const Transactions: React.FC = () => {
                 <SmartAutocomplete
                   value={payees?.find(p => p.id === field.value) || null}
                   onChange={(event, newValue) => field.onChange(newValue?.id || '')}
-                  options={formSuggestions?.payee_suggestions || []}
+                  options={
+                    formSuggestions?.payee_suggestions || 
+                    (payees?.map(p => ({
+                      id: p.id,
+                      name: p.name,
+                      type: 'existing' as const,
+                      confidence: 0.5,
+                      reason: 'Existing payee',
+                      isExisting: true,
+                    })) || []).slice().sort((a, b) => a.name.localeCompare(b.name)) // Debug: sort payees
+                  }
                   getOptionLabel={(option) => option?.name || ''}
                   loading={suggestionsLoading}
                   placeholder="Select or search payee..."
@@ -707,7 +754,18 @@ const Transactions: React.FC = () => {
                 <SmartAutocomplete
                   value={categories?.find(c => c.id === field.value) || null}
                   onChange={(event, newValue) => field.onChange(newValue?.id || '')}
-                  options={formSuggestions?.category_suggestions || []}
+                  options={
+                    formSuggestions?.category_suggestions || 
+                    (categories?.map(c => ({
+                      id: c.id,
+                      name: c.name,
+                      type: 'existing' as const,
+                      confidence: 0.5,
+                      reason: 'Existing category',
+                      color: c.color,
+                      isExisting: true,
+                    })) || []).slice().sort((a, b) => a.name.localeCompare(b.name)) // Debug: log and sort categories
+                  }
                   getOptionLabel={(option) => option?.name || ''}
                   loading={suggestionsLoading}
                   placeholder="Select or search category..."

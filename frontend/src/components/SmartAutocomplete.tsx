@@ -70,6 +70,7 @@ const SmartAutocomplete: React.FC<SmartAutocompleteProps> = ({
     const historicalSuggestions = options.filter(opt => opt.type === 'historical');
     const existingSuggestions = options.filter(opt => opt.type === 'existing');
     
+    
     // AI suggestions first, then historical, then existing
     return [...aiSuggestions, ...historicalSuggestions, ...existingSuggestions];
   }, [options]);
@@ -292,6 +293,22 @@ const SmartAutocomplete: React.FC<SmartAutocompleteProps> = ({
       size={size}
       onOpen={handleOpen}
       isOptionEqualToValue={(option, value) => option?.id === value?.id}
+      ListboxProps={{
+        style: {
+          maxHeight: '400px', // Increase max height for better visibility
+          overflowY: 'auto', // Ensure scrolling works
+        }
+      }}
+      filterOptions={(options, params) => {
+        // Don't filter when input is empty, show all options
+        if (!params.inputValue) {
+          return options;
+        }
+        // Use default filtering when user types
+        return options.filter(option =>
+          option.name.toLowerCase().includes(params.inputValue.toLowerCase())
+        );
+      }}
       groupBy={(option) => {
         switch (option.type) {
           case 'ai_suggestion':
