@@ -111,7 +111,7 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2">
           Auto-categorize uses AI to automatically assign payees and categories to uncategorized transactions 
-          with high confidence (≥50%).
+          with high confidence (≥60%).
         </Typography>
       </Alert>
 
@@ -142,7 +142,7 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
               }))}
             />
           }
-          label="Auto-apply high confidence suggestions (≥50%)"
+          label="Auto-apply high confidence suggestions (≥60%)"
         />
         <FormControlLabel
           control={

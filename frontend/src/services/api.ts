@@ -187,6 +187,13 @@ export const importApi = {
     api.post(`/import/column-mapping/${fileType}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     }).then(res => res.data),
+  
+  // Batch import pre-processed transactions
+  importTransactionsBatch: (transactionsData: any[], accountId: string): Promise<any> => 
+    api.post('/import/transactions/batch', { 
+      transactions_data: transactionsData, 
+      account_id: accountId 
+    }).then(res => res.data),
 };
 
 export default api;

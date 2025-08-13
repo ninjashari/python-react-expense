@@ -14,6 +14,12 @@ class LLMTransactionData(BaseModel):
     confidence: float = Field(default=0.8, description="Extraction confidence (0.0-1.0)")
 
 
+class BatchImportRequest(BaseModel):
+    """Request schema for batch transaction import"""
+    transactions_data: List[LLMTransactionData] = Field(..., description="List of transactions to import")
+    account_id: uuid.UUID = Field(..., description="Target account ID for imported transactions")
+
+
 class PDFLLMImportRequest(BaseModel):
     """Request schema for PDF LLM import"""
     account_id: uuid.UUID = Field(..., description="Target account ID for imported transactions")

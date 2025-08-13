@@ -4,6 +4,8 @@ from typing import Optional, List
 import uuid
 import pandas as pd
 import io
+from datetime import datetime
+from decimal import Decimal
 import PyPDF2
 import pytesseract
 from PIL import Image
@@ -11,18 +13,15 @@ import openpyxl
 from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
-from models.payees import Payee
-from models.categories import Category
 from models.users import User
 from schemas.transactions import TransactionCreate
 from schemas.import_schemas import (
     PDFLLMImportRequest, PDFLLMImportResponse, 
     PDFLLMPreviewResponse, PDFLLMSystemStatusResponse,
-    LLMTransactionData
+    LLMTransactionData, BatchImportRequest
 )
 from services.pdf_llm_processor import PDFLLMProcessor
-from utils.color_generator import generate_unique_color
-from utils.slug import create_slug
+from services.ai_trainer import TransactionAITrainer
 from utils.auth import get_current_active_user
 from routers.transactions import update_account_balance
 
@@ -64,49 +63,6 @@ def parse_excel_data(file_content: bytes) -> pd.DataFrame:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error reading Excel: {str(e)}")
 
-def create_or_get_payee(db: Session, name: str, user_id: uuid.UUID) -> Optional[uuid.UUID]:
-    """Create a new payee or get existing one for the current user"""
-    if not name or name.strip() == "":
-        return None
-    
-    payee = db.query(Payee).filter(
-        Payee.name == name.strip(),
-        Payee.user_id == user_id
-    ).first()
-    if not payee:
-        slug = create_slug(name.strip())
-        payee = Payee(
-            name=name.strip(),
-            slug=slug,
-            user_id=user_id
-        )
-        db.add(payee)
-        db.commit()
-        db.refresh(payee)
-    return payee.id
-
-def create_or_get_category(db: Session, name: str, user_id: uuid.UUID) -> Optional[uuid.UUID]:
-    """Create a new category or get existing one for the current user"""
-    if not name or name.strip() == "":
-        return None
-    
-    category = db.query(Category).filter(
-        Category.name == name.strip(),
-        Category.user_id == user_id
-    ).first()
-    if not category:
-        slug = create_slug(name.strip())
-        color = generate_unique_color(db, name.strip(), str(user_id))
-        category = Category(
-            name=name.strip(),
-            slug=slug,
-            color=color,
-            user_id=user_id
-        )
-        db.add(category)
-        db.commit()
-        db.refresh(category)
-    return category.id
 
 def process_transactions_data(
     df: pd.DataFrame,
@@ -121,9 +77,17 @@ def process_transactions_data(
     transaction_type_column: Optional[str] = None,
     default_transaction_type: str = "expense"
 ) -> tuple[int, List[str]]:
-    """Process DataFrame rows and create transactions"""
+    """Process DataFrame rows and create transactions with AI categorization"""
+    
+    # Initialize AI trainer and train on historical data
+    print(f"Training AI on user's historical transaction data...")
+    ai_trainer = TransactionAITrainer(db, current_user.id)
+    training_stats = ai_trainer.train_from_historical_data()
+    print(f"AI training completed: {training_stats}")
+    
     transactions_created = 0
     errors = []
+    ai_predictions_made = 0
     
     for index, row in df.iterrows():
         try:
@@ -143,15 +107,25 @@ def process_transactions_data(
             if transaction_type not in ['income', 'expense', 'transfer']:
                 transaction_type = 'expense'  # Default fallback
             
-            # Handle payee
+            # Use AI to predict payee and category from existing entities only
             payee_id = None
-            if payee_column and payee_column in df.columns and pd.notna(row[payee_column]):
-                payee_id = create_or_get_payee(db, str(row[payee_column]), current_user.id)
-            
-            # Handle category
             category_id = None
-            if category_column and category_column in df.columns and pd.notna(row[category_column]):
-                category_id = create_or_get_category(db, str(row[category_column]), current_user.id)
+            
+            ai_prediction = ai_trainer.predict_payee_and_category(
+                description,
+                transaction_type,
+                amount
+            )
+            
+            if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
+                payee_id = ai_prediction['payee']['id']
+                print(f"AI predicted payee: {ai_prediction['payee']['name']} (confidence: {ai_prediction['payee']['confidence']:.2f})")
+                ai_predictions_made += 1
+            
+            if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
+                category_id = ai_prediction['category']['id']
+                print(f"AI predicted category: {ai_prediction['category']['name']} (confidence: {ai_prediction['category']['confidence']:.2f})")
+                ai_predictions_made += 1
             
             # Create transaction
             transaction_data = TransactionCreate(
@@ -175,7 +149,8 @@ def process_transactions_data(
         except Exception as e:
             errors.append(f"Row {index + 1}: {str(e)}")
     
-    return transactions_created, errors
+    print(f"AI made {ai_predictions_made} predictions for payees and categories")
+    return transactions_created, errors, ai_predictions_made, training_stats
 
 @router.post("/csv")
 async def import_csv(
@@ -211,7 +186,7 @@ async def import_csv(
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
     # Process transactions using common utility function
-    transactions_created, errors = process_transactions_data(
+    transactions_created, errors, ai_predictions_made, training_stats = process_transactions_data(
         df=df,
         db=db,
         current_user=current_user,
@@ -232,8 +207,10 @@ async def import_csv(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
     return {
-        "message": f"Successfully imported {transactions_created} transactions",
+        "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions",
         "transactions_created": transactions_created,
+        "ai_predictions_made": ai_predictions_made,
+        "training_stats": training_stats,
         "errors": errors
     }
 
@@ -279,7 +256,7 @@ async def import_excel(
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
     # Process transactions using common utility function
-    transactions_created, errors = process_transactions_data(
+    transactions_created, errors, ai_predictions_made, training_stats = process_transactions_data(
         df=df,
         db=db,
         current_user=current_user,
@@ -300,8 +277,10 @@ async def import_excel(
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
     return {
-        "message": f"Successfully imported {transactions_created} transactions",
+        "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions",
         "transactions_created": transactions_created,
+        "ai_predictions_made": ai_predictions_made,
+        "training_stats": training_stats,
         "errors": errors
     }
 
@@ -455,24 +434,41 @@ async def import_pdf_with_llm(
         if preview_only or result["status"] != "success":
             return PDFLLMImportResponse(**result)
         
+        # Initialize AI trainer and train on historical data
+        print(f"Training AI on user's historical transaction data...")
+        ai_trainer = TransactionAITrainer(db, current_user.id)
+        training_stats = ai_trainer.train_from_historical_data()
+        print(f"AI training completed: {training_stats}")
+        
         # Import transactions to database
         transactions_created = 0
         errors = []
+        ai_predictions_made = 0
         
         for transaction_data in result["transactions"]:
             try:
                 # Convert LLM data to database format
                 llm_transaction = LLMTransactionData(**transaction_data)
                 
-                # Handle payee
+                # Use AI to predict payee and category from existing entities only
                 payee_id = None
-                if llm_transaction.payee:
-                    payee_id = create_or_get_payee(db, llm_transaction.payee, current_user.id)
-                
-                # Handle category
                 category_id = None
-                if llm_transaction.category:
-                    category_id = create_or_get_category(db, llm_transaction.category, current_user.id)
+                
+                ai_prediction = ai_trainer.predict_payee_and_category(
+                    llm_transaction.description,
+                    llm_transaction.transaction_type,
+                    llm_transaction.amount
+                )
+                
+                if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
+                    payee_id = ai_prediction['payee']['id']
+                    print(f"AI predicted payee: {ai_prediction['payee']['name']} (confidence: {ai_prediction['payee']['confidence']:.2f})")
+                    ai_predictions_made += 1
+                
+                if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
+                    category_id = ai_prediction['category']['id']
+                    print(f"AI predicted category: {ai_prediction['category']['name']} (confidence: {ai_prediction['category']['confidence']:.2f})")
+                    ai_predictions_made += 1
                 
                 # Create transaction
                 transaction_create = TransactionCreate(
@@ -506,7 +502,10 @@ async def import_pdf_with_llm(
         # Update result with import statistics
         result["transactions_created"] = transactions_created
         result["import_errors"] = errors
-        result["message"] = f"Successfully imported {transactions_created} transactions from PDF using LLM"
+        result["ai_predictions_made"] = ai_predictions_made
+        result["training_stats"] = training_stats
+        result["message"] = f"Successfully imported {transactions_created} transactions from PDF using LLM with {ai_predictions_made} AI predictions"
+        print(f"AI made {ai_predictions_made} predictions for payees and categories")
         
         return PDFLLMImportResponse(**result)
         
@@ -514,3 +513,111 @@ async def import_pdf_with_llm(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing PDF with LLM: {str(e)}")
+
+
+@router.post("/transactions/batch")
+async def import_transactions_batch(
+    request: BatchImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Import a batch of pre-processed transactions directly with AI categorization"""
+    
+    # Verify account exists and belongs to current user
+    account = db.query(Account).filter(
+        Account.id == request.account_id,
+        Account.user_id == current_user.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    # Initialize AI trainer and train on historical data
+    print(f"Training AI on user's historical transaction data...")
+    ai_trainer = TransactionAITrainer(db, current_user.id)
+    training_stats = ai_trainer.train_from_historical_data()
+    print(f"AI training completed: {training_stats}")
+    
+    transactions_created = 0
+    errors = []
+    ai_predictions_made = 0
+    
+    try:
+        print(f"Starting batch import of {len(request.transactions_data)} transactions")
+        for i, transaction_data in enumerate(request.transactions_data):
+            try:
+                print(f"Processing transaction {i + 1}: {transaction_data.description}")
+                print(f"Transaction data: date={transaction_data.date}, amount={transaction_data.amount}, type={transaction_data.transaction_type}")
+                
+                # Use AI to predict payee and category from existing entities only
+                payee_id = None
+                category_id = None
+                
+                ai_prediction = ai_trainer.predict_payee_and_category(
+                    transaction_data.description,
+                    transaction_data.transaction_type,
+                    transaction_data.amount
+                )
+                
+                if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
+                    payee_id = ai_prediction['payee']['id']
+                    print(f"AI predicted payee: {ai_prediction['payee']['name']} (confidence: {ai_prediction['payee']['confidence']:.2f})")
+                    ai_predictions_made += 1
+                
+                if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
+                    category_id = ai_prediction['category']['id']
+                    print(f"AI predicted category: {ai_prediction['category']['name']} (confidence: {ai_prediction['category']['confidence']:.2f})")
+                    ai_predictions_made += 1
+
+                # Create the transaction
+                # Parse date string to date object
+                try:
+                    transaction_date = datetime.strptime(transaction_data.date, '%Y-%m-%d').date()
+                except ValueError:
+                    # Try alternative date formats
+                    transaction_date = datetime.strptime(transaction_data.date, '%Y-%m-%d').date()
+                
+                transaction = Transaction(
+                    date=transaction_date,
+                    amount=Decimal(str(transaction_data.amount)),
+                    description=transaction_data.description,
+                    type=transaction_data.transaction_type,
+                    account_id=request.account_id,
+                    payee_id=payee_id,
+                    category_id=category_id,
+                    user_id=current_user.id
+                )
+                
+                db.add(transaction)
+                db.flush()
+                
+                # Update account balance
+                update_account_balance(db, request.account_id, float(transaction_data.amount), transaction_data.transaction_type)
+                
+                transactions_created += 1
+                print(f"Successfully created transaction {i + 1}")
+                
+            except Exception as e:
+                print(f"Error creating transaction {i + 1}: {str(e)}")
+                # Don't rollback here, just log the error and continue
+                errors.append(f"Transaction {i + 1}: {str(e)}")
+                continue
+        
+        # Commit all transactions
+        print(f"Committing {transactions_created} transactions to database")
+        db.commit()
+        print(f"Database commit successful")
+        print(f"AI made {ai_predictions_made} predictions for payees and categories")
+        
+        return {
+            "transactions_created": transactions_created,
+            "import_errors": errors,
+            "ai_predictions_made": ai_predictions_made,
+            "training_stats": training_stats,
+            "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error importing transactions: {str(e)}")

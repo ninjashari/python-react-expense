@@ -63,17 +63,17 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
   const recordSelection = useRecordSelection();
   const { trackSuggestionShown, trackSuggestionAccepted } = useLearningMetrics();
   
-  // Get enhanced suggestions
+  // Get enhanced suggestions (only when editing or has potential high-confidence suggestions)
   const {
     data: suggestions,
     isLoading: suggestionsLoading
   } = useEnhancedSuggestions(
-    transactionDescription,
-    transactionAmount,
+    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? transactionDescription : '',
+    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? transactionAmount : undefined,
     undefined, // accountId not needed here
-    accountType,
-    fieldType === 'payee' ? allOptions as Array<{ id: string; name: string }> : [],
-    fieldType === 'category' ? allOptions as Array<{ id: string; name: string; color: string }> : []
+    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? accountType : undefined,
+    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? (fieldType === 'payee' ? allOptions as Array<{ id: string; name: string }> : []) : [],
+    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? (fieldType === 'category' ? allOptions as Array<{ id: string; name: string; color: string }> : []) : []
   );
   
   // Get current suggestions for this field type
@@ -83,11 +83,11 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
   
   // Check if there are high-confidence AI suggestions
   const hasHighConfidenceSuggestion = currentSuggestions.some(
-    s => s.type === 'ai_suggestion' && s.confidence > 0.5
+    s => s.type === 'ai_suggestion' && s.confidence > 0.6
   );
   
   const topAISuggestion = currentSuggestions.find(
-    s => s.type === 'ai_suggestion' && s.confidence > 0.5
+    s => s.type === 'ai_suggestion' && s.confidence > 0.6
   );
   
   // Handle selection change with learning

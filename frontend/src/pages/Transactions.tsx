@@ -26,6 +26,7 @@ import {
   FormControl,
   InputLabel,
   Select,
+  Checkbox,
 } from '@mui/material';
 import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -83,6 +84,9 @@ const Transactions: React.FC = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [savingTransactions, setSavingTransactions] = useState<Set<string>>(new Set());
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
+  const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -129,17 +133,17 @@ const Transactions: React.FC = () => {
   const [selectedAccount, setSelectedAccount] = useState<any>(null);
   const { trackSuggestionShown, trackSuggestionAccepted } = useLearningMetrics();
   
-  // Get enhanced suggestions for form
+  // Get enhanced suggestions for form (only when dialog is open)
   const {
     data: formSuggestions,
     isLoading: suggestionsLoading
   } = useEnhancedSuggestions(
-    formDescription,
-    formAmount,
-    selectedAccount?.id,
-    selectedAccount?.type,
-    payees || [],
-    categories || []
+    dialogOpen ? formDescription : '',
+    dialogOpen ? formAmount : undefined,
+    dialogOpen ? selectedAccount?.id : undefined,
+    dialogOpen ? selectedAccount?.type : undefined,
+    dialogOpen ? (payees || []) : [],
+    dialogOpen ? (categories || []) : []
   );
 
   const createMutation = useCreateWithToast(transactionsApi.create, {
@@ -270,10 +274,66 @@ const Transactions: React.FC = () => {
     }
   };
 
-  const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this transaction?')) {
-      deleteMutation.mutate(id);
+  const handleDelete = (transaction: Transaction) => {
+    setTransactionToDelete(transaction);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (transactionToDelete) {
+      deleteMutation.mutate(transactionToDelete.id);
+      setDeleteDialogOpen(false);
+      setTransactionToDelete(null);
     }
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteDialogOpen(false);
+    setTransactionToDelete(null);
+  };
+
+  // Batch selection functions
+  const handleSelectTransaction = (transactionId: string) => {
+    setSelectedTransactions(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(transactionId)) {
+        newSet.delete(transactionId);
+      } else {
+        newSet.add(transactionId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    const allTransactionIds = transactionData?.items?.map(t => t.id) || [];
+    setSelectedTransactions(new Set(allTransactionIds));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedTransactions(new Set());
+  };
+
+  const handleBatchDelete = () => {
+    setBatchDeleteDialogOpen(true);
+  };
+
+  const handleConfirmBatchDelete = async () => {
+    const selectedIds = Array.from(selectedTransactions);
+    try {
+      // Delete all selected transactions
+      await Promise.all(selectedIds.map(id => 
+        deleteMutation.mutateAsync(id)
+      ));
+      setBatchDeleteDialogOpen(false);
+      setSelectedTransactions(new Set());
+    } catch (error) {
+      // Error handling is done by the mutation hook
+    }
+  };
+
+  const handleCancelBatchDelete = () => {
+    setBatchDeleteDialogOpen(false);
   };
 
   const handleFilterChange = (field: keyof TransactionFilters, value: any) => {
@@ -364,6 +424,17 @@ const Transactions: React.FC = () => {
           >
             Add Transaction
           </Button>
+          {selectedTransactions.size > 0 && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<Delete />}
+              onClick={handleBatchDelete}
+              sx={{ ml: 2 }}
+            >
+              Delete Selected ({selectedTransactions.size})
+            </Button>
+          )}
         </Box>
       </Box>
 
@@ -431,6 +502,13 @@ const Transactions: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox
+                  indeterminate={selectedTransactions.size > 0 && selectedTransactions.size < (transactionData?.items?.length || 0)}
+                  checked={(transactionData?.items?.length || 0) > 0 && selectedTransactions.size === (transactionData?.items?.length || 0)}
+                  onChange={(e) => e.target.checked ? handleSelectAll() : handleClearSelection()}
+                />
+              </TableCell>
               <TableCell>Date</TableCell>
               <TableCell>Description</TableCell>
               <TableCell>Account</TableCell>
@@ -444,6 +522,12 @@ const Transactions: React.FC = () => {
           <TableBody>
             {transactionData?.items?.map((transaction) => (
               <TableRow key={transaction.id}>
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    checked={selectedTransactions.has(transaction.id)}
+                    onChange={() => handleSelectTransaction(transaction.id)}
+                  />
+                </TableCell>
                 <TableCell sx={{ minWidth: 120 }}>
                   <InlineDateEdit
                     value={transaction.date}
@@ -525,7 +609,7 @@ const Transactions: React.FC = () => {
                   </IconButton>
                   <IconButton
                     size="small"
-                    onClick={() => handleDelete(transaction.id)}
+                    onClick={() => handleDelete(transaction)}
                     color="error"
                   >
                     <Delete />
@@ -789,6 +873,123 @@ const Transactions: React.FC = () => {
             </Button>
           </DialogActions>
         </form>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleCancelDelete}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Confirm Delete</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete this transaction?
+          </Typography>
+          {transactionToDelete && (
+            <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.50', borderRadius: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Date:</strong> {new Date(transactionToDelete.date).toLocaleDateString()}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Description:</strong> {transactionToDelete.description || 'No description'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Amount:</strong> {formatCurrency(transactionToDelete.amount)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Account:</strong> {transactionToDelete.account?.name}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelDelete}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmDelete} 
+            color="error" 
+            variant="contained"
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Batch Delete Confirmation Dialog */}
+      <Dialog
+        open={batchDeleteDialogOpen}
+        onClose={handleCancelBatchDelete}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Confirm Batch Delete</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete {selectedTransactions.size} selected transaction{selectedTransactions.size > 1 ? 's' : ''}?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            This action cannot be undone.
+          </Typography>
+          
+          {/* Show preview of selected transactions */}
+          {transactionData?.items && (
+            <Box sx={{ mt: 2, maxHeight: 300, overflow: 'auto' }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Selected Transactions:
+              </Typography>
+              {transactionData.items
+                .filter(t => selectedTransactions.has(t.id))
+                .slice(0, 10) // Show only first 10 for preview
+                .map((transaction) => (
+                  <Box 
+                    key={transaction.id} 
+                    sx={{ 
+                      p: 1, 
+                      mb: 1, 
+                      backgroundColor: 'grey.50', 
+                      borderRadius: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2">
+                        {transaction.description || 'No description'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {new Date(transaction.date).toLocaleDateString()} • {transaction.account?.name}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color={transaction.type === 'income' ? 'success.main' : 'error.main'}>
+                      {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                    </Typography>
+                  </Box>
+                ))}
+              {selectedTransactions.size > 10 && (
+                <Typography variant="caption" color="text.secondary">
+                  ... and {selectedTransactions.size - 10} more transactions
+                </Typography>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelBatchDelete}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmBatchDelete} 
+            color="error" 
+            variant="contained"
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? 'Deleting...' : `Delete ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

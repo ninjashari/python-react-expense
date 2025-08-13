@@ -293,15 +293,15 @@ const Import: React.FC = () => {
       let results: any;
 
       if (importData.isPdfLlm && importData.llmResults) {
-        // Handle PDF LLM final import with reviewed transactions
-        const formData = new FormData();
-        formData.append('file', importData.file);
-        formData.append('account_id', importData.account.id.toString());
-        formData.append('llm_model', importData.llmModel || 'llama3.1');
-        formData.append('preview_only', 'false');
-
-        results = await importApi.importPdfLlm(formData);
-        setImportData(prev => ({ ...prev, llmResults: results as PDFLLMImportResponse }));
+        // Handle PDF LLM final import with reviewed transactions (use batch import)
+        console.log('Importing transactions:', importData.llmResults.transactions.length, 'transactions');
+        console.log('Sample transaction:', importData.llmResults.transactions[0]);
+        console.log('Account ID:', importData.account.id);
+        results = await importApi.importTransactionsBatch(
+          importData.llmResults.transactions,
+          importData.account.id
+        );
+        console.log('Import results:', results);
       } else {
         // Handle CSV/Excel import
         const formData = new FormData();

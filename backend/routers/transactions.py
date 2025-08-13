@@ -10,6 +10,7 @@ from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
 from models.users import User
+from models.learning import UserSelectionHistory
 from schemas.transactions import (
     TransactionCreate, 
     TransactionUpdate, 
@@ -350,6 +351,11 @@ def delete_transaction(
         update_account_balance(db, transaction.account_id, transaction.amount, "expense", is_reversal=True)
         if transaction.to_account_id:
             update_account_balance(db, transaction.to_account_id, transaction.amount, "income", is_reversal=True)
+    
+    # Delete related learning history records to avoid foreign key constraint violation
+    db.query(UserSelectionHistory).filter(
+        UserSelectionHistory.transaction_id == transaction_id
+    ).delete(synchronize_session=False)
     
     db.delete(transaction)
     db.commit()
