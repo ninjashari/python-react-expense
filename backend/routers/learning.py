@@ -467,7 +467,7 @@ async def auto_categorize_transactions(
         )
         
         updates = {}
-        confidence_threshold = 0.85  # High confidence threshold for auto-categorization
+        confidence_threshold = 0.5  # High confidence threshold for auto-categorization
         
         # Auto-apply payee if high confidence
         if not transaction.payee_id:

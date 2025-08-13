@@ -83,11 +83,11 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
   
   // Check if there are high-confidence AI suggestions
   const hasHighConfidenceSuggestion = currentSuggestions.some(
-    s => s.type === 'ai_suggestion' && s.confidence > 0.8
+    s => s.type === 'ai_suggestion' && s.confidence > 0.5
   );
   
   const topAISuggestion = currentSuggestions.find(
-    s => s.type === 'ai_suggestion' && s.confidence > 0.7
+    s => s.type === 'ai_suggestion' && s.confidence > 0.5
   );
   
   // Handle selection change with learning

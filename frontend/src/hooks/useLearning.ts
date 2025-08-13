@@ -159,7 +159,7 @@ export const useSmartTransactionForm = (
         ? suggestions?.payee_suggestions || []
         : suggestions?.category_suggestions || [];
       
-      return suggestionList.find(s => s.type === 'ai_suggestion' && s.confidence > 0.8);
+      return suggestionList.find(s => s.type === 'ai_suggestion' && s.confidence > 0.5);
     },
     
     hasHighConfidenceSuggestions: () => {
@@ -167,7 +167,7 @@ export const useSmartTransactionForm = (
         ...(suggestions?.payee_suggestions || []),
         ...(suggestions?.category_suggestions || [])
       ];
-      return allSuggestions.some(s => s.type === 'ai_suggestion' && s.confidence > 0.8);
+      return allSuggestions.some(s => s.type === 'ai_suggestion' && s.confidence > 0.5);
     },
   };
 };
@@ -177,7 +177,7 @@ export const useSmartTransactionForm = (
  */
 export const useAutoSuggestions = (
   description: string,
-  confidenceThreshold: number = 0.85
+  confidenceThreshold: number = 0.5
 ) => {
   const [autoAppliedSuggestions, setAutoAppliedSuggestions] = useState<{
     payee?: SuggestionItem;
