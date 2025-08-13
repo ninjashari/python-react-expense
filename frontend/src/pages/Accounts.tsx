@@ -15,8 +15,10 @@ import {
   IconButton,
   CircularProgress,
   LinearProgress,
+  Backdrop,
+  Alert,
 } from '@mui/material';
-import { Add, Edit, Delete } from '@mui/icons-material';
+import { Add, Edit, Delete, Refresh } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { accountsApi } from '../services/api';
@@ -35,6 +37,7 @@ const accountTypes = [
 const Accounts: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [isRecalculating, setIsRecalculating] = useState(false);
   const queryClient = useQueryClient();
 
   // Helper function to calculate credit utilization percentage
@@ -69,16 +72,21 @@ const Accounts: React.FC = () => {
 
   const watchAccountType = watch('type');
 
-  const { data: accounts, isLoading } = useQuery({
+  const { data: accounts, isLoading, error, refetch } = useQuery({
     queryKey: ['accounts'],
     queryFn: async () => {
-      // Recalculate balances first, then fetch accounts
+      // Show specific loading state for recalculation
+      setIsRecalculating(true);
+      
       try {
         await accountsApi.recalculateBalances();
       } catch (error) {
         console.warn('Failed to recalculate balances:', error);
         // Continue with fetching accounts even if recalculation fails
+      } finally {
+        setIsRecalculating(false);
       }
+      
       return accountsApi.getAll();
     },
   });
@@ -166,8 +174,55 @@ const Accounts: React.FC = () => {
 
   if (isLoading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="400px">
-        <CircularProgress />
+      <Box>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+          <Typography variant="h4">Accounts</Typography>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            disabled
+          >
+            Add Account
+          </Button>
+        </Box>
+        
+        <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" height="400px">
+          <CircularProgress size={48} />
+          <Typography variant="h6" mt={2} color="textSecondary">
+            {isRecalculating ? 'Recalculating account balances...' : 'Loading accounts...'}
+          </Typography>
+          <Typography variant="body2" color="textSecondary" mt={1}>
+            {isRecalculating ? 'Processing all transactions to ensure accurate balances' : 'Fetching your account data'}
+          </Typography>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+          <Typography variant="h4">Accounts</Typography>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpenDialog()}
+          >
+            Add Account
+          </Button>
+        </Box>
+        
+        <Alert 
+          severity="error" 
+          action={
+            <Button color="inherit" size="small" onClick={() => refetch()}>
+              Retry
+            </Button>
+          }
+        >
+          Failed to load accounts. Please try again.
+        </Alert>
       </Box>
     );
   }
@@ -176,13 +231,24 @@ const Accounts: React.FC = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">Accounts</Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpenDialog()}
-        >
-          Add Account
-        </Button>
+        <Box display="flex" gap={1}>
+          <Button
+            variant="outlined"
+            startIcon={<Refresh />}
+            onClick={() => refetch()}
+            disabled={isRecalculating}
+          >
+            {isRecalculating ? 'Recalculating...' : 'Refresh'}
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpenDialog()}
+            disabled={isRecalculating}
+          >
+            Add Account
+          </Button>
+        </Box>
       </Box>
 
       <Grid container spacing={3}>
@@ -276,6 +342,26 @@ const Accounts: React.FC = () => {
           </Grid>
         ))}
       </Grid>
+
+      {/* Calculation Overlay */}
+      <Backdrop
+        sx={{ 
+          color: '#fff', 
+          zIndex: (theme) => theme.zIndex.drawer + 1,
+          backgroundColor: 'rgba(0, 0, 0, 0.3)'
+        }}
+        open={isRecalculating && !isLoading}
+      >
+        <Box display="flex" flexDirection="column" alignItems="center">
+          <CircularProgress color="inherit" size={48} />
+          <Typography variant="h6" mt={2}>
+            Recalculating balances...
+          </Typography>
+          <Typography variant="body2" mt={1} textAlign="center">
+            Processing transactions to ensure accurate account balances
+          </Typography>
+        </Box>
+      </Backdrop>
 
       {/* Account Dialog */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>

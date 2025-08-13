@@ -121,6 +121,7 @@ export const categoriesApi = {
   update: (id: string, data: Partial<CreateCategoryDto>): Promise<Category> => 
     api.put(`/categories/${id}`, data).then(res => res.data),
   delete: (id: string): Promise<void> => api.delete(`/categories/${id}`).then(res => res.data),
+  reassignColors: (): Promise<any> => api.post('/categories/reassign-colors').then(res => res.data),
 };
 
 // Transactions API

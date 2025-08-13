@@ -25,6 +25,8 @@ A modern, full-stack expense management application designed for personal financ
 - **Transfer Handling**: Seamless money transfers between accounts with proper balance tracking
 - **Multi-Select Dropdowns**: Advanced UI components with search and reset functionality
 - **File Import System**: Import transactions from CSV, Excel, and PDF files with OCR support
+- **AI-Powered Transaction Categorization**: Intelligent payee and category suggestions based on historical data
+- **Machine Learning Training**: System learns from user behavior to improve future suggestions
 - **Unique Color Generation**: Automatic generation of distinct colors for categories
 - **Comprehensive Filtering**: Multi-dimensional filtering across all data entities
 
@@ -35,6 +37,8 @@ A modern, full-stack expense management application designed for personal financ
 - **PostgreSQL** database
 - **SQLAlchemy** ORM with Alembic migrations
 - **Pydantic** for data validation
+- **AI Training System** with pattern matching and confidence scoring
+- **Machine Learning** for transaction categorization and payee prediction
 - **OCR Support** with Tesseract and PIL
 - **PDF Processing** with PyPDF2
 - **Excel/CSV Processing** with pandas and openpyxl
@@ -194,9 +198,17 @@ The backend provides a comprehensive REST API with the following endpoints:
 - `GET /reports/monthly-trend` - Get monthly transaction trends
 
 ### Import
-- `POST /import/csv` - Import transactions from CSV file
-- `POST /import/excel` - Import transactions from Excel file
-- `POST /import/pdf` - Extract text from PDF using OCR
+- `POST /import/csv` - Import transactions from CSV file with AI categorization
+- `POST /import/excel` - Import transactions from Excel file with AI categorization
+- `POST /import/pdf-ocr` - Extract text from PDF using OCR
+- `POST /import/pdf-llm` - Import transactions from PDF using LLM processing with AI categorization
+- `POST /import/transactions/batch` - Batch import with AI-powered categorization
+- `GET /import/pdf-llm/status` - Check PDF-LLM system status
+
+### AI Learning System
+- `GET /learning/suggestions` - Get AI-powered suggestions for payees and categories
+- `POST /learning/feedback` - Provide feedback to improve AI accuracy
+- `GET /learning/stats` - View learning system performance metrics
 
 ## 📖 Usage Guide
 
@@ -234,6 +246,16 @@ The backend provides a comprehensive REST API with the following endpoints:
 3. Map columns to transaction fields
 4. Review and confirm import
 5. For PDFs, OCR will extract text for manual processing
+6. **AI Enhancement**: System automatically trains on your historical data before import
+7. **Smart Categorization**: AI suggests payees and categories during import process
+
+### Using AI-Powered Features
+1. **Automatic Training**: System learns from your transaction history before each import
+2. **Smart Suggestions**: AI provides payee and category suggestions with confidence scores
+3. **Continuous Learning**: System improves as you manually categorize more transactions
+4. **Confidence Thresholds**: Only suggestions above 60% confidence are automatically applied
+5. **Manual Override**: You can always manually assign categories and payees
+6. **Learning Dashboard**: View AI performance metrics and training statistics
 
 ## 📄 Import Features
 
@@ -250,9 +272,17 @@ The system provides intelligent column mapping suggestions:
 - Payee: "payee", "merchant", "vendor", "to", "from"
 - Category: "category", "type", "class"
 
-### Auto-Creation
-- Payees and categories are automatically created if they don't exist
-- Each new category gets a unique color assigned
+### AI-Powered Categorization
+- **Historical Data Training**: System analyzes your past transactions before each import
+- **Pattern Recognition**: Identifies keywords, transaction types, and amount patterns
+- **Confidence Scoring**: Only applies suggestions with 60%+ confidence
+- **Existing Entities Only**: AI never creates new categories or payees - only suggests from existing ones
+- **User Learning**: System learns from manual corrections to improve future accuracy
+- **Feature Engineering**: Uses description keywords, transaction types, and amount ranges for predictions
+
+### Auto-Creation (Manual Mode)
+- Payees and categories can be created manually during import if needed
+- Each new category gets a unique color assigned automatically
 
 ## 🧪 Development
 
@@ -306,12 +336,18 @@ gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
 ### Database Schema
 - **accounts**: Store account information with type-specific fields  
 - **transactions**: Transaction records with relationships to accounts, payees, categories
-- **payees**: Transaction counterparties
-- **categories**: Expense/income categories with unique colors
+- **payees**: Transaction counterparties with slug support
+- **categories**: Expense/income categories with unique colors and slug support
+- **user_transaction_patterns**: AI learning patterns from user behavior
+- **user_selection_history**: Track user selections for continuous learning
+- **user_correction_patterns**: Learn from user corrections and rejections
+- **learning_statistics**: Overall learning system performance metrics
 
 ### Key Features Implementation
 - **Balance Tracking**: Automatic updates on transaction create/update/delete
 - **Transfer Logic**: Proper debit/credit handling between accounts
+- **AI Training System**: Pattern-based machine learning for transaction categorization
+- **Learning Engine**: Continuous improvement through user feedback and corrections
 - **Color Generation**: Algorithm ensures unique colors for categories
 - **Multi-Select UI**: Custom component with search and reset functionality
 - **File Processing**: Robust parsing with error handling and validation
@@ -395,6 +431,7 @@ REACT_APP_API_BASE_URL=http://localhost:8000/api
 
 ## 📊 Roadmap
 
+### Core Features
 - [ ] Mobile responsive design improvements
 - [ ] Advanced analytics and charts
 - [ ] Budget planning and alerts
@@ -403,6 +440,15 @@ REACT_APP_API_BASE_URL=http://localhost:8000/api
 - [ ] Export to various formats
 - [ ] Docker containerization
 - [ ] Cloud deployment guides
+
+### AI & Machine Learning
+- [ ] Advanced ML models (neural networks, ensemble methods)
+- [ ] Real-time learning without requiring import triggers
+- [ ] Anomaly detection for unusual transactions
+- [ ] Predictive budgeting based on spending patterns
+- [ ] Natural language processing for transaction descriptions
+- [ ] Smart recurring transaction detection
+- [ ] Personalized financial insights and recommendations
 
 ## 🙏 Acknowledgments
 

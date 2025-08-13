@@ -18,8 +18,10 @@ import {
   IconButton,
   Chip,
   CircularProgress,
+  Alert,
+  Tooltip,
 } from '@mui/material';
-import { Add, Edit, Delete } from '@mui/icons-material';
+import { Add, Edit, Delete, Palette } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { categoriesApi } from '../services/api';
@@ -30,6 +32,8 @@ import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../h
 const Categories: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [isReassigning, setIsReassigning] = useState(false);
+  const [reassignResult, setReassignResult] = useState<any>(null);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, formState: { errors } } = useForm<CreateCategoryDto>({
@@ -113,6 +117,39 @@ const Categories: React.FC = () => {
     }
   };
 
+  const handleReassignColors = async () => {
+    if (!categories || categories.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'This will generate mathematically optimal unique colors using Golden Ratio distribution. ' +
+      'Each category will get a visually distinct color positioned at 137.5° intervals ' +
+      'around the color wheel for maximum visual separation. Continue?'
+    );
+
+    if (!confirmed) return;
+
+    setIsReassigning(true);
+    setReassignResult(null);
+
+    try {
+      const result = await categoriesApi.reassignColors();
+      setReassignResult(result);
+      
+      // Refresh categories to show new colors
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      
+    } catch (error: any) {
+      setReassignResult({
+        error: true,
+        message: error.response?.data?.detail || 'Failed to reassign colors'
+      });
+    } finally {
+      setIsReassigning(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="400px">
@@ -125,14 +162,54 @@ const Categories: React.FC = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">Categories</Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpenDialog()}
-        >
-          Add Category
-        </Button>
+        <Box display="flex" gap={1}>
+          <Tooltip title="Generate mathematically optimal unique colors using Golden Ratio distribution">
+            <Button
+              variant="outlined"
+              startIcon={<Palette />}
+              onClick={handleReassignColors}
+              disabled={isReassigning || !categories || categories.length === 0}
+            >
+              {isReassigning ? 'Distributing...' : 'Golden Ratio Colors'}
+            </Button>
+          </Tooltip>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpenDialog()}
+          >
+            Add Category
+          </Button>
+        </Box>
       </Box>
+
+      {/* Color Reassignment Results */}
+      {reassignResult && (
+        <Alert 
+          severity={reassignResult.error ? 'error' : 'success'}
+          onClose={() => setReassignResult(null)}
+          sx={{ mb: 2 }}
+        >
+          {reassignResult.error ? (
+            reassignResult.message
+          ) : (
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                {reassignResult.message}
+              </Typography>
+              <Typography variant="body2">
+                • Colors generated: {reassignResult.categories_updated} / {reassignResult.total_categories}
+              </Typography>
+              <Typography variant="body2">
+                • Distribution method: {reassignResult.distribution_method || 'Golden Ratio (137.5°)'}
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Each color is mathematically positioned for optimal visual distinction and accessibility.
+              </Typography>
+            </Box>
+          )}
+        </Alert>
+      )}
 
       <TableContainer component={Paper}>
         <Table>
@@ -151,14 +228,27 @@ const Categories: React.FC = () => {
                   <Typography variant="body1">{category.name}</Typography>
                 </TableCell>
                 <TableCell>
-                  <Chip
-                    label={category.color}
-                    size="small"
-                    sx={{
-                      backgroundColor: category.color,
-                      color: 'white',
-                    }}
-                  />
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box
+                      sx={{
+                        width: 24,
+                        height: 24,
+                        backgroundColor: category.color,
+                        borderRadius: '4px',
+                        border: '1px solid rgba(0,0,0,0.12)',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                      }}
+                    />
+                    <Chip
+                      label={category.color}
+                      size="small"
+                      variant="outlined"
+                      sx={{
+                        fontFamily: 'monospace',
+                        fontSize: '0.75rem',
+                      }}
+                    />
+                  </Box>
                 </TableCell>
                 <TableCell>{formatDateTime(category.created_at)}</TableCell>
                 <TableCell align="center">

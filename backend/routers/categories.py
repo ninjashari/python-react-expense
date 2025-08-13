@@ -131,3 +131,76 @@ def delete_category(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail="Failed to delete category")
+
+@router.post("/reassign-colors")
+def reassign_category_colors(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Golden Ratio Color Distribution - Reassign mathematically optimal unique colors to all categories.
+    
+    Uses the golden angle (137.5°) to create maximally distributed colors in perceptual color space.
+    Each category gets a unique, visually distinct, and accessible color using elegant mathematical principles.
+    """
+    try:
+        # Get all categories for the current user
+        categories = db.query(Category).filter(Category.user_id == current_user.id).all()
+        
+        if not categories:
+            return {
+                "message": "No categories found to reassign colors",
+                "categories_updated": 0,
+                "total_categories": 0,
+                "updated_categories": []
+            }
+        
+        # Clear all existing colors first to enable fresh golden distribution
+        old_colors = {}
+        for category in categories:
+            old_colors[category.id] = category.color
+            category.color = None
+        
+        db.commit()  # Commit the clearing to ensure clean slate
+        
+        # Generate new mathematically distributed colors
+        updated_categories = []
+        colors_assigned = 0
+        
+        # Sort categories by name for consistent ordering
+        sorted_categories = sorted(categories, key=lambda c: c.name.lower())
+        
+        for category in sorted_categories:
+            try:
+                # Generate unique color using golden ratio distribution
+                new_color = generate_unique_color(db, category.name, str(current_user.id))
+                category.color = new_color
+                
+                updated_categories.append({
+                    "category_id": category.id,
+                    "category_name": category.name,
+                    "old_color": old_colors[category.id],
+                    "new_color": new_color,
+                    "distribution_index": colors_assigned
+                })
+                
+                colors_assigned += 1
+                
+            except Exception as e:
+                # Fallback to old color if generation fails
+                category.color = old_colors[category.id]
+                print(f"Failed to generate color for category {category.name}: {e}")
+        
+        db.commit()
+        
+        return {
+            "message": f"Golden ratio distribution complete - {colors_assigned} unique colors assigned",
+            "categories_updated": colors_assigned,
+            "total_categories": len(categories),
+            "updated_categories": updated_categories,
+            "distribution_method": "Golden Angle (137.5°) Mathematical Distribution"
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to reassign category colors: {str(e)}")

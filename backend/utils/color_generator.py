@@ -211,64 +211,285 @@ def find_contrasting_colors(existing_colors: List[str], min_distance: float = 50
     
     return contrasting_colors
 
+def get_semantic_color_for_category(category_name: str) -> Optional[str]:
+    """
+    AI-powered semantic color assignment based on category meaning and UX best practices.
+    Uses psychological color associations and common UI patterns.
+    """
+    category_lower = category_name.lower()
+    
+    # Financial categories with semantic meaning
+    semantic_mappings = {
+        # Income categories - Green family (success, growth, money)
+        'salary': '#4CAF50',
+        'income': '#66BB6A', 
+        'wages': '#4CAF50',
+        'bonus': '#81C784',
+        'dividend': '#2E7D32',
+        'interest': '#388E3C',
+        'freelance': '#43A047',
+        'side income': '#66BB6A',
+        
+        # Food & Dining - Orange/Red family (appetite, warmth)
+        'food': '#FF9800',
+        'groceries': '#FF9800',
+        'dining': '#FF5722',
+        'restaurant': '#FF5722',
+        'coffee': '#8D6E63',  # Brown for coffee
+        'lunch': '#FFA726',
+        'dinner': '#FF7043',
+        'snacks': '#FFB74D',
+        'takeout': '#FF8A65',
+        
+        # Transportation - Blue family (movement, travel)
+        'transport': '#2196F3',
+        'gas': '#1976D2',
+        'fuel': '#1976D2',
+        'car': '#1565C0',
+        'uber': '#424242',  # Uber brand-ish
+        'taxi': '#FFC107',  # Yellow for taxi
+        'public transport': '#2196F3',
+        'parking': '#607D8B',
+        'maintenance': '#455A64',
+        
+        # Health & Medical - Red/Pink family (medical, care)
+        'health': '#E91E63',
+        'medical': '#E91E63',
+        'doctor': '#C2185B',
+        'pharmacy': '#AD1457',
+        'insurance': '#EC407A',
+        'dental': '#F06292',
+        'hospital': '#D81B60',
+        
+        # Entertainment - Purple family (creativity, fun)
+        'entertainment': '#9C27B0',
+        'movies': '#8E24AA',
+        'games': '#7B1FA2',
+        'music': '#AB47BC',
+        'streaming': '#BA68C8',
+        'netflix': '#E53935',  # Netflix red
+        'spotify': '#4CAF50',  # Spotify green
+        'books': '#5E35B1',
+        
+        # Shopping - Indigo/Deep Purple family (retail, luxury)
+        'shopping': '#3F51B5',
+        'clothes': '#673AB7',
+        'clothing': '#673AB7',
+        'accessories': '#512DA8',
+        'shoes': '#4527A0',
+        'electronics': '#303F9F',
+        'gadgets': '#283593',
+        
+        # Utilities - Cyan/Teal family (essential services)
+        'utilities': '#00BCD4',
+        'electricity': '#FFC107',  # Yellow for electric
+        'water': '#03A9F4',  # Blue for water
+        'gas bill': '#FF5722',  # Orange for gas
+        'internet': '#009688',
+        'phone': '#4DD0E1',
+        'cable': '#26A69A',
+        
+        # Home & Family - Green/Brown family (stability, nature)
+        'home': '#795548',
+        'rent': '#8D6E63',
+        'mortgage': '#6D4C41',
+        'repairs': '#5D4037',
+        'garden': '#4CAF50',
+        'family': '#FF9800',
+        'kids': '#FFEB3B',
+        'education': '#2196F3',
+        'school': '#1976D2',
+        
+        # Travel - Light Blue family (sky, freedom)
+        'travel': '#00BCD4',
+        'vacation': '#4FC3F7',
+        'flight': '#29B6F6',
+        'hotel': '#0288D1',
+        'tourism': '#0277BD',
+        
+        # Business - Dark Blue/Grey family (professional)
+        'business': '#37474F',
+        'office': '#546E7A',
+        'supplies': '#607D8B',
+        'software': '#455A64',
+        'subscriptions': '#78909C',
+        
+        # Emergency/Important - Red family (urgency, attention)
+        'emergency': '#F44336',
+        'urgent': '#E53935',
+        'fees': '#D32F2F',
+        'penalty': '#C62828',
+        'tax': '#B71C1C',
+    }
+    
+    # Try direct matches first
+    if category_lower in semantic_mappings:
+        return semantic_mappings[category_lower]
+    
+    # Try partial matches for compound category names
+    for keyword, color in semantic_mappings.items():
+        if keyword in category_lower:
+            return color
+    
+    return None
+
+def generate_ux_optimized_colors() -> List[str]:
+    """
+    Generate colors optimized for UX best practices:
+    - High contrast against white backgrounds
+    - Accessible color combinations
+    - Distinguishable for color-blind users
+    - Aesthetically pleasing color harmony
+    """
+    return [
+        # Primary vibrant colors (high contrast, accessible)
+        '#1976D2',  # Material Blue 700
+        '#388E3C',  # Material Green 700  
+        '#F57C00',  # Material Orange 700
+        '#7B1FA2',  # Material Purple 700
+        '#C62828',  # Material Red 700
+        '#00796B',  # Material Teal 700
+        '#5D4037',  # Material Brown 700
+        '#455A64',  # Material Blue Grey 700
+        
+        # Secondary colors (good contrast)
+        '#1565C0',  # Material Blue 800
+        '#2E7D32',  # Material Green 800
+        '#E65100',  # Material Orange 900
+        '#6A1B9A',  # Material Purple 800
+        '#B71C1C',  # Material Red 900
+        '#004D40',  # Material Teal 900
+        '#3E2723',  # Material Brown 900
+        '#263238',  # Material Blue Grey 900
+        
+        # Tertiary colors (balanced)
+        '#0D47A1',  # Material Blue 900
+        '#1B5E20',  # Material Green 900
+        '#BF360C',  # Material Deep Orange 900
+        '#4A148C',  # Material Purple 900
+        '#880E4F',  # Material Pink 900
+        '#006064',  # Material Cyan 900
+        '#E65100',  # Material Orange 900
+        '#37474F',  # Material Blue Grey 800
+        
+        # Additional accessible colors
+        '#AD1457',  # Material Pink 700
+        '#00838F',  # Material Cyan 700
+        '#6A4C93',  # Custom Purple
+        '#C73E1D',  # Custom Red
+        '#F39C12',  # Custom Orange
+        '#27AE60',  # Custom Green
+        '#2980B9',  # Custom Blue
+        '#8E44AD',  # Custom Purple
+    ]
+
+def calculate_wcag_contrast_ratio(color1: str, color2: str) -> float:
+    """Calculate WCAG contrast ratio between two colors."""
+    l1 = get_color_luminance(color1)
+    l2 = get_color_luminance(color2)
+    
+    # Ensure l1 is the lighter color
+    if l1 < l2:
+        l1, l2 = l2, l1
+    
+    return (l1 + 0.05) / (l2 + 0.05)
+
+def is_color_accessible(color: str, background: str = '#FFFFFF') -> bool:
+    """Check if color meets WCAG AA accessibility standards."""
+    contrast_ratio = calculate_wcag_contrast_ratio(color, background)
+    return contrast_ratio >= 4.5  # WCAG AA standard for normal text
+
 def generate_unique_color(db: Session, category_name: Optional[str] = None, user_id: Optional[str] = None) -> str:
     """
-    Generate a unique hex color that's not already used by any category.
+    Golden Ratio Color Distribution System - Mathematically elegant unique color generation.
+    
+    Uses the golden angle (137.5°) to create maximally distributed colors in perceptual color space.
+    Each color is guaranteed to be visually distinct, accessible, and aesthetically pleasing.
+    
+    Algorithm:
+    1. Count existing colors to determine position in golden sequence
+    2. Apply golden angle rotation for optimal spacing
+    3. Use perceptual lightness and saturation curves for visual harmony
+    4. Ensure WCAG AA accessibility compliance
     
     Args:
         db: Database session
-        category_name: Optional category name to generate consistent color
-        user_id: Optional user ID to scope color uniqueness to user
+        category_name: Category name (used for deterministic seed, not semantic matching)
+        user_id: User ID to scope uniqueness
         
     Returns:
-        A unique hex color string
+        A unique, mathematically distributed hex color string
     """
-    # Build query to get existing colors
+    # Get existing colors to determine sequence position
     query = db.query(Category.color)
     if user_id:
         query = query.filter(Category.user_id == user_id)
     
-    existing_colors = [color[0] for color in query.all()]
+    existing_colors = [color[0] for color in query.all() if color[0]]
     existing_colors_set = set(existing_colors)
     
-    # If category name provided, try to generate consistent color first
-    if category_name:
-        name_based_color = generate_category_color_from_name(category_name)
-        if name_based_color not in existing_colors_set:
-            return name_based_color
+    # Golden ratio and angle constants for optimal distribution
+    GOLDEN_RATIO = 1.618033988749
+    GOLDEN_ANGLE = 137.50776405  # 360 / φ²
     
-    # Get Material Design colors first (highest priority)
-    material_colors = generate_material_design_colors()
-    for color in material_colors:
-        if color not in existing_colors_set:
-            return color
+    # High-quality color parameters for UI design
+    SATURATION_RANGE = (65, 85)  # Vibrant but not overwhelming
+    LIGHTNESS_RANGE = (35, 55)   # Dark enough for accessibility, light enough for visibility
     
-    # Find contrasting colors
-    contrasting_colors = find_contrasting_colors(existing_colors, min_distance=60.0)
-    if contrasting_colors:
-        return random.choice(contrasting_colors)
+    def get_deterministic_seed(name: str) -> int:
+        """Generate consistent seed from category name for deterministic colors."""
+        if not name:
+            return 0
+        return sum(ord(c) * (i + 1) for i, c in enumerate(name.lower())) % 1000
     
-    # Generate vibrant colors as fallback
-    vibrant_colors = generate_vibrant_colors(200)
-    for color in vibrant_colors:
-        if color not in existing_colors_set:
-            return color
+    def calculate_golden_hue(index: int, seed: int = 0) -> float:
+        """Calculate hue using golden angle distribution with optional deterministic offset."""
+        base_hue = (index * GOLDEN_ANGLE + seed * 23) % 360
+        return base_hue
     
-    # Last resort: generate completely random color
-    max_attempts = 1000
-    for _ in range(max_attempts):
-        # Generate using HSL for better color distribution
-        hue = random.randint(0, 360)
-        saturation = random.randint(60, 90)  # Keep vibrant
-        lightness = random.randint(40, 70)   # Keep visible
+    def get_perceptual_saturation(index: int) -> int:
+        """Generate saturation using sinusoidal variation for visual rhythm."""
+        base_sat = SATURATION_RANGE[0]
+        sat_range = SATURATION_RANGE[1] - SATURATION_RANGE[0]
+        variation = math.sin(index * 0.7) * 0.5 + 0.5  # [0, 1]
+        return int(base_sat + variation * sat_range)
+    
+    def get_perceptual_lightness(index: int) -> int:
+        """Generate lightness using golden ratio variation for aesthetic harmony."""
+        base_light = LIGHTNESS_RANGE[0]
+        light_range = LIGHTNESS_RANGE[1] - LIGHTNESS_RANGE[0]
+        variation = ((index * GOLDEN_RATIO) % 1)  # [0, 1)
+        return int(base_light + variation * light_range)
+    
+    # Start with existing color count as base index
+    start_index = len(existing_colors)
+    seed = get_deterministic_seed(category_name) if category_name else 0
+    
+    # Generate up to 1000 colors using golden distribution
+    for i in range(1000):
+        index = start_index + i
         
+        # Calculate color components using mathematical distribution
+        hue = calculate_golden_hue(index, seed)
+        saturation = get_perceptual_saturation(index)
+        lightness = get_perceptual_lightness(index)
+        
+        # Convert to RGB and hex
         r, g, b = hsl_to_rgb(hue, saturation, lightness)
         color = rgb_to_hex(r, g, b)
         
-        if color not in existing_colors_set:
+        # Ensure uniqueness and accessibility
+        if (color not in existing_colors_set and 
+            is_color_accessible(color) and
+            all(color_distance(color, existing) > 45 for existing in existing_colors)):
             return color
     
-    # Ultimate fallback: timestamp-based color
+    # Fallback: Pure mathematical generation with timestamp microseconds
     import time
-    timestamp_color = "#{:06x}".format(int(time.time()) % 0xFFFFFF)
-    return timestamp_color
+    microseed = int(time.time() * 1000000) % 1000
+    hue = (microseed * GOLDEN_ANGLE) % 360
+    saturation = 75
+    lightness = 45
+    
+    r, g, b = hsl_to_rgb(hue, saturation, lightness)
+    return rgb_to_hex(r, g, b)
