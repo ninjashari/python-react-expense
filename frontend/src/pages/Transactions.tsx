@@ -18,7 +18,6 @@ import {
   TextField,
   MenuItem,
   IconButton,
-  Chip,
   CircularProgress,
   Card,
   CardContent,
@@ -40,8 +39,8 @@ import SmartInlineEdit from '../components/SmartInlineEdit';
 import SmartAutocomplete from '../components/SmartAutocomplete';
 import SmartAutomation from '../components/SmartAutomation';
 import InlineTextEdit from '../components/InlineTextEdit';
-import InlineSelectEdit from '../components/InlineSelectEdit';
 import InlineDateEdit from '../components/InlineDateEdit';
+import InlineToggleEdit from '../components/InlineToggleEdit';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 
 const transactionTypes = [
@@ -498,17 +497,10 @@ const Transactions: React.FC = () => {
                   />
                 </TableCell>
                 <TableCell sx={{ minWidth: 120 }}>
-                  <InlineSelectEdit
+                  <InlineToggleEdit
                     value={transaction.type}
                     options={transactionTypeOptions}
                     onSave={(newValue) => handleInlineTypeChange(transaction.id, newValue)}
-                    getDisplayValue={(value) => (
-                      <Chip
-                        label={transactionTypeOptions.find(opt => opt.value === value)?.label || value}
-                        size="small"
-                        color={transactionTypeOptions.find(opt => opt.value === value)?.color || 'default'}
-                      />
-                    )}
                     isSaving={savingTransactions.has(transaction.id)}
                   />
                 </TableCell>

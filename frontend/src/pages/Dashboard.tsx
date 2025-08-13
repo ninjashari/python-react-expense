@@ -20,10 +20,10 @@ const Dashboard: React.FC = () => {
     queryFn: accountsApi.getAll,
   });
 
-  // Get all transactions for accurate totals
-  const { data: allTransactionData, isLoading: allTransactionsLoading } = useQuery({
-    queryKey: ['transactions', 'all'],
-    queryFn: () => transactionsApi.getAll({ size: 1000 }), // Get a large number for totals
+  // Get transaction summary from backend
+  const { data: summary, isLoading: summaryLoading } = useQuery({
+    queryKey: ['transactions', 'summary'],
+    queryFn: () => transactionsApi.getSummary(),
   });
 
   // Get recent transactions for display
@@ -31,34 +31,6 @@ const Dashboard: React.FC = () => {
     queryKey: ['transactions', 'recent'],
     queryFn: () => transactionsApi.getAll({ size: 10 }), // Just for recent transactions display
   });
-
-  // Calculate summary from ALL transactions
-  const calculateSummary = () => {
-    const allTransactions = allTransactionData?.items;
-    if (!allTransactions || allTransactions.length === 0) return null;
-    
-    const total_income = allTransactions
-      .filter((t: Transaction) => t.type === 'income')
-      .reduce((sum: number, t: Transaction) => {
-        const amount = parseFloat(String(t.amount || '0'));
-        return sum + (isNaN(amount) ? 0 : amount);
-      }, 0);
-    
-    const total_expenses = allTransactions
-      .filter((t: Transaction) => t.type === 'expense')
-      .reduce((sum: number, t: Transaction) => {
-        const amount = parseFloat(String(t.amount || '0'));
-        return sum + (isNaN(amount) ? 0 : amount);
-      }, 0);
-    
-    return { 
-      total_income,
-      total_expenses,
-      net_income: total_income - total_expenses 
-    };
-  };
-  const summary = calculateSummary();
-  const summaryLoading = allTransactionsLoading;
 
   // Calculate total net worth (assets - debts)
   const totalBalance = accounts?.reduce((sum, account) => {
@@ -121,7 +93,7 @@ const Dashboard: React.FC = () => {
                 Total Expenses
               </Typography>
               <Typography variant="h5" component="div" color="error.main">
-                {formatCurrency(summary?.total_expenses || 0)}
+                {formatCurrency(summary?.total_expense || 0)}
               </Typography>
             </CardContent>
           </Card>
@@ -136,9 +108,9 @@ const Dashboard: React.FC = () => {
               <Typography
                 variant="h5"
                 component="div"
-                color={summary?.net_income && summary.net_income >= 0 ? 'success.main' : 'error.main'}
+                color={summary?.net_amount && summary.net_amount >= 0 ? 'success.main' : 'error.main'}
               >
-                {formatCurrency(summary?.net_income || 0)}
+                {formatCurrency(summary?.net_amount || 0)}
               </Typography>
             </CardContent>
           </Card>
