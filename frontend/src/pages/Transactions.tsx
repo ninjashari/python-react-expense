@@ -33,7 +33,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
 import { Transaction, CreateTransactionDto, PaginatedResponse } from '../types';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency } from '../utils/formatters';
 import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import SmartInlineEdit from '../components/SmartInlineEdit';
@@ -41,6 +41,7 @@ import SmartAutocomplete from '../components/SmartAutocomplete';
 import SmartAutomation from '../components/SmartAutomation';
 import InlineTextEdit from '../components/InlineTextEdit';
 import InlineSelectEdit from '../components/InlineSelectEdit';
+import InlineDateEdit from '../components/InlineDateEdit';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 
 const transactionTypes = [
@@ -173,20 +174,16 @@ const Transactions: React.FC = () => {
   });
 
   // Inline editing functions
-  const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id' | 'description' | 'type', value: string | null) => {
-    console.log('handleInlineUpdate called with:', { transactionId, field, value });
+  const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id' | 'description' | 'type' | 'date', value: string | null) => {
     setSavingTransactions(prev => new Set(prev).add(transactionId));
     
     try {
       const updateData = { [field]: value || undefined };
-      console.log('Sending update data:', updateData);
       await updateMutation.mutateAsync({
         id: transactionId,
         data: updateData
       });
-      console.log('Update completed successfully');
     } catch (error) {
-      console.error('handleInlineUpdate error:', error);
       // Error handling is already done by the mutation hook
     } finally {
       setSavingTransactions(prev => {
@@ -206,12 +203,15 @@ const Transactions: React.FC = () => {
   };
 
   const handleInlineDescriptionChange = async (transactionId: string, description: string) => {
-    console.log('handleInlineDescriptionChange called with:', { transactionId, description });
     await handleInlineUpdate(transactionId, 'description', description);
   };
 
   const handleInlineTypeChange = async (transactionId: string, type: string) => {
     await handleInlineUpdate(transactionId, 'type', type);
+  };
+
+  const handleInlineDateChange = async (transactionId: string, date: string) => {
+    await handleInlineUpdate(transactionId, 'date', date);
   };
 
   const handleOpenDialog = (transaction?: Transaction) => {
@@ -445,7 +445,13 @@ const Transactions: React.FC = () => {
           <TableBody>
             {transactionData?.items?.map((transaction) => (
               <TableRow key={transaction.id}>
-                <TableCell>{formatDate(transaction.date)}</TableCell>
+                <TableCell sx={{ minWidth: 120 }}>
+                  <InlineDateEdit
+                    value={transaction.date}
+                    onSave={(newValue) => handleInlineDateChange(transaction.id, newValue)}
+                    isSaving={savingTransactions.has(transaction.id)}
+                  />
+                </TableCell>
                 <TableCell sx={{ minWidth: 200 }}>
                   <InlineTextEdit
                     value={transaction.description || ''}

@@ -9,24 +9,18 @@ import {
 } from '@mui/material';
 import { Edit, Check, Close } from '@mui/icons-material';
 
-interface InlineTextEditProps {
-  value: string;
+interface InlineDateEditProps {
+  value: string; // Date in YYYY-MM-DD format
   onSave: (newValue: string) => Promise<void>;
-  placeholder?: string;
-  emptyDisplay?: string;
   isSaving?: boolean;
-  multiline?: boolean;
-  maxLength?: number;
+  displayFormat?: (date: string) => string;
 }
 
-const InlineTextEdit: React.FC<InlineTextEditProps> = ({
+const InlineDateEdit: React.FC<InlineDateEditProps> = ({
   value,
   onSave,
-  placeholder = "Enter text...",
-  emptyDisplay = "-",
   isSaving = false,
-  multiline = false,
-  maxLength,
+  displayFormat,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [tempValue, setTempValue] = useState(value);
@@ -36,10 +30,6 @@ const InlineTextEdit: React.FC<InlineTextEditProps> = ({
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
-      // Only call select if it exists (not available on multiline inputs)
-      if (inputRef.current.select && typeof inputRef.current.select === 'function') {
-        inputRef.current.select();
-      }
     }
   }, [isEditing]);
 
@@ -53,14 +43,12 @@ const InlineTextEdit: React.FC<InlineTextEditProps> = ({
   };
 
   const handleSave = async () => {
-    const trimmedValue = tempValue.trim();
-    if (trimmedValue !== value) {
+    if (tempValue !== value) {
       try {
-        await onSave(trimmedValue);
+        await onSave(tempValue);
       } catch (error) {
-        console.error('Failed to save:', error);
+        console.error('Failed to save date:', error);
         setTempValue(value); // Reset to original value on error
-        // Don't exit editing mode on error so user can try again
         return;
       }
     }
@@ -73,11 +61,28 @@ const InlineTextEdit: React.FC<InlineTextEditProps> = ({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === 'Enter' && !multiline) {
+    if (event.key === 'Enter') {
       event.preventDefault();
       handleSave();
     } else if (event.key === 'Escape') {
       handleCancel();
+    }
+  };
+
+  const formatDisplayDate = (dateStr: string) => {
+    if (displayFormat) {
+      return displayFormat(dateStr);
+    }
+    // Default format: convert YYYY-MM-DD to a more readable format
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch {
+      return dateStr;
     }
   };
 
@@ -86,16 +91,13 @@ const InlineTextEdit: React.FC<InlineTextEditProps> = ({
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 200 }}>
         <TextField
           ref={inputRef}
+          type="date"
           value={tempValue}
           onChange={(e) => setTempValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
           size="small"
-          multiline={multiline}
-          maxRows={multiline ? 3 : 1}
           fullWidth
           disabled={isSaving}
-          inputProps={{ maxLength }}
           sx={{
             '& .MuiInputBase-input': {
               fontSize: '0.875rem',
@@ -156,12 +158,11 @@ const InlineTextEdit: React.FC<InlineTextEditProps> = ({
         variant="body2"
         sx={{
           flex: 1,
-          color: value ? 'text.primary' : 'text.secondary',
-          fontStyle: value ? 'normal' : 'italic',
+          color: 'text.primary',
           wordBreak: 'break-word',
         }}
       >
-        {value || emptyDisplay}
+        {formatDisplayDate(value)}
       </Typography>
       
       {isHovered && (
@@ -173,4 +174,4 @@ const InlineTextEdit: React.FC<InlineTextEditProps> = ({
   );
 };
 
-export default InlineTextEdit;
+export default InlineDateEdit;
