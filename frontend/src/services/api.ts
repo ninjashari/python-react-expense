@@ -184,6 +184,20 @@ export const importApi = {
     api.post('/import/pdf-llm', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     }).then(res => res.data),
+
+  // XLS LLM Import APIs
+  getXlsLlmStatus: (): Promise<any> => 
+    api.get('/import/xls-llm/status').then(res => res.data),
+  
+  previewXlsLlm: (formData: FormData): Promise<any> => 
+    api.post('/import/xls-llm/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(res => res.data),
+  
+  importXlsLlm: (formData: FormData): Promise<any> => 
+    api.post('/import/xls-llm', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(res => res.data),
   
   getColumnMapping: (formData: FormData, fileType: string): Promise<any> => 
     api.post(`/import/column-mapping/${fileType}`, formData, {

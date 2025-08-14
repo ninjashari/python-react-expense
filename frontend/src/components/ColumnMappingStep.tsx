@@ -26,6 +26,8 @@ interface ColumnMappings {
   payee?: string;
   category?: string;
   transactionType?: string;
+  withdrawal?: string;  // For ICICI style debit/withdrawal column
+  deposit?: string;     // For ICICI style credit/deposit column
 }
 
 interface ColumnMappingStepProps {
@@ -59,7 +61,8 @@ const ColumnMappingStep: React.FC<ColumnMappingStepProps> = ({
   };
 
   const isRequiredFieldMapped = () => {
-    return columnMappings.date && columnMappings.amount && columnMappings.description;
+    const hasAmountField = columnMappings.amount || (columnMappings.withdrawal && columnMappings.deposit);
+    return columnMappings.date && hasAmountField && columnMappings.description;
   };
 
   const getColumnPreview = (columnName: string) => {
@@ -75,7 +78,7 @@ const ColumnMappingStep: React.FC<ColumnMappingStepProps> = ({
       
       {!isRequiredFieldMapped() && (
         <Alert severity="warning" sx={{ mb: 3 }}>
-          Please map all required fields (Date, Amount, Description) and select an account to continue.
+          Please map all required fields (Date, Amount OR Withdrawal+Deposit, Description) and select an account to continue.
         </Alert>
       )}
 
@@ -158,12 +161,13 @@ const ColumnMappingStep: React.FC<ColumnMappingStepProps> = ({
         </Grid>
 
         <Grid item xs={12} md={4}>
-          <FormControl fullWidth required>
+          <FormControl fullWidth required={!(columnMappings.withdrawal && columnMappings.deposit)}>
             <InputLabel>Amount Column</InputLabel>
             <Select
               value={columnMappings.amount}
               label="Amount Column"
               onChange={(e) => handleMappingChange('amount', e.target.value)}
+              disabled={!!(columnMappings.withdrawal && columnMappings.deposit)}
             >
               <MenuItem value="">None</MenuItem>
               {columns.map((column) => (
@@ -183,6 +187,90 @@ const ColumnMappingStep: React.FC<ColumnMappingStepProps> = ({
                   key={index}
                   label={value?.toString() || 'Empty'}
                   size="small"
+                  sx={{ m: 0.5 }}
+                />
+              ))}
+            </Box>
+          )}
+          {(columnMappings.withdrawal || columnMappings.deposit) && (
+            <Box sx={{ mt: 1 }}>
+              <Alert severity="info" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                Using separate withdrawal/deposit columns instead
+              </Alert>
+            </Box>
+          )}
+        </Grid>
+
+        {/* ICICI Bank Style: Separate Withdrawal and Deposit Columns */}
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
+            OR use separate debit/credit columns (for ICICI bank statements)
+          </Typography>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <FormControl fullWidth>
+            <InputLabel>Withdrawal/Debit Column</InputLabel>
+            <Select
+              value={columnMappings.withdrawal || ''}
+              label="Withdrawal/Debit Column"
+              onChange={(e) => handleMappingChange('withdrawal', e.target.value)}
+            >
+              <MenuItem value="">None</MenuItem>
+              {columns.map((column) => (
+                <MenuItem key={column} value={column}>
+                  {column}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {columnMappings.withdrawal && (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Sample values:
+              </Typography>
+              {getColumnPreview(columnMappings.withdrawal).map((value, index) => (
+                <Chip
+                  key={index}
+                  label={value?.toString() || 'Empty'}
+                  size="small"
+                  color="error"
+                  variant="outlined"
+                  sx={{ m: 0.5 }}
+                />
+              ))}
+            </Box>
+          )}
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <FormControl fullWidth>
+            <InputLabel>Deposit/Credit Column</InputLabel>
+            <Select
+              value={columnMappings.deposit || ''}
+              label="Deposit/Credit Column"
+              onChange={(e) => handleMappingChange('deposit', e.target.value)}
+            >
+              <MenuItem value="">None</MenuItem>
+              {columns.map((column) => (
+                <MenuItem key={column} value={column}>
+                  {column}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {columnMappings.deposit && (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Sample values:
+              </Typography>
+              {getColumnPreview(columnMappings.deposit).map((value, index) => (
+                <Chip
+                  key={index}
+                  label={value?.toString() || 'Empty'}
+                  size="small"
+                  color="success"
+                  variant="outlined"
                   sx={{ m: 0.5 }}
                 />
               ))}

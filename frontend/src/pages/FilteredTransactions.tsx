@@ -34,6 +34,7 @@ import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import MultiSelectDropdown, { Option } from '../components/MultiSelectDropdown';
 import { useUpdateWithToast } from '../hooks/useApiWithToast';
 import SmartInlineEdit from '../components/SmartInlineEdit';
+import { usePersistentFilters } from '../hooks/usePersistentFilters';
 
 interface FilteredTransactionFilters {
   startDate?: string;
@@ -64,13 +65,18 @@ const pageSizeOptions = [
 const FilteredTransactions: React.FC = () => {
   usePageTitle(getPageTitle('filtered-transactions', 'Transaction Analysis'));
   
-  const [filters, setFilters] = useState<FilteredTransactionFilters>({
+  const defaultFilters: FilteredTransactionFilters = {
     accountIds: [],
     categoryIds: [],
     payeeIds: [],
     page: 1,
     size: 50
-  });
+  };
+
+  const { filters, setFilters, clearSavedFilters } = usePersistentFilters<FilteredTransactionFilters>(
+    'filtered-transactions-filters',
+    defaultFilters
+  );
   
   const [savingTransactions, setSavingTransactions] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
@@ -189,13 +195,7 @@ const FilteredTransactions: React.FC = () => {
   };
 
   const clearFilters = () => {
-    setFilters({
-      accountIds: [],
-      categoryIds: [],
-      payeeIds: [],
-      page: 1,
-      size: 50
-    });
+    clearSavedFilters();
   };
 
   const getTransactionTypeColor = (type: string) => {

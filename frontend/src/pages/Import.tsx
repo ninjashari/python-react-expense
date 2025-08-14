@@ -35,8 +35,8 @@ import TransactionReviewStep from '../components/TransactionReviewStep';
 import ImportPreview from '../components/ImportPreview';
 import ImportResults from '../components/ImportResults';
 
-const getSteps = (isPdfLlm: boolean) => 
-  isPdfLlm 
+const getSteps = (isLlm: boolean) => 
+  isLlm 
     ? ['Upload File', 'Configure', 'Process & Review', 'Import']
     : ['Upload File', 'Configure', 'Preview', 'Import'];
 
@@ -52,6 +52,8 @@ interface ImportData {
     payee?: string;
     category?: string;
     transactionType?: string;
+    withdrawal?: string;  // For ICICI style debit/withdrawal column
+    deposit?: string;     // For ICICI style credit/deposit column
   };
   account: Account | null;
   defaultTransactionType: string;
@@ -153,6 +155,8 @@ const Import: React.FC = () => {
             payee: mappingData.suggested_mappings.payee || '',
             category: mappingData.suggested_mappings.category || '',
             transactionType: mappingData.suggested_mappings.transaction_type || '',
+            withdrawal: mappingData.suggested_mappings.withdrawal || '',
+            deposit: mappingData.suggested_mappings.deposit || '',
           },
         }));
         
@@ -293,7 +297,7 @@ const Import: React.FC = () => {
       let results: any;
 
       if (importData.isPdfLlm && importData.llmResults) {
-        // Handle PDF LLM final import with reviewed transactions (use batch import)
+        // Handle LLM final import with reviewed transactions (use batch import)
         console.log('Importing transactions:', importData.llmResults.transactions.length, 'transactions');
         console.log('Sample transaction:', importData.llmResults.transactions[0]);
         console.log('Account ID:', importData.account.id);
@@ -320,6 +324,12 @@ const Import: React.FC = () => {
         }
         if (importData.columnMappings.transactionType) {
           formData.append('transaction_type_column', importData.columnMappings.transactionType);
+        }
+        if (importData.columnMappings.withdrawal) {
+          formData.append('withdrawal_column', importData.columnMappings.withdrawal);
+        }
+        if (importData.columnMappings.deposit) {
+          formData.append('deposit_column', importData.columnMappings.deposit);
         }
 
         if (importData.fileType === 'csv') {
@@ -470,16 +480,18 @@ const Import: React.FC = () => {
         if (importData.isPdfLlm) {
           return importData.account !== null && importData.pdfPreview?.has_financial_data;
         } else {
+          const hasAmountField = importData.columnMappings.amount || 
+            (importData.columnMappings.withdrawal && importData.columnMappings.deposit);
           return (
             importData.columnMappings.date &&
-            importData.columnMappings.amount &&
+            hasAmountField &&
             importData.columnMappings.description &&
             importData.account
           );
         }
       case 2:
         if (importData.isPdfLlm) {
-          // For PDF LLM, can proceed if we have LLM results and not currently processing
+          // For PDF LLM import, can proceed if we have LLM results and not currently processing
           return importData.llmResults && !isLLMProcessing && (importData.llmResults.transactions?.length || 0) > 0;
         } else {
           return true; // Regular import can always proceed to import step

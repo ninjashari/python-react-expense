@@ -131,3 +131,39 @@ export interface PDFLLMImportResponse {
   message?: string;
   error?: string;
 }
+
+// XLS LLM Import Types
+export interface XLSLLMSystemStatus {
+  xls_processor: string;
+  ollama_service: string;
+  available_models: string[];
+  recommended_models: string[];
+  supported_formats: string[];
+}
+
+export interface XLSLLMPreviewResponse {
+  extraction_method: string;
+  text_length: number;
+  has_financial_data: boolean;
+  estimated_processing_time: number;
+  preview_text: string;
+  file_info: any;
+  sheet_count: number;
+  error?: string;
+}
+
+export interface XLSLLMImportResponse {
+  status: string;
+  extraction_method: string;
+  extracted_text: string;
+  transactions: LLMTransactionData[];
+  processing_notes: string[];
+  file_info: any;
+  transaction_count?: number;
+  transactions_created?: number;
+  import_errors?: string[];
+  ai_predictions_made?: number;
+  training_stats?: any;
+  message?: string;
+  error?: string;
+}

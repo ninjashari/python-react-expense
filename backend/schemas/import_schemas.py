@@ -56,6 +56,46 @@ class PDFLLMSystemStatusResponse(BaseModel):
     recommended_models: List[str] = Field(default_factory=list, description="Recommended LLM models")
 
 
+class XLSLLMImportRequest(BaseModel):
+    """Request schema for XLS LLM import"""
+    account_id: uuid.UUID = Field(..., description="Target account ID for imported transactions")
+    llm_model: Optional[str] = Field("llama3.1", description="LLM model to use for extraction")
+    preview_only: bool = Field(False, description="Only preview extraction, don't import")
+
+
+class XLSLLMPreviewResponse(BaseModel):
+    """Response schema for XLS LLM preview"""
+    extraction_method: str = Field(..., description="Text extraction method used")
+    text_length: int = Field(..., description="Length of extracted text")
+    has_financial_data: bool = Field(..., description="Whether financial data was detected")
+    estimated_processing_time: int = Field(..., description="Estimated processing time in seconds")
+    preview_text: str = Field(..., description="Preview of extracted text")
+    file_info: Dict[str, Any] = Field(default_factory=dict, description="Excel file information")
+    sheet_count: int = Field(default=0, description="Number of sheets in the Excel file")
+    error: Optional[str] = Field(None, description="Error message if preview failed")
+
+
+class XLSLLMImportResponse(BaseModel):
+    """Response schema for XLS LLM import"""
+    status: str = Field(..., description="Processing status: success, warning, or error")
+    extraction_method: str = Field(..., description="Text extraction method used")
+    extracted_text: str = Field(..., description="Full extracted text")
+    transactions: List[LLMTransactionData] = Field(default_factory=list, description="Extracted transactions")
+    processing_notes: List[str] = Field(default_factory=list, description="Processing step notes")
+    file_info: Dict[str, Any] = Field(default_factory=dict, description="Excel file information")
+    transaction_count: Optional[int] = Field(None, description="Number of transactions extracted")
+    error: Optional[str] = Field(None, description="Error message if processing failed")
+
+
+class XLSLLMSystemStatusResponse(BaseModel):
+    """Response schema for XLS LLM system status check"""
+    xls_processor: str = Field(..., description="XLS processor status")
+    ollama_service: str = Field(..., description="Ollama service connection status")
+    available_models: List[str] = Field(default_factory=list, description="Available LLM models")
+    recommended_models: List[str] = Field(default_factory=list, description="Recommended LLM models")
+    supported_formats: List[str] = Field(default_factory=list, description="Supported Excel file formats")
+
+
 class ImportResultsResponse(BaseModel):
     """Generic response schema for import operations"""
     message: str = Field(..., description="Success/error message")

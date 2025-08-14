@@ -43,6 +43,7 @@ import InlineTextEdit from '../components/InlineTextEdit';
 import InlineDateEdit from '../components/InlineDateEdit';
 import InlineToggleEdit from '../components/InlineToggleEdit';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
+import { usePersistentFilters } from '../hooks/usePersistentFilters';
 
 const transactionTypes = [
   { value: 'income', label: 'Income' },
@@ -77,10 +78,15 @@ const Transactions: React.FC = () => {
   const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  const [filters, setFilters] = useState<TransactionFilters>({
+  const defaultFilters: TransactionFilters = {
     page: 1,
     size: 50
-  });
+  };
+  
+  const { filters, setFilters, clearSavedFilters } = usePersistentFilters<TransactionFilters>(
+    'transactions-filters',
+    defaultFilters
+  );
   const [showFilters, setShowFilters] = useState(false);
   const [savingTransactions, setSavingTransactions] = useState<Set<string>>(new Set());
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
@@ -357,10 +363,7 @@ const Transactions: React.FC = () => {
   };
 
   const clearFilters = () => {
-    setFilters({
-      page: 1,
-      size: 50
-    });
+    clearSavedFilters();
   };
 
   const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId;
