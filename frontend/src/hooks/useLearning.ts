@@ -31,8 +31,8 @@ export const useEnhancedSuggestions = (
   amount?: number,
   accountId?: string,
   accountType?: string,
-  existingPayees: Array<{ id: string; name: string }> = [],
-  existingCategories: Array<{ id: string; name: string; color: string }> = []
+  existingPayees: Array<{ id: string; name: string; color?: string }> = [],
+  existingCategories: Array<{ id: string; name: string; color?: string }> = []
 ) => {
   return useQuery({
     queryKey: ['enhanced-suggestions', description, amount, accountId, existingPayees.length, existingCategories.length],

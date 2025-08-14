@@ -399,7 +399,7 @@ def is_color_accessible(color: str, background: str = '#FFFFFF') -> bool:
     contrast_ratio = calculate_wcag_contrast_ratio(color, background)
     return contrast_ratio >= 4.5  # WCAG AA standard for normal text
 
-def generate_unique_color(db: Session, category_name: Optional[str] = None, user_id: Optional[str] = None) -> str:
+def generate_unique_color(db: Session, entity_name: Optional[str] = None, user_id: Optional[str] = None, entity_type: str = "categories") -> str:
     """
     Golden Ratio Color Distribution System - Mathematically elegant unique color generation.
     
@@ -414,16 +414,25 @@ def generate_unique_color(db: Session, category_name: Optional[str] = None, user
     
     Args:
         db: Database session
-        category_name: Category name (used for deterministic seed, not semantic matching)
+        entity_name: Entity name (used for deterministic seed, not semantic matching)
         user_id: User ID to scope uniqueness
+        entity_type: Type of entity ("categories" or "payees")
         
     Returns:
         A unique, mathematically distributed hex color string
     """
+    # Import models dynamically based on entity type
+    if entity_type == "categories":
+        from models.categories import Category as Model
+    elif entity_type == "payees":
+        from models.payees import Payee as Model
+    else:
+        raise ValueError(f"Unsupported entity_type: {entity_type}")
+    
     # Get existing colors to determine sequence position
-    query = db.query(Category.color)
+    query = db.query(Model.color)
     if user_id:
-        query = query.filter(Category.user_id == user_id)
+        query = query.filter(Model.user_id == user_id)
     
     existing_colors = [color[0] for color in query.all() if color[0]]
     existing_colors_set = set(existing_colors)
@@ -463,7 +472,7 @@ def generate_unique_color(db: Session, category_name: Optional[str] = None, user
     
     # Start with existing color count as base index
     start_index = len(existing_colors)
-    seed = get_deterministic_seed(category_name) if category_name else 0
+    seed = get_deterministic_seed(entity_name) if entity_name else 0
     
     # Generate up to 1000 colors using golden distribution
     for i in range(1000):

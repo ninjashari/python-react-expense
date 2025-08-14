@@ -14,6 +14,7 @@ export interface Account {
 export interface Payee {
   id: string;
   name: string;
+  color?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -56,6 +57,7 @@ export interface CreateAccountDto {
 
 export interface CreatePayeeDto {
   name: string;
+  color?: string;
 }
 
 export interface CreateCategoryDto {

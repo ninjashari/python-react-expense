@@ -67,6 +67,14 @@ const customStyles = {
   multiValueRemove: () => ({
     display: 'none',
   }),
+  menu: (provided: any) => ({
+    ...provided,
+    zIndex: 9999,
+  }),
+  menuPortal: (provided: any) => ({
+    ...provided,
+    zIndex: 9999,
+  }),
   option: (provided: any, state: any) => ({
     ...provided,
     backgroundColor: state.isSelected
@@ -113,6 +121,8 @@ const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         components={{
           MultiValueContainer,
         }}
+        menuPortalTarget={document.body}
+        menuPosition="fixed"
         className={error ? 'react-select-error' : ''}
       />
       

@@ -30,7 +30,7 @@ def create_category(
         slug = create_slug(category.name)
         
         # Generate color if not provided
-        color = category.color or generate_unique_color(db, category.name, str(current_user.id))
+        color = category.color or generate_unique_color(db, category.name, str(current_user.id), "categories")
         
         db_category = Category(
             name=category.name,
@@ -60,6 +60,20 @@ def get_categories(
     if search:
         query = query.filter(Category.name.ilike(f"%{search}%"))
     categories = query.offset(skip).limit(limit).all()
+    
+    # Auto-assign colors to categories that don't have them
+    needs_update = False
+    for category in categories:
+        if not category.color:
+            try:
+                category.color = generate_unique_color(db, category.name, str(current_user.id), "categories")
+                needs_update = True
+            except Exception as e:
+                print(f"Failed to generate color for category {category.name}: {e}")
+    
+    if needs_update:
+        db.commit()
+    
     return categories
 
 @router.get("/{category_id}", response_model=CategoryResponse)
@@ -173,7 +187,7 @@ def reassign_category_colors(
         for category in sorted_categories:
             try:
                 # Generate unique color using golden ratio distribution
-                new_color = generate_unique_color(db, category.name, str(current_user.id))
+                new_color = generate_unique_color(db, category.name, str(current_user.id), "categories")
                 category.color = new_color
                 
                 updated_categories.append({

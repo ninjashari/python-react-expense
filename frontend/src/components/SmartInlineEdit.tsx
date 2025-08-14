@@ -72,8 +72,8 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
     (isEditing || (!currentValue && transactionDescription.length >= 5)) ? transactionAmount : undefined,
     undefined, // accountId not needed here
     (isEditing || (!currentValue && transactionDescription.length >= 5)) ? accountType : undefined,
-    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? (fieldType === 'payee' ? allOptions as Array<{ id: string; name: string }> : []) : [],
-    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? (fieldType === 'category' ? allOptions as Array<{ id: string; name: string; color: string }> : []) : []
+    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? (fieldType === 'payee' ? allOptions as Array<{ id: string; name: string; color?: string }> : []) : [],
+    (isEditing || (!currentValue && transactionDescription.length >= 5)) ? (fieldType === 'category' ? allOptions as Array<{ id: string; name: string; color?: string }> : []) : []
   );
   
   // Get current suggestions for this field type
@@ -192,7 +192,7 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
       );
     }
     
-    if (fieldType === 'category' && currentValue) {
+    if ((fieldType === 'category' || fieldType === 'payee') && currentValue) {
       return (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {currentValue.color && (
@@ -202,6 +202,8 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
                 height: 12,
                 borderRadius: '50%',
                 backgroundColor: currentValue.color,
+                border: '1px solid rgba(0,0,0,0.1)',
+                flexShrink: 0,
               }}
             />
           )}

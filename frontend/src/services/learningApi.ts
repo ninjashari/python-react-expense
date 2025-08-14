@@ -349,8 +349,8 @@ class LearningApiService {
    */
   async getEnhancedSuggestions(
     request: SmartSuggestionRequest,
-    existingPayees: Array<{ id: string; name: string }> = [],
-    existingCategories: Array<{ id: string; name: string; color: string }> = []
+    existingPayees: Array<{ id: string; name: string; color?: string }> = [],
+    existingCategories: Array<{ id: string; name: string; color?: string }> = []
   ): Promise<{
     payee_suggestions: Array<SuggestionItem & { isExisting?: boolean }>;
     category_suggestions: Array<SuggestionItem & { isExisting?: boolean }>;

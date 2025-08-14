@@ -110,6 +110,7 @@ export const payeesApi = {
   update: (id: string, data: Partial<CreatePayeeDto>): Promise<Payee> => 
     api.put(`/payees/${id}`, data).then(res => res.data),
   delete: (id: string): Promise<void> => api.delete(`/payees/${id}`).then(res => res.data),
+  reassignColors: (): Promise<any> => api.post('/payees/reassign-colors').then(res => res.data),
 };
 
 // Categories API
