@@ -27,6 +27,8 @@ import {
   InputLabel,
   Select,
   Checkbox,
+  Autocomplete,
+  Chip,
 } from '@mui/material';
 import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -69,6 +71,8 @@ interface TransactionFilters {
   startDate?: string;
   endDate?: string;
   accountId?: string;
+  categoryIds?: string[];
+  payeeIds?: string[];
   page: number;
   size: number;
 }
@@ -93,6 +97,10 @@ const Transactions: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
+  const [bulkCategoryDialogOpen, setBulkCategoryDialogOpen] = useState(false);
+  const [selectedCategoryForBulk, setSelectedCategoryForBulk] = useState<string>('');
+  const [bulkPayeeDialogOpen, setBulkPayeeDialogOpen] = useState(false);
+  const [selectedPayeeForBulk, setSelectedPayeeForBulk] = useState<string>('');
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -115,6 +123,8 @@ const Transactions: React.FC = () => {
       start_date: filters.startDate,
       end_date: filters.endDate,
       account_ids: filters.accountId,
+      category_ids: filters.categoryIds?.join(','),
+      payee_ids: filters.payeeIds?.join(','),
     }),
   });
 
@@ -217,6 +227,32 @@ const Transactions: React.FC = () => {
 
   const handleInlineTypeChange = async (transactionId: string, type: string) => {
     await handleInlineUpdate(transactionId, 'type', type);
+  };
+
+  // Create new payee function
+  const handleCreatePayee = async (name: string): Promise<{ id: string; name: string; color?: string }> => {
+    try {
+      const newPayee = await payeesApi.create({ name });
+      // Invalidate payees query to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['payees'] });
+      return newPayee;
+    } catch (error) {
+      console.error('Failed to create payee:', error);
+      throw error;
+    }
+  };
+
+  // Create new category function
+  const handleCreateCategory = async (name: string): Promise<{ id: string; name: string; color?: string }> => {
+    try {
+      const newCategory = await categoriesApi.create({ name });
+      // Invalidate categories query to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      return newCategory;
+    } catch (error) {
+      console.error('Failed to create category:', error);
+      throw error;
+    }
   };
 
   const handleInlineDateChange = async (transactionId: string, date: string) => {
@@ -342,6 +378,66 @@ const Transactions: React.FC = () => {
     setBatchDeleteDialogOpen(false);
   };
 
+  // Bulk category edit functions
+  const handleBulkCategoryEdit = () => {
+    setBulkCategoryDialogOpen(true);
+  };
+
+  const handleConfirmBulkCategoryUpdate = async () => {
+    if (!selectedCategoryForBulk) return;
+    
+    const selectedIds = Array.from(selectedTransactions);
+    try {
+      // Update category for all selected transactions
+      await Promise.all(selectedIds.map(id => 
+        updateMutation.mutateAsync({
+          id: id,
+          data: { category_id: selectedCategoryForBulk === 'none' ? undefined : selectedCategoryForBulk }
+        })
+      ));
+      setBulkCategoryDialogOpen(false);
+      setSelectedTransactions(new Set());
+      setSelectedCategoryForBulk('');
+    } catch (error) {
+      console.error('Bulk category update failed:', error);
+    }
+  };
+
+  const handleCancelBulkCategoryUpdate = () => {
+    setBulkCategoryDialogOpen(false);
+    setSelectedCategoryForBulk('');
+  };
+
+  // Bulk payee edit functions
+  const handleBulkPayeeEdit = () => {
+    setBulkPayeeDialogOpen(true);
+  };
+
+  const handleConfirmBulkPayeeUpdate = async () => {
+    if (!selectedPayeeForBulk) return;
+    
+    const selectedIds = Array.from(selectedTransactions);
+    try {
+      // Update payee for all selected transactions
+      await Promise.all(selectedIds.map(id => 
+        updateMutation.mutateAsync({
+          id: id,
+          data: { payee_id: selectedPayeeForBulk === 'none' ? undefined : selectedPayeeForBulk }
+        })
+      ));
+      setBulkPayeeDialogOpen(false);
+      setSelectedTransactions(new Set());
+      setSelectedPayeeForBulk('');
+    } catch (error) {
+      console.error('Bulk payee update failed:', error);
+    }
+  };
+
+  const handleCancelBulkPayeeUpdate = () => {
+    setBulkPayeeDialogOpen(false);
+    setSelectedPayeeForBulk('');
+  };
+
   const handleFilterChange = (field: keyof TransactionFilters, value: any) => {
     setFilters(prev => ({
       ...prev,
@@ -366,7 +462,7 @@ const Transactions: React.FC = () => {
     clearSavedFilters();
   };
 
-  const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId;
+  const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId || (filters.categoryIds && filters.categoryIds.length > 0) || (filters.payeeIds && filters.payeeIds.length > 0);
   
   // Calculate uncategorized transactions count
   const uncategorizedCount = transactionData?.items?.filter(
@@ -428,15 +524,35 @@ const Transactions: React.FC = () => {
             Add Transaction
           </Button>
           {selectedTransactions.size > 0 && (
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<Delete />}
-              onClick={handleBatchDelete}
-              sx={{ ml: 2 }}
-            >
-              Delete Selected ({selectedTransactions.size})
-            </Button>
+            <>
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={<Edit />}
+                onClick={handleBulkCategoryEdit}
+                sx={{ ml: 2 }}
+              >
+                Change Category ({selectedTransactions.size})
+              </Button>
+              <Button
+                variant="outlined"
+                color="secondary"
+                startIcon={<Edit />}
+                onClick={handleBulkPayeeEdit}
+                sx={{ ml: 2 }}
+              >
+                Change Payee ({selectedTransactions.size})
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<Delete />}
+                onClick={handleBatchDelete}
+                sx={{ ml: 2 }}
+              >
+                Delete Selected ({selectedTransactions.size})
+              </Button>
+            </>
           )}
         </Box>
       </Box>
@@ -446,7 +562,7 @@ const Transactions: React.FC = () => {
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={2.4}>
                 <TextField
                   label="Start Date"
                   type="date"
@@ -457,7 +573,7 @@ const Transactions: React.FC = () => {
                   InputLabelProps={{ shrink: true }}
                 />
               </Grid>
-              <Grid item xs={12} sm={3}>
+              <Grid item xs={12} sm={2.4}>
                 <TextField
                   label="End Date"
                   type="date"
@@ -468,7 +584,7 @@ const Transactions: React.FC = () => {
                   InputLabelProps={{ shrink: true }}
                 />
               </Grid>
-              <Grid item xs={12} sm={4}>
+              <Grid item xs={12} sm={2.4}>
                 <TextField
                   select
                   label="Account"
@@ -485,15 +601,85 @@ const Transactions: React.FC = () => {
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={12} sm={2}>
+              <Grid item xs={12} sm={2.4}>
+                <Autocomplete
+                  multiple
+                  value={filters.categoryIds ? filters.categoryIds.map(id => 
+                    id === 'none' 
+                      ? { id: 'none', name: 'No Category' }
+                      : categories?.find(c => c.id === id) || { id, name: 'Unknown' }
+                  ) : []}
+                  onChange={(event, newValue) => {
+                    const newIds = newValue.map(v => v.id);
+                    handleFilterChange('categoryIds', newIds.length > 0 ? newIds : undefined);
+                  }}
+                  options={[
+                    { id: 'none', name: 'No Category' },
+                    ...(categories?.map(c => ({ id: c.id, name: c.name })) || []).sort((a, b) => a.name.localeCompare(b.name))
+                  ]}
+                  getOptionLabel={(option) => option.name}
+                  size="small"
+                  renderInput={(params) => (
+                    <TextField {...params} label="Categories" size="small" />
+                  )}
+                  renderTags={(value, getTagProps) =>
+                    value.map((option, index) => (
+                      <Chip
+                        variant="outlined"
+                        label={option.name}
+                        size="small"
+                        {...getTagProps({ index })}
+                        key={option.id}
+                      />
+                    ))
+                  }
+                  isOptionEqualToValue={(option, value) => option.id === value.id}
+                />
+              </Grid>
+              <Grid item xs={12} sm={2.4}>
+                <Autocomplete
+                  multiple
+                  value={filters.payeeIds ? filters.payeeIds.map(id => 
+                    id === 'none' 
+                      ? { id: 'none', name: 'No Payee' }
+                      : payees?.find(p => p.id === id) || { id, name: 'Unknown' }
+                  ) : []}
+                  onChange={(event, newValue) => {
+                    const newIds = newValue.map(v => v.id);
+                    handleFilterChange('payeeIds', newIds.length > 0 ? newIds : undefined);
+                  }}
+                  options={[
+                    { id: 'none', name: 'No Payee' },
+                    ...(payees?.map(p => ({ id: p.id, name: p.name })) || []).sort((a, b) => a.name.localeCompare(b.name))
+                  ]}
+                  getOptionLabel={(option) => option.name}
+                  size="small"
+                  renderInput={(params) => (
+                    <TextField {...params} label="Payees" size="small" />
+                  )}
+                  renderTags={(value, getTagProps) =>
+                    value.map((option, index) => (
+                      <Chip
+                        variant="outlined"
+                        label={option.name}
+                        size="small"
+                        {...getTagProps({ index })}
+                        key={option.id}
+                      />
+                    ))
+                  }
+                  isOptionEqualToValue={(option, value) => option.id === value.id}
+                />
+              </Grid>
+              <Grid item xs={12} sm={12} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <Button
                   onClick={clearFilters}
                   disabled={!hasActiveFilters}
                   startIcon={<Clear />}
-                  fullWidth
                   size="small"
+                  variant="outlined"
                 >
-                  Clear
+                  Clear Filters
                 </Button>
               </Grid>
             </Grid>
@@ -561,6 +747,7 @@ const Transactions: React.FC = () => {
                     onSelectionChange={async (newValue) => {
                       await handleInlinePayeeChange(transaction.id, newValue?.id || null);
                     }}
+                    onCreateNew={handleCreatePayee}
                     isSaving={savingTransactions.has(transaction.id)}
                     placeholder="Select payee..."
                     emptyDisplay="-"
@@ -578,6 +765,7 @@ const Transactions: React.FC = () => {
                     onSelectionChange={async (newValue) => {
                       await handleInlineCategoryChange(transaction.id, newValue?.id || null);
                     }}
+                    onCreateNew={handleCreateCategory}
                     isSaving={savingTransactions.has(transaction.id)}
                     placeholder="Select category..."
                     emptyDisplay="-"
@@ -825,6 +1013,8 @@ const Transactions: React.FC = () => {
                   fieldType="payee"
                   variant="outlined"
                   size="medium"
+                  allowCreate={true}
+                  onCreateNew={handleCreatePayee}
                   onSuggestionShown={trackSuggestionShown}
                   onSuggestionAccepted={trackSuggestionAccepted}
                   sx={{ mt: 2 }}
@@ -858,6 +1048,8 @@ const Transactions: React.FC = () => {
                   fieldType="category"
                   variant="outlined"
                   size="medium"
+                  allowCreate={true}
+                  onCreateNew={handleCreateCategory}
                   onSuggestionShown={trackSuggestionShown}
                   onSuggestionAccepted={trackSuggestionAccepted}
                   sx={{ mt: 2 }}
@@ -991,6 +1183,198 @@ const Transactions: React.FC = () => {
             disabled={deleteMutation.isPending}
           >
             {deleteMutation.isPending ? 'Deleting...' : `Delete ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Category Edit Dialog */}
+      <Dialog
+        open={bulkCategoryDialogOpen}
+        onClose={handleCancelBulkCategoryUpdate}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Change Category for Selected Transactions</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Update the category for {selectedTransactions.size} selected transaction{selectedTransactions.size > 1 ? 's' : ''}:
+          </Typography>
+          
+          {/* Show preview of selected transactions */}
+          {transactionData?.items && (
+            <Box sx={{ mt: 2, mb: 3, maxHeight: 200, overflow: 'auto' }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Selected Transactions:
+              </Typography>
+              {transactionData.items
+                .filter(t => selectedTransactions.has(t.id))
+                .slice(0, 5) // Show only first 5 for preview
+                .map((transaction) => (
+                  <Box 
+                    key={transaction.id} 
+                    sx={{ 
+                      p: 1, 
+                      mb: 1, 
+                      backgroundColor: 'grey.50', 
+                      borderRadius: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2">
+                        {transaction.description || 'No description'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Current: {categories?.find(c => c.id === transaction.category_id)?.name || 'No category'}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color={transaction.type === 'income' ? 'success.main' : 'error.main'}>
+                      {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                    </Typography>
+                  </Box>
+                ))}
+              {selectedTransactions.size > 5 && (
+                <Typography variant="caption" color="text.secondary">
+                  ... and {selectedTransactions.size - 5} more transactions
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          {/* Category Selection with Create Option */}
+          <SmartAutocomplete
+            value={selectedCategoryForBulk ? (selectedCategoryForBulk === 'none' ? { id: 'none', name: 'No Category' } : categories?.find(c => c.id === selectedCategoryForBulk) || null) : null}
+            onChange={(event, newValue) => setSelectedCategoryForBulk(newValue?.id || '')}
+            options={[
+              { id: 'none', name: 'No Category', type: 'existing' as const, confidence: 1, reason: 'Remove category' },
+              ...(categories?.map(c => ({
+                id: c.id,
+                name: c.name,
+                type: 'existing' as const,
+                confidence: 1,
+                reason: 'Existing category',
+                color: c.color,
+              })) || []).sort((a, b) => a.name.localeCompare(b.name))
+            ]}
+            getOptionLabel={(option) => option?.name || ''}
+            placeholder="Select or create category..."
+            label="New Category"
+            fieldType="category"
+            variant="outlined"
+            size="medium"
+            allowCreate={true}
+            onCreateNew={handleCreateCategory}
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelBulkCategoryUpdate}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmBulkCategoryUpdate} 
+            color="primary" 
+            variant="contained"
+            disabled={!selectedCategoryForBulk || updateMutation.isPending}
+          >
+            {updateMutation.isPending ? 'Updating...' : `Update ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Payee Edit Dialog */}
+      <Dialog
+        open={bulkPayeeDialogOpen}
+        onClose={handleCancelBulkPayeeUpdate}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Change Payee for Selected Transactions</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Update the payee for {selectedTransactions.size} selected transaction{selectedTransactions.size > 1 ? 's' : ''}:
+          </Typography>
+          
+          {/* Show preview of selected transactions */}
+          {transactionData?.items && (
+            <Box sx={{ mt: 2, mb: 3, maxHeight: 200, overflow: 'auto' }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Selected Transactions:
+              </Typography>
+              {transactionData.items
+                .filter(t => selectedTransactions.has(t.id))
+                .slice(0, 5) // Show only first 5 for preview
+                .map((transaction) => (
+                  <Box 
+                    key={transaction.id} 
+                    sx={{ 
+                      p: 1, 
+                      mb: 1, 
+                      backgroundColor: 'grey.50', 
+                      borderRadius: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2">
+                        {transaction.description || 'No description'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Current: {payees?.find(p => p.id === transaction.payee_id)?.name || 'No payee'}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color={transaction.type === 'income' ? 'success.main' : 'error.main'}>
+                      {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                    </Typography>
+                  </Box>
+                ))}
+              {selectedTransactions.size > 5 && (
+                <Typography variant="caption" color="text.secondary">
+                  ... and {selectedTransactions.size - 5} more transactions
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          {/* Payee Selection with Create Option */}
+          <SmartAutocomplete
+            value={selectedPayeeForBulk ? (selectedPayeeForBulk === 'none' ? { id: 'none', name: 'No Payee' } : payees?.find(p => p.id === selectedPayeeForBulk) || null) : null}
+            onChange={(event, newValue) => setSelectedPayeeForBulk(newValue?.id || '')}
+            options={[
+              { id: 'none', name: 'No Payee', type: 'existing' as const, confidence: 1, reason: 'Remove payee' },
+              ...(payees?.map(p => ({
+                id: p.id,
+                name: p.name,
+                type: 'existing' as const,
+                confidence: 1,
+                reason: 'Existing payee',
+                color: p.color,
+              })) || []).sort((a, b) => a.name.localeCompare(b.name))
+            ]}
+            getOptionLabel={(option) => option?.name || ''}
+            placeholder="Select or create payee..."
+            label="New Payee"
+            fieldType="payee"
+            variant="outlined"
+            size="medium"
+            allowCreate={true}
+            onCreateNew={handleCreatePayee}
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelBulkPayeeUpdate}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmBulkPayeeUpdate} 
+            color="secondary" 
+            variant="contained"
+            disabled={!selectedPayeeForBulk || updateMutation.isPending}
+          >
+            {updateMutation.isPending ? 'Updating...' : `Update ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
           </Button>
         </DialogActions>
       </Dialog>

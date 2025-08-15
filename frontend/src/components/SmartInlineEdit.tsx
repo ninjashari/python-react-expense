@@ -30,6 +30,7 @@ interface SmartInlineEditProps {
   // Options and handlers
   allOptions: Array<{ id: string; name: string; color?: string }>;
   onSelectionChange: (newValue: any) => Promise<void>;
+  onCreateNew?: (name: string) => Promise<{ id: string; name: string; color?: string }>;
   
   // Display properties
   placeholder?: string;
@@ -50,6 +51,7 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
   currentValue,
   allOptions,
   onSelectionChange,
+  onCreateNew,
   placeholder = `Select ${fieldType}...`,
   emptyDisplay = '-',
   minWidth = 150,
@@ -246,6 +248,8 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
           fieldType={fieldType}
           size="small"
           variant="standard"
+          allowCreate={!!onCreateNew}
+          onCreateNew={onCreateNew}
           onSuggestionShown={handleSuggestionShown}
           sx={{
             '& .MuiAutocomplete-endAdornment': {

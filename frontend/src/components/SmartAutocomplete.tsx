@@ -33,6 +33,10 @@ interface SmartAutocompleteProps {
   disabled?: boolean;
   size?: 'small' | 'medium';
   
+  // Creation functionality
+  allowCreate?: boolean;
+  onCreateNew?: (name: string) => Promise<{ id: string; name: string; color?: string }>;
+  
   // Learning callbacks
   onSuggestionShown?: (suggestion: SuggestionItem) => void;
   onSuggestionAccepted?: (suggestion: SuggestionItem) => void;
@@ -55,6 +59,8 @@ const SmartAutocomplete: React.FC<SmartAutocompleteProps> = ({
   fieldType,
   disabled = false,
   size = 'small',
+  allowCreate = true,
+  onCreateNew,
   onSuggestionShown,
   onSuggestionAccepted,
   onSuggestionRejected,
@@ -63,6 +69,7 @@ const SmartAutocomplete: React.FC<SmartAutocompleteProps> = ({
   variant = 'standard',
 }) => {
   const [hasShownSuggestions, setHasShownSuggestions] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   // Group suggestions by type for better UX
   const groupedOptions = React.useMemo(() => {
@@ -88,15 +95,34 @@ const SmartAutocomplete: React.FC<SmartAutocompleteProps> = ({
   }, [hasShownSuggestions, options, onSuggestionShown]);
 
   // Track when user selects an option
-  const handleChange = useCallback((event: React.SyntheticEvent, newValue: any) => {
-    if (newValue && onSuggestionAccepted) {
-      const selectedOption = options.find(opt => opt.id === newValue.id);
-      if (selectedOption && selectedOption.type === 'ai_suggestion') {
-        onSuggestionAccepted(selectedOption);
+  const handleChange = useCallback(async (event: React.SyntheticEvent, newValue: any) => {
+    if (newValue) {
+      // Handle creating new entries
+      if (newValue.type === 'create_new' && onCreateNew) {
+        setIsCreating(true);
+        try {
+          const createdItem = await onCreateNew(newValue.name);
+          // Call onChange with the newly created item
+          onChange(event, createdItem);
+        } catch (error) {
+          console.error('Failed to create new item:', error);
+        } finally {
+          setIsCreating(false);
+        }
+        return;
+      }
+      
+      // Handle AI suggestion tracking
+      if (onSuggestionAccepted) {
+        const selectedOption = options.find(opt => opt.id === newValue.id);
+        if (selectedOption && selectedOption.type === 'ai_suggestion') {
+          onSuggestionAccepted(selectedOption);
+        }
       }
     }
+    
     onChange(event, newValue);
-  }, [onChange, options, onSuggestionAccepted]);
+  }, [onChange, options, onSuggestionAccepted, onCreateNew]);
 
   const getSuggestionTypeIcon = (type: string) => {
     switch (type) {
@@ -288,7 +314,7 @@ const SmartAutocomplete: React.FC<SmartAutocompleteProps> = ({
       renderOption={renderOption}
       renderInput={renderInput}
       renderTags={renderTags}
-      loading={loading}
+      loading={loading || isCreating}
       disabled={disabled}
       size={size}
       onOpen={handleOpen}
@@ -304,10 +330,30 @@ const SmartAutocomplete: React.FC<SmartAutocompleteProps> = ({
         if (!params.inputValue) {
           return options;
         }
-        // Use default filtering when user types
-        return options.filter(option =>
+        
+        // Filter existing options
+        const filtered = options.filter(option =>
           option.name.toLowerCase().includes(params.inputValue.toLowerCase())
         );
+        
+        // Add "Create new" option if enabled and input doesn't match any existing option
+        if (allowCreate && onCreateNew && params.inputValue.trim()) {
+          const exactMatch = options.find(
+            option => option.name.toLowerCase() === params.inputValue.toLowerCase()
+          );
+          
+          if (!exactMatch) {
+            filtered.push({
+              id: `create_new_${params.inputValue}`,
+              name: params.inputValue.trim(),
+              type: 'create_new',
+              confidence: 1,
+              reason: `Create new ${fieldType}`,
+            });
+          }
+        }
+        
+        return filtered;
       }}
       groupBy={(option) => {
         switch (option.type) {
@@ -317,6 +363,8 @@ const SmartAutocomplete: React.FC<SmartAutocompleteProps> = ({
             return '📊 Recent Selections';
           case 'existing':
             return '📋 All Options';
+          case 'create_new':
+            return '➕ Create New';
           default:
             return 'Other';
         }
