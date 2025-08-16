@@ -5,6 +5,7 @@ import uuid
 from database import get_db
 from models.payees import Payee
 from models.users import User
+from models.transactions import Transaction
 from schemas.payees import PayeeCreate, PayeeUpdate, PayeeResponse
 from utils.auth import get_current_active_user
 from utils.slug import create_slug
@@ -75,6 +76,59 @@ def get_payees(
         db.commit()
     
     return payees
+
+@router.delete("/unused")
+def delete_unused_payees(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Remove all payees that are not referenced by any transactions.
+    """
+    try:
+        # Get all payees for the current user
+        all_payees = db.query(Payee).filter(Payee.user_id == current_user.id).all()
+        
+        if not all_payees:
+            return {
+                "message": "No payees found",
+                "deleted_count": 0,
+                "deleted_payees": []
+            }
+        
+        # Find payees that are not referenced by any transactions
+        unused_payees = []
+        deleted_payees = []
+        
+        for payee in all_payees:
+            transaction_count = db.query(Transaction).filter(
+                Transaction.payee_id == payee.id,
+                Transaction.user_id == current_user.id
+            ).count()
+            
+            if transaction_count == 0:
+                unused_payees.append(payee)
+                deleted_payees.append({
+                    "id": payee.id,
+                    "name": payee.name,
+                    "color": payee.color
+                })
+        
+        # Delete unused payees
+        for payee in unused_payees:
+            db.delete(payee)
+        
+        db.commit()
+        
+        return {
+            "message": f"Successfully deleted {len(unused_payees)} unused payee(s)",
+            "deleted_count": len(unused_payees),
+            "deleted_payees": deleted_payees
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete unused payees: {str(e)}")
 
 @router.get("/{payee_id}", response_model=PayeeResponse)
 def get_payee(

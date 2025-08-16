@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -37,6 +37,10 @@ import {
   ErrorOutline,
   CalendarToday,
   Insights as InsightsIcon,
+  Assessment,
+  Category as CategoryIcon,
+  Payment,
+  LocalAtm,
 } from '@mui/icons-material';
 import {
   useSpendingPredictions,
@@ -46,6 +50,9 @@ import {
 } from '../hooks/useLearning';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { useQuery } from '@tanstack/react-query';
+import { transactionsApi, accountsApi, categoriesApi, payeesApi } from '../services/api';
+import { Transaction, Account, Category, Payee } from '../types';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -77,11 +84,148 @@ const AdvancedInsights: React.FC = () => {
   usePageTitle(getPageTitle('advanced-insights', 'Advanced Insights'));
   const [tabValue, setTabValue] = useState(0);
 
+  // Load transaction data for overview insights
+  const { data: transactions, isLoading: transactionsLoading } = useQuery({
+    queryKey: ['transactions', { size: 1000 }], // Get recent transactions for analysis
+    queryFn: () => transactionsApi.getAll({ size: 1000 }),
+  });
+
+  const { data: accounts } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: accountsApi.getAll,
+  });
+
+  const { data: categories } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesApi.getAll(),
+  });
+
+  const { data: payees } = useQuery({
+    queryKey: ['payees'],
+    queryFn: () => payeesApi.getAll(),
+  });
+
   // Load advanced ML data
   const { data: predictions, isLoading: predictionsLoading, error: predictionsError } = useSpendingPredictions();
   const { data: anomalies, isLoading: anomaliesLoading, error: anomaliesError } = useSpendingAnomalies();
   const { data: budgetRecs, isLoading: budgetLoading, error: budgetError } = useBudgetRecommendations();
   const { data: trends, isLoading: trendsLoading, error: trendsError } = useTrendForecast();
+
+  // Calculate overview insights
+  const insights = useMemo(() => {
+    if (!transactions?.items || !accounts || !categories || !payees) {
+      return null;
+    }
+
+    const allTransactions = transactions.items;
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixMonthsAgo = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+
+    // Recent transactions (last 30 days)
+    const recentTransactions = allTransactions.filter((t: Transaction) => new Date(t.date) >= thirtyDaysAgo);
+    const last6MonthsTransactions = allTransactions.filter((t: Transaction) => new Date(t.date) >= sixMonthsAgo);
+
+    // Income vs Expenses
+    const totalIncome = recentTransactions
+      .filter((t: Transaction) => t.type === 'income')
+      .reduce((sum: number, t: Transaction) => sum + Number(t.amount), 0);
+    
+    const totalExpenses = recentTransactions
+      .filter((t: Transaction) => t.type === 'expense')
+      .reduce((sum: number, t: Transaction) => sum + Number(t.amount), 0);
+
+    // Category analysis
+    const categorySpending = new Map<string, { amount: number; count: number; name: string; color?: string }>();
+    recentTransactions
+      .filter((t: Transaction) => t.type === 'expense' && t.category_id)
+      .forEach((t: Transaction) => {
+        const category = categories.find((c: Category) => c.id === t.category_id);
+        const existing = categorySpending.get(t.category_id!) || { amount: 0, count: 0, name: category?.name || 'Unknown', color: category?.color };
+        categorySpending.set(t.category_id!, {
+          ...existing,
+          amount: existing.amount + Number(t.amount),
+          count: existing.count + 1
+        });
+      });
+
+    const topCategories = Array.from(categorySpending.entries())
+      .map(([id, data]) => ({ id, ...data }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5);
+
+    // Payee analysis
+    const payeeSpending = new Map<string, { amount: number; count: number; name: string; color?: string }>();
+    recentTransactions
+      .filter((t: Transaction) => t.type === 'expense' && t.payee_id)
+      .forEach((t: Transaction) => {
+        const payee = payees.find((p: Payee) => p.id === t.payee_id);
+        const existing = payeeSpending.get(t.payee_id!) || { amount: 0, count: 0, name: payee?.name || 'Unknown', color: payee?.color };
+        payeeSpending.set(t.payee_id!, {
+          ...existing,
+          amount: existing.amount + Number(t.amount),
+          count: existing.count + 1
+        });
+      });
+
+    const topPayees = Array.from(payeeSpending.entries())
+      .map(([id, data]) => ({ id, ...data }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5);
+
+    // Monthly trends (last 6 months)
+    const monthlyData = new Map<string, { income: number; expenses: number; transactions: number }>();
+    last6MonthsTransactions.forEach((t: Transaction) => {
+      const monthKey = new Date(t.date).toISOString().slice(0, 7); // YYYY-MM
+      const existing = monthlyData.get(monthKey) || { income: 0, expenses: 0, transactions: 0 };
+      monthlyData.set(monthKey, {
+        income: existing.income + (t.type === 'income' ? Number(t.amount) : 0),
+        expenses: existing.expenses + (t.type === 'expense' ? Number(t.amount) : 0),
+        transactions: existing.transactions + 1
+      });
+    });
+
+    const monthlyTrends = Array.from(monthlyData.entries())
+      .map(([month, data]) => ({ month, ...data }))
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .slice(-6);
+
+    // Account analysis
+    const accountBalances = accounts.map((account: Account) => ({
+      ...account,
+      balance: Number(account.balance || 0),
+      recent_transactions: recentTransactions.filter((t: Transaction) => t.account_id === account.id).length
+    }));
+
+    // Calculate averages
+    const avgDailyExpenses = totalExpenses / 30;
+    const avgTransactionAmount = recentTransactions.length > 0 
+      ? recentTransactions.reduce((sum: number, t: Transaction) => sum + Number(t.amount), 0) / recentTransactions.length 
+      : 0;
+
+    // Uncategorized transactions
+    const uncategorizedCount = recentTransactions.filter((t: Transaction) => t.type === 'expense' && !t.category_id).length;
+    const uncategorizedAmount = recentTransactions
+      .filter((t: Transaction) => t.type === 'expense' && !t.category_id)
+      .reduce((sum: number, t: Transaction) => sum + Number(t.amount), 0);
+
+    return {
+      totalIncome,
+      totalExpenses,
+      netIncome: totalIncome - totalExpenses,
+      topCategories,
+      topPayees,
+      monthlyTrends,
+      accountBalances,
+      avgDailyExpenses,
+      avgTransactionAmount,
+      uncategorizedCount,
+      uncategorizedAmount,
+      totalTransactions: recentTransactions.length,
+      categorySpendingMap: categorySpending,
+      payeeSpendingMap: payeeSpending
+    };
+  }, [transactions, accounts, categories, payees]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -112,6 +256,327 @@ const AdvancedInsights: React.FC = () => {
       case 'low': return 'success';
       default: return 'default';
     }
+  };
+
+  // Overview Tab Component
+  const OverviewTab = () => {
+    if (transactionsLoading) return <CircularProgress />;
+    if (!insights) return <Alert severity="info">No transaction data available for analysis</Alert>;
+
+    return (
+      <Grid container spacing={3}>
+        <Grid item xs={12}>
+          <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Assessment color="primary" />
+            Financial Overview (Last 30 Days)
+          </Typography>
+        </Grid>
+
+        {/* Summary Cards */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Total Income
+              </Typography>
+              <Typography variant="h4" component="div" color="success.main">
+                {formatCurrency(insights.totalIncome)}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                Last 30 days
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Total Expenses
+              </Typography>
+              <Typography variant="h4" component="div" color="error.main">
+                {formatCurrency(insights.totalExpenses)}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                Avg: {formatCurrency(insights.avgDailyExpenses)}/day
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Net Income
+              </Typography>
+              <Typography 
+                variant="h4" 
+                component="div" 
+                color={insights.netIncome >= 0 ? 'success.main' : 'error.main'}
+                sx={{ display: 'flex', alignItems: 'center', gap: 1 }}
+              >
+                {insights.netIncome >= 0 ? <TrendingUp /> : <TrendingDown />}
+                {formatCurrency(Math.abs(insights.netIncome))}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                {insights.netIncome >= 0 ? 'Surplus' : 'Deficit'}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                Transactions
+              </Typography>
+              <Typography variant="h4" component="div">
+                {insights.totalTransactions}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                Avg: {formatCurrency(insights.avgTransactionAmount)}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Data Quality Alert */}
+        {insights.uncategorizedCount > 0 && (
+          <Grid item xs={12}>
+            <Alert severity="warning" icon={<Warning />}>
+              <Typography variant="subtitle2">
+                Data Quality Notice
+              </Typography>
+              You have {insights.uncategorizedCount} uncategorized expense transactions totaling {formatCurrency(insights.uncategorizedAmount)}. 
+              Categorizing these will improve your insights accuracy.
+            </Alert>
+          </Grid>
+        )}
+
+        {/* Top Categories */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CategoryIcon />
+                Top Spending Categories
+              </Typography>
+              <List>
+                {insights.topCategories.map((category, index) => (
+                  <ListItem key={category.id} sx={{ px: 0 }}>
+                    <ListItemIcon>
+                      <Box
+                        sx={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: '50%',
+                          backgroundColor: category.color || '#ccc',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          fontWeight: 'bold',
+                          fontSize: '0.8rem'
+                        }}
+                      >
+                        {index + 1}
+                      </Box>
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={category.name}
+                      secondary={`${category.count} transactions`}
+                    />
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography variant="body1" fontWeight="bold">
+                        {formatCurrency(category.amount)}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {((category.amount / insights.totalExpenses) * 100).toFixed(1)}%
+                      </Typography>
+                    </Box>
+                  </ListItem>
+                ))}
+              </List>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Top Payees */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Payment />
+                Top Payees
+              </Typography>
+              <List>
+                {insights.topPayees.map((payee, index) => (
+                  <ListItem key={payee.id} sx={{ px: 0 }}>
+                    <ListItemIcon>
+                      <Box
+                        sx={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: '50%',
+                          backgroundColor: payee.color || '#ccc',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          fontWeight: 'bold',
+                          fontSize: '0.8rem'
+                        }}
+                      >
+                        {index + 1}
+                      </Box>
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={payee.name}
+                      secondary={`${payee.count} transactions`}
+                    />
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography variant="body1" fontWeight="bold">
+                        {formatCurrency(payee.amount)}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {((payee.amount / insights.totalExpenses) * 100).toFixed(1)}%
+                      </Typography>
+                    </Box>
+                  </ListItem>
+                ))}
+              </List>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Monthly Trends */}
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Timeline />
+                Monthly Trends (Last 6 Months)
+              </Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Month</TableCell>
+                      <TableCell align="right">Income</TableCell>
+                      <TableCell align="right">Expenses</TableCell>
+                      <TableCell align="right">Net</TableCell>
+                      <TableCell align="right">Transactions</TableCell>
+                      <TableCell align="center">Status</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {insights.monthlyTrends.map((month) => {
+                      const net = month.income - month.expenses;
+                      return (
+                        <TableRow key={month.month}>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {new Date(month.month + '-01').toLocaleDateString('en-US', { 
+                                year: 'numeric', 
+                                month: 'short' 
+                              })}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: 'success.main' }}>
+                            {formatCurrency(month.income)}
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: 'error.main' }}>
+                            {formatCurrency(month.expenses)}
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: net >= 0 ? 'success.main' : 'error.main' }}>
+                            {formatCurrency(net)}
+                          </TableCell>
+                          <TableCell align="right">
+                            {month.transactions}
+                          </TableCell>
+                          <TableCell align="center">
+                            {net >= 0 ? 
+                              <CheckCircle color="success" fontSize="small" /> : 
+                              <ErrorOutline color="error" fontSize="small" />
+                            }
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Account Summary */}
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <LocalAtm />
+                Account Summary
+              </Typography>
+              <TableContainer>
+                <Table>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Account</TableCell>
+                      <TableCell>Type</TableCell>
+                      <TableCell align="right">Balance</TableCell>
+                      <TableCell align="right">Recent Activity</TableCell>
+                      <TableCell align="center">Status</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {insights.accountBalances.map((account) => (
+                      <TableRow key={account.id}>
+                        <TableCell>
+                          <Typography variant="body1" fontWeight="medium">
+                            {account.name}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={account.type.charAt(0).toUpperCase() + account.type.slice(1)}
+                            size="small"
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography 
+                            variant="body1" 
+                            fontWeight="bold"
+                            color={account.balance >= 0 ? 'success.main' : 'error.main'}
+                          >
+                            {formatCurrency(account.balance)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="right">
+                          <Typography variant="body2">
+                            {account.recent_transactions} transactions
+                          </Typography>
+                        </TableCell>
+                        <TableCell align="center">
+                          {account.recent_transactions > 0 ? 
+                            <CheckCircle color="success" fontSize="small" /> : 
+                            <ErrorOutline color="warning" fontSize="small" />
+                          }
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    );
   };
 
   // Spending Predictions Tab
@@ -759,6 +1224,7 @@ const AdvancedInsights: React.FC = () => {
 
       <Paper>
         <Tabs value={tabValue} onChange={handleTabChange} aria-label="advanced insights tabs">
+          <Tab label="Overview" icon={<Assessment />} />
           <Tab label="Predictions" icon={<TrendingUp />} />
           <Tab label="Anomalies" icon={<Warning />} />
           <Tab label="Budget" icon={<BudgetIcon />} />
@@ -766,18 +1232,22 @@ const AdvancedInsights: React.FC = () => {
         </Tabs>
 
         <TabPanel value={tabValue} index={0}>
-          <SpendingPredictionsTab />
+          <OverviewTab />
         </TabPanel>
 
         <TabPanel value={tabValue} index={1}>
-          <AnomalyDetectionTab />
+          <SpendingPredictionsTab />
         </TabPanel>
 
         <TabPanel value={tabValue} index={2}>
-          <BudgetRecommendationsTab />
+          <AnomalyDetectionTab />
         </TabPanel>
 
         <TabPanel value={tabValue} index={3}>
+          <BudgetRecommendationsTab />
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={4}>
           <TrendForecastingTab />
         </TabPanel>
       </Paper>

@@ -5,6 +5,7 @@ import uuid
 from database import get_db
 from models.categories import Category
 from models.users import User
+from models.transactions import Transaction
 from schemas.categories import CategoryCreate, CategoryUpdate, CategoryResponse
 from utils.auth import get_current_active_user
 from utils.color_generator import generate_unique_color
@@ -75,6 +76,59 @@ def get_categories(
         db.commit()
     
     return categories
+
+@router.delete("/unused")
+def delete_unused_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Remove all categories that are not referenced by any transactions.
+    """
+    try:
+        # Get all categories for the current user
+        all_categories = db.query(Category).filter(Category.user_id == current_user.id).all()
+        
+        if not all_categories:
+            return {
+                "message": "No categories found",
+                "deleted_count": 0,
+                "deleted_categories": []
+            }
+        
+        # Find categories that are not referenced by any transactions
+        unused_categories = []
+        deleted_categories = []
+        
+        for category in all_categories:
+            transaction_count = db.query(Transaction).filter(
+                Transaction.category_id == category.id,
+                Transaction.user_id == current_user.id
+            ).count()
+            
+            if transaction_count == 0:
+                unused_categories.append(category)
+                deleted_categories.append({
+                    "id": category.id,
+                    "name": category.name,
+                    "color": category.color
+                })
+        
+        # Delete unused categories
+        for category in unused_categories:
+            db.delete(category)
+        
+        db.commit()
+        
+        return {
+            "message": f"Successfully deleted {len(unused_categories)} unused category(s)",
+            "deleted_count": len(unused_categories),
+            "deleted_categories": deleted_categories
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete unused categories: {str(e)}")
 
 @router.get("/{category_id}", response_model=CategoryResponse)
 def get_category(

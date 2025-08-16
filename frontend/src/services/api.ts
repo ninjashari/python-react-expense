@@ -111,6 +111,7 @@ export const payeesApi = {
     api.put(`/payees/${id}`, data).then(res => res.data),
   delete: (id: string): Promise<void> => api.delete(`/payees/${id}`).then(res => res.data),
   reassignColors: (): Promise<any> => api.post('/payees/reassign-colors').then(res => res.data),
+  deleteUnused: (): Promise<any> => api.delete('/payees/unused').then(res => res.data),
 };
 
 // Categories API
@@ -123,6 +124,7 @@ export const categoriesApi = {
     api.put(`/categories/${id}`, data).then(res => res.data),
   delete: (id: string): Promise<void> => api.delete(`/categories/${id}`).then(res => res.data),
   reassignColors: (): Promise<any> => api.post('/categories/reassign-colors').then(res => res.data),
+  deleteUnused: (): Promise<any> => api.delete('/categories/unused').then(res => res.data),
 };
 
 // Transactions API

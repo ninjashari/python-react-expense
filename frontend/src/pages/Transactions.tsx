@@ -30,7 +30,7 @@ import {
   Autocomplete,
   Chip,
 } from '@mui/material';
-import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics } from '@mui/icons-material';
+import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics, ArrowUpward, ArrowDownward } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
@@ -77,6 +77,14 @@ interface TransactionFilters {
   size: number;
 }
 
+type SortField = 'date' | 'description' | 'account' | 'payee' | 'category' | 'type' | 'amount';
+type SortDirection = 'asc' | 'desc';
+
+interface SortState {
+  field: SortField | null;
+  direction: SortDirection;
+}
+
 const Transactions: React.FC = () => {
   usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
   const navigate = useNavigate();
@@ -101,6 +109,7 @@ const Transactions: React.FC = () => {
   const [selectedCategoryForBulk, setSelectedCategoryForBulk] = useState<string>('');
   const [bulkPayeeDialogOpen, setBulkPayeeDialogOpen] = useState(false);
   const [selectedPayeeForBulk, setSelectedPayeeForBulk] = useState<string>('');
+  const [sortState, setSortState] = useState<SortState>({ field: null, direction: 'asc' });
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -438,12 +447,57 @@ const Transactions: React.FC = () => {
     setSelectedPayeeForBulk('');
   };
 
+  // Helper function to get the last day of a month
+  const getLastDayOfMonth = (year: number, month: number): number => {
+    return new Date(year, month, 0).getDate();
+  };
+
+  // Helper function to adjust end date when start date changes
+  const adjustEndDateForMonth = (startDate: string, currentEndDate?: string): string => {
+    if (!startDate) return currentEndDate || '';
+    
+    const start = new Date(startDate);
+    const startYear = start.getFullYear();
+    const startMonth = start.getMonth() + 1; // getMonth() returns 0-11
+    
+    // If we have an existing end date, check if it's in the same month
+    if (currentEndDate) {
+      const end = new Date(currentEndDate);
+      const endYear = end.getFullYear();
+      const endMonth = end.getMonth() + 1;
+      
+      // If they're in the same month and year, update to last day of month
+      if (startYear === endYear && startMonth === endMonth) {
+        const lastDay = getLastDayOfMonth(startYear, startMonth);
+        return `${startYear}-${startMonth.toString().padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
+      }
+    } else {
+      // If no end date, set to last day of the start date's month
+      const lastDay = getLastDayOfMonth(startYear, startMonth);
+      return `${startYear}-${startMonth.toString().padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
+    }
+    
+    return currentEndDate || '';
+  };
+
   const handleFilterChange = (field: keyof TransactionFilters, value: any) => {
-    setFilters(prev => ({
-      ...prev,
-      [field]: value === '' ? undefined : value,
-      page: field !== 'page' && field !== 'size' ? 1 : prev.page // Reset to first page when changing filters
-    }));
+    setFilters(prev => {
+      const newFilters = {
+        ...prev,
+        [field]: value === '' ? undefined : value,
+        page: field !== 'page' && field !== 'size' ? 1 : prev.page // Reset to first page when changing filters
+      };
+
+      // Smart date handling: when start date changes, potentially adjust end date
+      if (field === 'startDate' && value) {
+        const adjustedEndDate = adjustEndDateForMonth(value, prev.endDate);
+        if (adjustedEndDate && adjustedEndDate !== prev.endDate) {
+          newFilters.endDate = adjustedEndDate;
+        }
+      }
+
+      return newFilters;
+    });
   };
 
   const handlePageChange = (event: React.ChangeEvent<unknown>, newPage: number) => {
@@ -461,6 +515,83 @@ const Transactions: React.FC = () => {
   const clearFilters = () => {
     clearSavedFilters();
   };
+
+  const handleSort = (field: SortField) => {
+    setSortState(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const getSortIcon = (field: SortField) => {
+    if (sortState.field !== field) return null;
+    return sortState.direction === 'asc' ? <ArrowUpward fontSize="small" /> : <ArrowDownward fontSize="small" />;
+  };
+
+  const sortedTransactions = React.useMemo(() => {
+    if (!transactionData?.items || !sortState.field) {
+      return transactionData?.items || [];
+    }
+
+    const sorted = [...transactionData.items].sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+
+      switch (sortState.field) {
+        case 'date':
+          aValue = a.date ? new Date(a.date).getTime() : 0;
+          bValue = b.date ? new Date(b.date).getTime() : 0;
+          break;
+        case 'description':
+          aValue = (a.description || '').toLowerCase();
+          bValue = (b.description || '').toLowerCase();
+          break;
+        case 'account':
+          aValue = (a.account?.name || '').toLowerCase();
+          bValue = (b.account?.name || '').toLowerCase();
+          break;
+        case 'payee':
+          aValue = (payees?.find(p => p.id === a.payee_id)?.name || '').toLowerCase();
+          bValue = (payees?.find(p => p.id === b.payee_id)?.name || '').toLowerCase();
+          break;
+        case 'category':
+          aValue = (categories?.find(c => c.id === a.category_id)?.name || '').toLowerCase();
+          bValue = (categories?.find(c => c.id === b.category_id)?.name || '').toLowerCase();
+          break;
+        case 'type':
+          aValue = a.type;
+          bValue = b.type;
+          break;
+        case 'amount':
+          aValue = Number(a.amount) || 0;
+          bValue = Number(b.amount) || 0;
+          break;
+        default:
+          return 0;
+      }
+
+      // Handle null/empty values - always sort them to the end
+      if (aValue === '' || aValue === null || aValue === undefined || aValue === 0) {
+        if (bValue === '' || bValue === null || bValue === undefined || bValue === 0) {
+          return 0;
+        }
+        return 1;
+      }
+      if (bValue === '' || bValue === null || bValue === undefined || bValue === 0) {
+        return -1;
+      }
+
+      if (aValue < bValue) {
+        return sortState.direction === 'asc' ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return sortState.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+
+    return sorted;
+  }, [transactionData?.items, sortState, payees, categories]);
 
   const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId || (filters.categoryIds && filters.categoryIds.length > 0) || (filters.payeeIds && filters.payeeIds.length > 0);
   
@@ -698,18 +829,75 @@ const Transactions: React.FC = () => {
                   onChange={(e) => e.target.checked ? handleSelectAll() : handleClearSelection()}
                 />
               </TableCell>
-              <TableCell>Date</TableCell>
-              <TableCell>Description</TableCell>
-              <TableCell>Account</TableCell>
-              <TableCell>Payee</TableCell>
-              <TableCell>Category</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell align="right">Amount</TableCell>
+              <TableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+                onClick={() => handleSort('date')}
+              >
+                <Box display="flex" alignItems="center" gap={1}>
+                  Date
+                  {getSortIcon('date')}
+                </Box>
+              </TableCell>
+              <TableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+                onClick={() => handleSort('description')}
+              >
+                <Box display="flex" alignItems="center" gap={1}>
+                  Description
+                  {getSortIcon('description')}
+                </Box>
+              </TableCell>
+              <TableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+                onClick={() => handleSort('account')}
+              >
+                <Box display="flex" alignItems="center" gap={1}>
+                  Account
+                  {getSortIcon('account')}
+                </Box>
+              </TableCell>
+              <TableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+                onClick={() => handleSort('payee')}
+              >
+                <Box display="flex" alignItems="center" gap={1}>
+                  Payee
+                  {getSortIcon('payee')}
+                </Box>
+              </TableCell>
+              <TableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+                onClick={() => handleSort('category')}
+              >
+                <Box display="flex" alignItems="center" gap={1}>
+                  Category
+                  {getSortIcon('category')}
+                </Box>
+              </TableCell>
+              <TableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+                onClick={() => handleSort('type')}
+              >
+                <Box display="flex" alignItems="center" gap={1}>
+                  Type
+                  {getSortIcon('type')}
+                </Box>
+              </TableCell>
+              <TableCell 
+                align="right" 
+                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+                onClick={() => handleSort('amount')}
+              >
+                <Box display="flex" alignItems="center" justifyContent="flex-end" gap={1}>
+                  Amount
+                  {getSortIcon('amount')}
+                </Box>
+              </TableCell>
               <TableCell align="center">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {transactionData?.items?.map((transaction) => (
+            {sortedTransactions?.map((transaction) => (
               <TableRow key={transaction.id}>
                 <TableCell padding="checkbox">
                   <Checkbox

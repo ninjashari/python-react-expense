@@ -21,7 +21,7 @@ import {
   Alert,
   Tooltip,
 } from '@mui/material';
-import { Add, Edit, Delete, Palette } from '@mui/icons-material';
+import { Add, Edit, Delete, Palette, CleaningServices } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { payeesApi } from '../services/api';
@@ -34,6 +34,8 @@ const Payees: React.FC = () => {
   const [editingPayee, setEditingPayee] = useState<Payee | null>(null);
   const [isReassigning, setIsReassigning] = useState(false);
   const [reassignResult, setReassignResult] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteResult, setDeleteResult] = useState<any>(null);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, formState: { errors } } = useForm<CreatePayeeDto>({
@@ -150,6 +152,38 @@ const Payees: React.FC = () => {
     }
   };
 
+  const handleDeleteUnused = async () => {
+    if (!payees || payees.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'This will permanently delete all payees that are not referenced by any transactions. ' +
+      'This action cannot be undone. Continue?'
+    );
+
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    setDeleteResult(null);
+
+    try {
+      const result = await payeesApi.deleteUnused();
+      setDeleteResult(result);
+      
+      // Refresh payees to show updated list
+      queryClient.invalidateQueries({ queryKey: ['payees'] });
+      
+    } catch (error: any) {
+      setDeleteResult({
+        error: true,
+        message: error.response?.data?.detail || 'Failed to delete unused payees'
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="400px">
@@ -163,6 +197,17 @@ const Payees: React.FC = () => {
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">Payees</Typography>
         <Box display="flex" gap={1}>
+          <Tooltip title="Delete all payees that are not referenced by any transactions">
+            <Button
+              variant="outlined"
+              startIcon={<CleaningServices />}
+              onClick={handleDeleteUnused}
+              disabled={isDeleting || !payees || payees.length === 0}
+              color="error"
+            >
+              {isDeleting ? 'Deleting...' : 'Remove Unused'}
+            </Button>
+          </Tooltip>
           <Tooltip title="Generate mathematically optimal unique colors using Golden Ratio distribution">
             <Button
               variant="outlined"
@@ -182,6 +227,42 @@ const Payees: React.FC = () => {
           </Button>
         </Box>
       </Box>
+
+      {/* Delete Unused Results */}
+      {deleteResult && (
+        <Alert 
+          severity={deleteResult.error ? 'error' : 'success'}
+          onClose={() => setDeleteResult(null)}
+          sx={{ mb: 2 }}
+        >
+          {deleteResult.error ? (
+            deleteResult.message
+          ) : (
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                {deleteResult.message}
+              </Typography>
+              {deleteResult.deleted_payees && deleteResult.deleted_payees.length > 0 && (
+                <Box>
+                  <Typography variant="body2">
+                    Deleted payees:
+                  </Typography>
+                  {deleteResult.deleted_payees.slice(0, 5).map((payee: any, index: number) => (
+                    <Typography key={index} variant="body2" sx={{ ml: 2 }}>
+                      • {payee.name}
+                    </Typography>
+                  ))}
+                  {deleteResult.deleted_payees.length > 5 && (
+                    <Typography variant="body2" sx={{ ml: 2 }}>
+                      ... and {deleteResult.deleted_payees.length - 5} more
+                    </Typography>
+                  )}
+                </Box>
+              )}
+            </Box>
+          )}
+        </Alert>
+      )}
 
       {/* Color Reassignment Results */}
       {reassignResult && (
