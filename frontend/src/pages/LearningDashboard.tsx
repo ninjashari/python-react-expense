@@ -40,13 +40,15 @@ import {
   Refresh,
   Info,
   CheckCircle,
+  ModelTraining,
 } from '@mui/icons-material';
 import { 
   usePerformanceAnalytics, 
   usePatternAnalytics, 
   useAccuracyAnalytics,
   useLearningStatistics,
-  useUserPatterns
+  useUserPatterns,
+  useTrainModel
 } from '../hooks/useLearning';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 
@@ -80,6 +82,7 @@ const LearningDashboard: React.FC = () => {
   usePageTitle(getPageTitle('learning-dashboard', 'Learning Analytics'));
   const [tabValue, setTabValue] = useState(0);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [trainingResult, setTrainingResult] = useState<any>(null);
 
   // Load analytics data
   const { data: performanceData, isLoading: performanceLoading, error: performanceError } = usePerformanceAnalytics();
@@ -87,6 +90,7 @@ const LearningDashboard: React.FC = () => {
   const { data: accuracyData, isLoading: accuracyLoading, error: accuracyError } = useAccuracyAnalytics();
   const { data: statsData } = useLearningStatistics();
   const { data: patternsData, isLoading: patternsDataLoading } = useUserPatterns();
+  const trainModelMutation = useTrainModel();
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -96,6 +100,25 @@ const LearningDashboard: React.FC = () => {
     if (confidence >= 0.8) return 'success';
     if (confidence >= 0.6) return 'warning';
     return 'error';
+  };
+
+  const handleTrainModel = async () => {
+    const confirmed = window.confirm(
+      'This will retrain the AI model using your historical transaction data. ' +
+      'This may take a few moments. Continue?'
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const result = await trainModelMutation.mutateAsync();
+      setTrainingResult(result);
+    } catch (error: any) {
+      setTrainingResult({
+        error: true,
+        message: error.response?.data?.detail || 'Failed to train model'
+      });
+    }
   };
 
   const getConfidenceLabel = (confidence: number) => {
@@ -540,12 +563,52 @@ const LearningDashboard: React.FC = () => {
           <AIIcon />
           Learning Analytics
         </Typography>
-        <Tooltip title="View learning system insights and performance metrics">
-          <IconButton>
-            <Info />
-          </IconButton>
-        </Tooltip>
+        <Box display="flex" gap={1}>
+          <Tooltip title="Retrain AI model using your historical transaction data">
+            <Button
+              variant="outlined"
+              startIcon={<ModelTraining />}
+              onClick={handleTrainModel}
+              disabled={trainModelMutation.isPending}
+            >
+              {trainModelMutation.isPending ? 'Training...' : 'Train Model'}
+            </Button>
+          </Tooltip>
+          <Tooltip title="View learning system insights and performance metrics">
+            <IconButton>
+              <Info />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
+
+      {/* Training Results */}
+      {trainingResult && (
+        <Alert 
+          severity={trainingResult.error ? 'error' : 'success'}
+          onClose={() => setTrainingResult(null)}
+          sx={{ mb: 2 }}
+        >
+          {trainingResult.error ? (
+            trainingResult.message
+          ) : (
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                {trainingResult.message}
+              </Typography>
+              <Typography variant="body2">
+                • Transactions analyzed: {trainingResult.training_stats?.total_transactions || 0}
+              </Typography>
+              <Typography variant="body2">
+                • Payee patterns learned: {trainingResult.training_stats?.payee_patterns_learned || 0}
+              </Typography>
+              <Typography variant="body2">
+                • Category patterns learned: {trainingResult.training_stats?.category_patterns_learned || 0}
+              </Typography>
+            </Box>
+          )}
+        </Alert>
+      )}
 
       {/* Overview Cards */}
       {statsData && (

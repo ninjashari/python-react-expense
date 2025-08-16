@@ -34,7 +34,7 @@ import {
 } from '@mui/icons-material';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAutoCategorization, useBulkProcessing } from '../hooks/useLearning';
-import { useToast } from '../contexts/ToastContext';
+// import { useToast } from '../contexts/ToastContext'; // Replaced with confirm dialogs
 
 interface SmartAutomationProps {
   uncategorizedCount?: number;
@@ -59,14 +59,14 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
   const queryClient = useQueryClient();
   const autoCategorizeMutation = useAutoCategorization();
   const bulkProcessMutation = useBulkProcessing();
-  const toast = useToast();
+  // const toast = useToast(); // Replaced with confirm dialogs
 
   const handleAutoCategorize = async () => {
     try {
       const result = await autoCategorizeMutation.mutateAsync();
       
       // Show success message
-      toast.showSuccess(`Successfully auto-categorized ${result.categorized_transactions.length} transactions!`);
+      window.alert(`Successfully auto-categorized ${result.categorized_transactions.length} transactions!`);
       
       // Refresh transaction data
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -84,7 +84,7 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
 
   const handleBulkProcess = async () => {
     if (selectedTransactionIds.length === 0) {
-      toast.showError('Please select transactions to process');
+      window.alert('Error: Please select transactions to process');
       return;
     }
 
@@ -94,7 +94,7 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
         action: bulkAction
       });
       
-      toast.showSuccess(`Processed ${result.processed_count} transactions`);
+      window.alert(`Processed ${result.processed_count} transactions`);
       
       if (onAutomationComplete) {
         onAutomationComplete();

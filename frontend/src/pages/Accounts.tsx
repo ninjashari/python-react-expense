@@ -24,7 +24,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { accountsApi } from '../services/api';
 import { Account, CreateAccountDto } from '../types';
 import { formatCurrency, formatAccountType } from '../utils/formatters';
-import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
+import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
 
 const accountTypes = [
   { value: 'checking', label: 'Checking' },
@@ -91,7 +91,7 @@ const Accounts: React.FC = () => {
     },
   });
 
-  const createMutation = useCreateWithToast(accountsApi.create, {
+  const createMutation = useCreateWithConfirm(accountsApi.create, {
     resourceName: 'Account',
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
@@ -99,7 +99,7 @@ const Accounts: React.FC = () => {
     },
   });
 
-  const updateMutation = useUpdateWithToast(
+  const updateMutation = useUpdateWithConfirm(
     ({ id, data }: { id: string; data: Partial<CreateAccountDto> }) =>
       accountsApi.update(id, data),
     {
@@ -111,7 +111,7 @@ const Accounts: React.FC = () => {
     }
   );
 
-  const deleteMutation = useDeleteWithToast(accountsApi.delete, {
+  const deleteMutation = useDeleteWithConfirm(accountsApi.delete, {
     resourceName: 'Account',
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] });

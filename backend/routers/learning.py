@@ -15,6 +15,7 @@ from schemas.learning import (
     LearningFeedbackRequest
 )
 from services.learning_service import TransactionLearningService
+from services.ai_trainer import TransactionAITrainer
 from utils.auth import get_current_active_user
 
 router = APIRouter()
@@ -1112,3 +1113,32 @@ async def get_expense_trend_forecast(
             "best_savings_month": max(monthly_data.items(), key=lambda x: x[1]['net_income'])[0] if monthly_data else None
         }
     }
+
+@router.post("/train")
+async def manually_train_model(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Manually trigger AI model training on user's historical transaction data.
+    This will update the model used for payee and category suggestions.
+    """
+    try:
+        # Initialize AI trainer
+        ai_trainer = TransactionAITrainer(db, current_user.id)
+        
+        # Train on historical data
+        training_stats = ai_trainer.train_from_historical_data()
+        
+        # Get training summary
+        training_summary = ai_trainer.get_training_summary()
+        
+        return {
+            "message": "AI model training completed successfully",
+            "training_stats": training_stats,
+            "training_summary": training_summary,
+            "status": "completed"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to train model: {str(e)}")

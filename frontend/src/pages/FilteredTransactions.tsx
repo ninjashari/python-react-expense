@@ -32,7 +32,7 @@ import { Transaction, PaginatedResponse, Account, Category, Payee } from '../typ
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import MultiSelectDropdown, { Option } from '../components/MultiSelectDropdown';
-import { useUpdateWithToast } from '../hooks/useApiWithToast';
+import { useUpdateWithConfirm } from '../hooks/useApiWithConfirm';
 import SmartInlineEdit from '../components/SmartInlineEdit';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
 
@@ -133,7 +133,7 @@ const FilteredTransactions: React.FC = () => {
   });
 
   // Mutation for inline updates
-  const updateMutation = useUpdateWithToast(
+  const updateMutation = useUpdateWithConfirm(
     ({ id, data }: { id: string; data: Partial<any> }) =>
       transactionsApi.update(id, data),
     {

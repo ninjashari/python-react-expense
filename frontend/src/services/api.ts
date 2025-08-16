@@ -152,6 +152,8 @@ export const transactionsApi = {
     api.post('/transactions', data).then(res => res.data),
   update: (id: string, data: Partial<CreateTransactionDto>): Promise<Transaction> => 
     api.put(`/transactions/${id}`, data).then(res => res.data),
+  bulkUpdate: (transaction_ids: string[], updates: any): Promise<any> => 
+    api.put('/transactions/bulk', { transaction_ids, updates }).then(res => res.data),
   delete: (id: string): Promise<void> => api.delete(`/transactions/${id}`).then(res => res.data),
 };
 

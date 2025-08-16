@@ -376,3 +376,13 @@ export const useTrendForecast = () => {
     retry: 1,
   });
 };
+
+/**
+ * Hook for manual model training
+ */
+export const useTrainModel = () => {
+  return useMutation({
+    mutationFn: () => learningApi.trainModel(),
+    retry: 1,
+  });
+};

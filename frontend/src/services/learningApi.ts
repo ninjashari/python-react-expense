@@ -553,6 +553,13 @@ class LearningApiService {
   async getTrendForecast(): Promise<TrendForecastResult> {
     return api.get('/learning/trends/forecast').then(res => res.data);
   }
+
+  /**
+   * Manually trigger AI model training
+   */
+  async trainModel(): Promise<any> {
+    return api.post('/learning/train').then(res => res.data);
+  }
 }
 
 export const learningApi = new LearningApiService();

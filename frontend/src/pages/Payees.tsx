@@ -27,7 +27,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { payeesApi } from '../services/api';
 import { Payee, CreatePayeeDto } from '../types';
 import { formatDateTime } from '../utils/formatters';
-import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
+import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
 
 const Payees: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -50,7 +50,7 @@ const Payees: React.FC = () => {
     queryFn: () => payeesApi.getAll(),
   });
 
-  const createMutation = useCreateWithToast(payeesApi.create, {
+  const createMutation = useCreateWithConfirm(payeesApi.create, {
     resourceName: 'Payee',
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payees'] });
@@ -58,7 +58,7 @@ const Payees: React.FC = () => {
     },
   });
 
-  const updateMutation = useUpdateWithToast(
+  const updateMutation = useUpdateWithConfirm(
     ({ id, data }: { id: string; data: Partial<CreatePayeeDto> }) =>
       payeesApi.update(id, data),
     {
@@ -70,7 +70,7 @@ const Payees: React.FC = () => {
     }
   );
 
-  const deleteMutation = useDeleteWithToast(payeesApi.delete, {
+  const deleteMutation = useDeleteWithConfirm(payeesApi.delete, {
     resourceName: 'Payee',
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payees'] });

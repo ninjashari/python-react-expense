@@ -27,7 +27,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { categoriesApi } from '../services/api';
 import { Category, CreateCategoryDto } from '../types';
 import { formatDateTime } from '../utils/formatters';
-import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
+import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
 
 const Categories: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -50,7 +50,7 @@ const Categories: React.FC = () => {
     queryFn: () => categoriesApi.getAll(),
   });
 
-  const createMutation = useCreateWithToast(categoriesApi.create, {
+  const createMutation = useCreateWithConfirm(categoriesApi.create, {
     resourceName: 'Category',
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] });
@@ -58,7 +58,7 @@ const Categories: React.FC = () => {
     },
   });
 
-  const updateMutation = useUpdateWithToast(
+  const updateMutation = useUpdateWithConfirm(
     ({ id, data }: { id: string; data: Partial<CreateCategoryDto> }) =>
       categoriesApi.update(id, data),
     {
@@ -70,7 +70,7 @@ const Categories: React.FC = () => {
     }
   );
 
-  const deleteMutation = useDeleteWithToast(categoriesApi.delete, {
+  const deleteMutation = useDeleteWithConfirm(categoriesApi.delete, {
     resourceName: 'Category',
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] });

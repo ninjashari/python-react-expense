@@ -36,7 +36,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
 import { Transaction, CreateTransactionDto, PaginatedResponse } from '../types';
 import { formatCurrency } from '../utils/formatters';
-import { useCreateWithToast, useUpdateWithToast, useDeleteWithToast } from '../hooks/useApiWithToast';
+import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import SmartInlineEdit from '../components/SmartInlineEdit';
 import SmartAutocomplete from '../components/SmartAutocomplete';
@@ -109,6 +109,7 @@ const Transactions: React.FC = () => {
   const [selectedCategoryForBulk, setSelectedCategoryForBulk] = useState<string>('');
   const [bulkPayeeDialogOpen, setBulkPayeeDialogOpen] = useState(false);
   const [selectedPayeeForBulk, setSelectedPayeeForBulk] = useState<string>('');
+  const [bulkUpdateDialogOpen, setBulkUpdateDialogOpen] = useState(false);
   const [sortState, setSortState] = useState<SortState>({ field: null, direction: 'asc' });
   const queryClient = useQueryClient();
 
@@ -171,7 +172,7 @@ const Transactions: React.FC = () => {
     dialogOpen ? (categories || []) : []
   );
 
-  const createMutation = useCreateWithToast(transactionsApi.create, {
+  const createMutation = useCreateWithConfirm(transactionsApi.create, {
     resourceName: 'Transaction',
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -180,7 +181,7 @@ const Transactions: React.FC = () => {
     },
   });
 
-  const updateMutation = useUpdateWithToast(
+  const updateMutation = useUpdateWithConfirm(
     ({ id, data }: { id: string; data: Partial<CreateTransactionDto> }) =>
       transactionsApi.update(id, data),
     {
@@ -193,13 +194,25 @@ const Transactions: React.FC = () => {
     }
   );
 
-  const deleteMutation = useDeleteWithToast(transactionsApi.delete, {
+  const deleteMutation = useDeleteWithConfirm(transactionsApi.delete, {
     resourceName: 'Transaction',
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
   });
+
+  const bulkUpdateMutation = useUpdateWithConfirm(
+    ({ transaction_ids, updates }: { transaction_ids: string[]; updates: any }) =>
+      transactionsApi.bulkUpdate(transaction_ids, updates),
+    {
+      resourceName: 'Transactions',
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      },
+    }
+  );
 
   // Inline editing functions
   const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id' | 'description' | 'type' | 'date', value: string | null) => {
@@ -388,9 +401,9 @@ const Transactions: React.FC = () => {
   };
 
   // Bulk category edit functions
-  const handleBulkCategoryEdit = () => {
-    setBulkCategoryDialogOpen(true);
-  };
+  // const handleBulkCategoryEdit = () => {
+  //   setBulkCategoryDialogOpen(true);
+  // };
 
   const handleConfirmBulkCategoryUpdate = async () => {
     if (!selectedCategoryForBulk) return;
@@ -418,9 +431,9 @@ const Transactions: React.FC = () => {
   };
 
   // Bulk payee edit functions
-  const handleBulkPayeeEdit = () => {
-    setBulkPayeeDialogOpen(true);
-  };
+  // const handleBulkPayeeEdit = () => {
+  //   setBulkPayeeDialogOpen(true);
+  // };
 
   const handleConfirmBulkPayeeUpdate = async () => {
     if (!selectedPayeeForBulk) return;
@@ -444,6 +457,43 @@ const Transactions: React.FC = () => {
 
   const handleCancelBulkPayeeUpdate = () => {
     setBulkPayeeDialogOpen(false);
+    setSelectedPayeeForBulk('');
+  };
+
+  const handleConfirmBulkUpdate = async () => {
+    if (!selectedCategoryForBulk && !selectedPayeeForBulk) {
+      return;
+    }
+
+    const selectedIds = Array.from(selectedTransactions);
+    
+    try {
+      const updates: any = {};
+      if (selectedCategoryForBulk) {
+        updates.category_id = selectedCategoryForBulk;
+      }
+      if (selectedPayeeForBulk) {
+        updates.payee_id = selectedPayeeForBulk;
+      }
+
+      await bulkUpdateMutation.mutateAsync({
+        transaction_ids: selectedIds,
+        updates
+      });
+
+      // Clear selection and close dialog
+      setSelectedTransactions(new Set());
+      setBulkUpdateDialogOpen(false);
+      setSelectedCategoryForBulk('');
+      setSelectedPayeeForBulk('');
+    } catch (error) {
+      console.error('Failed to update transactions:', error);
+    }
+  };
+
+  const handleCancelBulkUpdate = () => {
+    setBulkUpdateDialogOpen(false);
+    setSelectedCategoryForBulk('');
     setSelectedPayeeForBulk('');
   };
 
@@ -660,19 +710,10 @@ const Transactions: React.FC = () => {
                 variant="outlined"
                 color="primary"
                 startIcon={<Edit />}
-                onClick={handleBulkCategoryEdit}
+                onClick={() => setBulkUpdateDialogOpen(true)}
                 sx={{ ml: 2 }}
               >
-                Change Category ({selectedTransactions.size})
-              </Button>
-              <Button
-                variant="outlined"
-                color="secondary"
-                startIcon={<Edit />}
-                onClick={handleBulkPayeeEdit}
-                sx={{ ml: 2 }}
-              >
-                Change Payee ({selectedTransactions.size})
+                Update Selected ({selectedTransactions.size})
               </Button>
               <Button
                 variant="outlined"
@@ -1563,6 +1604,118 @@ const Transactions: React.FC = () => {
             disabled={!selectedPayeeForBulk || updateMutation.isPending}
           >
             {updateMutation.isPending ? 'Updating...' : `Update ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Unified Bulk Update Dialog */}
+      <Dialog
+        open={bulkUpdateDialogOpen}
+        onClose={handleCancelBulkUpdate}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Update Selected Transactions</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Update {selectedTransactions.size} selected transaction{selectedTransactions.size > 1 ? 's' : ''}:
+          </Typography>
+          
+          {/* Show preview of selected transactions */}
+          {transactionData?.items && (
+            <Box sx={{ mt: 2, mb: 3, maxHeight: 200, overflow: 'auto' }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Selected Transactions:
+              </Typography>
+              {transactionData.items
+                .filter(t => selectedTransactions.has(t.id))
+                .slice(0, 5) // Show only first 5 for preview
+                .map((transaction) => (
+                  <Box 
+                    key={transaction.id} 
+                    sx={{ 
+                      p: 1, 
+                      mb: 1, 
+                      backgroundColor: 'grey.50', 
+                      borderRadius: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2">
+                        {transaction.description || 'No description'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Current: {categories?.find(c => c.id === transaction.category_id)?.name || 'No category'} | {payees?.find(p => p.id === transaction.payee_id)?.name || 'No payee'}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color={transaction.type === 'income' ? 'success.main' : 'error.main'}>
+                      {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                    </Typography>
+                  </Box>
+                ))}
+              {selectedTransactions.size > 5 && (
+                <Typography variant="caption" color="text.secondary">
+                  ... and {selectedTransactions.size - 5} more transactions
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                Category (optional)
+              </Typography>
+              <Autocomplete
+                options={categories || []}
+                getOptionLabel={(option) => option.name}
+                value={categories?.find(c => c.id === selectedCategoryForBulk) || null}
+                onChange={(_, value) => setSelectedCategoryForBulk(value?.id || '')}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    placeholder="Keep current categories"
+                    size="small"
+                  />
+                )}
+                size="small"
+              />
+            </Box>
+
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                Payee (optional)
+              </Typography>
+              <Autocomplete
+                options={payees || []}
+                getOptionLabel={(option) => option.name}
+                value={payees?.find(p => p.id === selectedPayeeForBulk) || null}
+                onChange={(_, value) => setSelectedPayeeForBulk(value?.id || '')}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    placeholder="Keep current payees"
+                    size="small"
+                  />
+                )}
+                size="small"
+              />
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelBulkUpdate}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmBulkUpdate} 
+            color="primary" 
+            variant="contained"
+            disabled={(!selectedCategoryForBulk && !selectedPayeeForBulk) || bulkUpdateMutation.isPending}
+          >
+            {bulkUpdateMutation.isPending ? 'Updating...' : `Update ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
           </Button>
         </DialogActions>
       </Dialog>
