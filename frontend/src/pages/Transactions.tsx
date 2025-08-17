@@ -37,6 +37,7 @@ import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../servi
 import { Transaction, CreateTransactionDto, PaginatedResponse } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
+import { useToast } from '../contexts/ToastContext';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import SmartInlineEdit from '../components/SmartInlineEdit';
 import SmartAutocomplete from '../components/SmartAutocomplete';
@@ -88,6 +89,7 @@ interface SortState {
 const Transactions: React.FC = () => {
   usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
   const navigate = useNavigate();
+  const { showError } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const defaultFilters: TransactionFilters = {
@@ -99,6 +101,17 @@ const Transactions: React.FC = () => {
     'transactions-filters',
     defaultFilters
   );
+
+  // Initialize month/year dropdowns based on existing filter dates
+  React.useEffect(() => {
+    if (filters.startDate) {
+      const date = new Date(filters.startDate);
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear().toString();
+      setSelectedMonth(month);
+      setSelectedYear(year);
+    }
+  }, [filters.startDate]); // Re-run when startDate changes
   const [showFilters, setShowFilters] = useState(false);
   const [savingTransactions, setSavingTransactions] = useState<Set<string>>(new Set());
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
@@ -111,6 +124,8 @@ const Transactions: React.FC = () => {
   const [selectedPayeeForBulk, setSelectedPayeeForBulk] = useState<string>('');
   const [bulkUpdateDialogOpen, setBulkUpdateDialogOpen] = useState(false);
   const [sortState, setSortState] = useState<SortState>({ field: null, direction: 'asc' });
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [selectedYear, setSelectedYear] = useState<string>('');
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -259,7 +274,7 @@ const Transactions: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['payees'] });
       return newPayee;
     } catch (error) {
-      console.error('Failed to create payee:', error);
+      showError('Failed to create payee');
       throw error;
     }
   };
@@ -272,7 +287,7 @@ const Transactions: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       return newCategory;
     } catch (error) {
-      console.error('Failed to create category:', error);
+      showError('Failed to create category');
       throw error;
     }
   };
@@ -421,7 +436,7 @@ const Transactions: React.FC = () => {
       setSelectedTransactions(new Set());
       setSelectedCategoryForBulk('');
     } catch (error) {
-      console.error('Bulk category update failed:', error);
+      showError('Bulk category update failed');
     }
   };
 
@@ -451,7 +466,7 @@ const Transactions: React.FC = () => {
       setSelectedTransactions(new Set());
       setSelectedPayeeForBulk('');
     } catch (error) {
-      console.error('Bulk payee update failed:', error);
+      showError('Bulk payee update failed');
     }
   };
 
@@ -470,10 +485,16 @@ const Transactions: React.FC = () => {
     try {
       const updates: any = {};
       if (selectedCategoryForBulk) {
-        updates.category_id = selectedCategoryForBulk;
+        updates.category_id = selectedCategoryForBulk === 'none' ? undefined : selectedCategoryForBulk;
       }
       if (selectedPayeeForBulk) {
-        updates.payee_id = selectedPayeeForBulk;
+        updates.payee_id = selectedPayeeForBulk === 'none' ? undefined : selectedPayeeForBulk;
+      }
+
+      // Ensure we have at least one update to send
+      if (Object.keys(updates).length === 0) {
+        showError('Please select at least one field to update');
+        return;
       }
 
       await bulkUpdateMutation.mutateAsync({
@@ -487,7 +508,7 @@ const Transactions: React.FC = () => {
       setSelectedCategoryForBulk('');
       setSelectedPayeeForBulk('');
     } catch (error) {
-      console.error('Failed to update transactions:', error);
+      showError('Failed to update transactions');
     }
   };
 
@@ -548,6 +569,19 @@ const Transactions: React.FC = () => {
 
       return newFilters;
     });
+
+    // Sync month/year dropdowns when dates are changed manually
+    if (field === 'startDate' && value) {
+      const date = new Date(value);
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear().toString();
+      setSelectedMonth(month);
+      setSelectedYear(year);
+    } else if (field === 'startDate' && !value) {
+      // Clear month/year when start date is cleared
+      setSelectedMonth('');
+      setSelectedYear('');
+    }
   };
 
   const handlePageChange = (event: React.ChangeEvent<unknown>, newPage: number) => {
@@ -564,6 +598,83 @@ const Transactions: React.FC = () => {
 
   const clearFilters = () => {
     clearSavedFilters();
+    setSelectedMonth('');
+    setSelectedYear('');
+  };
+
+  // Helper function to generate month options
+  const getMonthOptions = () => [
+    { value: '', label: 'All Months' },
+    { value: '01', label: 'January' },
+    { value: '02', label: 'February' },
+    { value: '03', label: 'March' },
+    { value: '04', label: 'April' },
+    { value: '05', label: 'May' },
+    { value: '06', label: 'June' },
+    { value: '07', label: 'July' },
+    { value: '08', label: 'August' },
+    { value: '09', label: 'September' },
+    { value: '10', label: 'October' },
+    { value: '11', label: 'November' },
+    { value: '12', label: 'December' },
+  ];
+
+  // Helper function to generate year options (last 10 years + current + next 2 years)
+  const getYearOptions = () => {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    years.push({ value: '', label: 'All Years' });
+    for (let year = currentYear - 10; year <= currentYear + 2; year++) {
+      years.push({ value: year.toString(), label: year.toString() });
+    }
+    return years;
+  };
+
+  // Handle month/year selection
+  const handleMonthYearChange = (type: 'month' | 'year', value: string) => {
+    if (type === 'month') {
+      setSelectedMonth(value);
+    } else {
+      setSelectedYear(value);
+    }
+
+    // Update date filters based on month/year selection
+    const month = type === 'month' ? value : selectedMonth;
+    const year = type === 'year' ? value : selectedYear;
+
+    if (month && year) {
+      // Both month and year selected - set specific month range
+      const startDate = `${year}-${month}-01`;
+      const lastDay = getLastDayOfMonth(parseInt(year), parseInt(month));
+      const endDate = `${year}-${month}-${lastDay.toString().padStart(2, '0')}`;
+      
+      setFilters(prev => ({
+        ...prev,
+        startDate,
+        endDate,
+        page: 1
+      }));
+    } else if (year && !month) {
+      // Only year selected - set full year range
+      const startDate = `${year}-01-01`;
+      const endDate = `${year}-12-31`;
+      
+      setFilters(prev => ({
+        ...prev,
+        startDate,
+        endDate,
+        page: 1
+      }));
+    } else if (!month && !year) {
+      // Both cleared - clear date filters
+      setFilters(prev => ({
+        ...prev,
+        startDate: undefined,
+        endDate: undefined,
+        page: 1
+      }));
+    }
+    // If only month is selected without year, don't update dates (invalid state)
   };
 
   const handleSort = (field: SortField) => {
@@ -643,7 +754,7 @@ const Transactions: React.FC = () => {
     return sorted;
   }, [transactionData?.items, sortState, payees, categories]);
 
-  const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId || (filters.categoryIds && filters.categoryIds.length > 0) || (filters.payeeIds && filters.payeeIds.length > 0);
+  const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId || (filters.categoryIds && filters.categoryIds.length > 0) || (filters.payeeIds && filters.payeeIds.length > 0) || selectedMonth || selectedYear;
   
   // Calculate uncategorized transactions count
   const uncategorizedCount = transactionData?.items?.filter(
@@ -733,8 +844,46 @@ const Transactions: React.FC = () => {
       {showFilters && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} sm={2.4}>
+            <Grid container spacing={3} alignItems="flex-start">
+              {/* Date & Time Filters Section */}
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                  Date & Time Filters
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  select
+                  label="Month"
+                  value={selectedMonth}
+                  onChange={(e) => handleMonthYearChange('month', e.target.value)}
+                  fullWidth
+                  size="small"
+                >
+                  {getMonthOptions().map((month) => (
+                    <MenuItem key={month.value} value={month.value}>
+                      {month.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  select
+                  label="Year"
+                  value={selectedYear}
+                  onChange={(e) => handleMonthYearChange('year', e.target.value)}
+                  fullWidth
+                  size="small"
+                >
+                  {getYearOptions().map((year) => (
+                    <MenuItem key={year.value} value={year.value}>
+                      {year.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
                 <TextField
                   label="Start Date"
                   type="date"
@@ -745,7 +894,7 @@ const Transactions: React.FC = () => {
                   InputLabelProps={{ shrink: true }}
                 />
               </Grid>
-              <Grid item xs={12} sm={2.4}>
+              <Grid item xs={12} sm={6} md={3}>
                 <TextField
                   label="End Date"
                   type="date"
@@ -756,7 +905,14 @@ const Transactions: React.FC = () => {
                   InputLabelProps={{ shrink: true }}
                 />
               </Grid>
-              <Grid item xs={12} sm={2.4}>
+
+              {/* Account & Entity Filters Section */}
+              <Grid item xs={12}>
+                <Typography variant="subtitle2" color="text.secondary" gutterBottom sx={{ mt: 2 }}>
+                  Account & Entity Filters
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
                 <TextField
                   select
                   label="Account"
@@ -773,7 +929,7 @@ const Transactions: React.FC = () => {
                   ))}
                 </TextField>
               </Grid>
-              <Grid item xs={12} sm={2.4}>
+              <Grid item xs={12} sm={6} md={4}>
                 <Autocomplete
                   multiple
                   value={filters.categoryIds ? filters.categoryIds.map(id => 
@@ -808,7 +964,7 @@ const Transactions: React.FC = () => {
                   isOptionEqualToValue={(option, value) => option.id === value.id}
                 />
               </Grid>
-              <Grid item xs={12} sm={2.4}>
+              <Grid item xs={12} sm={6} md={4}>
                 <Autocomplete
                   multiple
                   value={filters.payeeIds ? filters.payeeIds.map(id => 
@@ -843,15 +999,18 @@ const Transactions: React.FC = () => {
                   isOptionEqualToValue={(option, value) => option.id === value.id}
                 />
               </Grid>
-              <Grid item xs={12} sm={12} sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+              
+              {/* Actions Section */}
+              <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
                 <Button
                   onClick={clearFilters}
                   disabled={!hasActiveFilters}
                   startIcon={<Clear />}
                   size="small"
                   variant="outlined"
+                  color="secondary"
                 >
-                  Clear Filters
+                  Clear All Filters
                 </Button>
               </Grid>
             </Grid>
@@ -896,6 +1055,9 @@ const Transactions: React.FC = () => {
                   Account
                   {getSortIcon('account')}
                 </Box>
+              </TableCell>
+              <TableCell align="right">
+                Account Balance
               </TableCell>
               <TableCell 
                 sx={{ cursor: 'pointer', userSelect: 'none' }} 
@@ -963,7 +1125,47 @@ const Transactions: React.FC = () => {
                     maxLength={255}
                   />
                 </TableCell>
-                <TableCell>{transaction.account?.name}</TableCell>
+                <TableCell>
+                  {transaction.type === 'transfer' ? (
+                    <Box>
+                      <Typography variant="body2">
+                        {transaction.account?.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        → {transaction.to_account?.name}
+                      </Typography>
+                    </Box>
+                  ) : (
+                    transaction.account?.name
+                  )}
+                </TableCell>
+                <TableCell align="right">
+                  {transaction.type === 'transfer' ? (
+                    <Box>
+                      <Typography 
+                        variant="body2" 
+                        fontWeight={500}
+                        color={transaction.account?.type === 'credit' && (transaction.account?.balance || 0) > 0 ? 'error.main' : 'text.primary'}
+                      >
+                        {formatCurrency(transaction.account?.balance || 0)}
+                      </Typography>
+                      <Typography 
+                        variant="caption" 
+                        color={transaction.to_account?.type === 'credit' && (transaction.to_account?.balance || 0) > 0 ? 'error.main' : 'text.secondary'}
+                      >
+                        {formatCurrency(transaction.to_account?.balance || 0)}
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Typography 
+                      variant="body2" 
+                      fontWeight={500}
+                      color={transaction.account?.type === 'credit' && (transaction.account?.balance || 0) > 0 ? 'error.main' : 'text.primary'}
+                    >
+                      {formatCurrency(transaction.account?.balance || 0)}
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell sx={{ minWidth: 150 }}>
                   <SmartInlineEdit
                     transactionId={transaction.id}
@@ -1009,16 +1211,27 @@ const Transactions: React.FC = () => {
                   />
                 </TableCell>
                 <TableCell align="right">
-                  <Typography
-                    color={
-                      transaction.type === 'income'
-                        ? 'success.main'
-                        : 'error.main'
-                    }
-                  >
-                    {transaction.type === 'income' ? '+' : '-'}
-                    {formatCurrency(transaction.amount)}
-                  </Typography>
+                  {transaction.type === 'transfer' ? (
+                    <Box>
+                      <Typography color="info.main" variant="body2">
+                        {formatCurrency(transaction.amount)}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Transfer
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Typography
+                      color={
+                        transaction.type === 'income'
+                          ? 'success.main'
+                          : 'error.main'
+                      }
+                    >
+                      {transaction.type === 'income' ? '+' : '-'}
+                      {formatCurrency(transaction.amount)}
+                    </Typography>
+                  )}
                 </TableCell>
                 <TableCell align="center">
                   <IconButton

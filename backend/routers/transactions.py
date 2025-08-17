@@ -16,7 +16,8 @@ from schemas.transactions import (
     TransactionUpdate, 
     TransactionResponse, 
     PaginatedTransactionsResponse,
-    TransactionSummary
+    TransactionSummary,
+    TransactionBulkUpdate
 )
 from utils.auth import get_current_active_user
 from services.learning_service import TransactionLearningService
@@ -145,7 +146,11 @@ def get_transactions(
     # Apply filters
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
-        query = query.filter(Transaction.account_id.in_(account_id_list))
+        # Include transactions where the account is either source OR destination (for transfers)
+        query = query.filter(
+            (Transaction.account_id.in_(account_id_list)) | 
+            (Transaction.to_account_id.in_(account_id_list))
+        )
     
     if category_ids:
         category_id_parts = [id.strip() for id in category_ids.split(',') if id.strip()]
@@ -228,7 +233,11 @@ def get_transaction_summary(
     # Apply filters (same logic as get_transactions)
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
-        query = query.filter(Transaction.account_id.in_(account_id_list))
+        # Include transactions where the account is either source OR destination (for transfers)
+        query = query.filter(
+            (Transaction.account_id.in_(account_id_list)) | 
+            (Transaction.to_account_id.in_(account_id_list))
+        )
     
     if category_ids:
         category_id_parts = [id.strip() for id in category_ids.split(',') if id.strip()]
@@ -288,6 +297,99 @@ def get_transaction_summary(
         net_amount=net_amount,
         transaction_count=transaction_count
     )
+
+@router.put("/bulk", response_model=List[TransactionResponse])
+async def bulk_update_transactions(
+    bulk_update: TransactionBulkUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update multiple transactions with the same changes"""
+    updated_transactions = []
+    
+    try:
+        for transaction_id in bulk_update.transaction_ids:
+            # Get the transaction
+            transaction = db.query(Transaction).options(
+                joinedload(Transaction.account),
+                joinedload(Transaction.to_account),
+                joinedload(Transaction.payee),
+                joinedload(Transaction.category)
+            ).filter(
+                Transaction.id == transaction_id,
+                Transaction.user_id == current_user.id
+            ).first()
+            
+            if transaction is None:
+                continue  # Skip transactions that don't exist or don't belong to user
+            
+            # Store original values for balance reversal and learning
+            original_values = {
+                'amount': transaction.amount,
+                'type': transaction.type,
+                'account_id': transaction.account_id,
+                'to_account_id': transaction.to_account_id,
+                'description': transaction.description,
+                'payee_id': transaction.payee_id,
+                'category_id': transaction.category_id
+            }
+            original_amount = transaction.amount
+            original_type = transaction.type
+            original_account_id = transaction.account_id
+            original_to_account_id = transaction.to_account_id
+            
+            # Reverse original balance changes
+            if original_type in ["income", "expense"]:
+                update_account_balance(db, original_account_id, original_amount, original_type, is_reversal=True)
+            elif original_type == "transfer":
+                update_account_balance(db, original_account_id, original_amount, "expense", is_reversal=True)
+                if original_to_account_id:
+                    update_account_balance(db, original_to_account_id, original_amount, "income", is_reversal=True)
+            
+            # Update transaction with only the fields that are set in the updates
+            update_data = bulk_update.updates.dict(exclude_unset=True)
+            for field, value in update_data.items():
+                setattr(transaction, field, value)
+            
+            # Apply new balance changes
+            if transaction.type in ["income", "expense"]:
+                update_account_balance(db, transaction.account_id, transaction.amount, transaction.type)
+            elif transaction.type == "transfer":
+                update_account_balance(db, transaction.account_id, transaction.amount, "expense")
+                if transaction.to_account_id:
+                    update_account_balance(db, transaction.to_account_id, transaction.amount, "income")
+            
+            updated_transactions.append(transaction)
+            
+            # 🧠 LEARNING TRIGGER - Run asynchronously
+            new_values = bulk_update.updates.dict(exclude_unset=True)
+            background_tasks.add_task(
+                TransactionLearningService.learn_from_transaction_update,
+                db=db,
+                user_id=str(current_user.id),
+                transaction_id=str(transaction_id),
+                old_values=original_values,
+                new_values=new_values,
+                update_context={
+                    'account_type': transaction.account.type,
+                    'update_method': 'bulk_edit',
+                    'timestamp': datetime.now()
+                }
+            )
+        
+        # Commit all changes at once
+        db.commit()
+        
+        # Refresh all updated transactions
+        for transaction in updated_transactions:
+            db.refresh(transaction)
+        
+        return updated_transactions
+    
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to update transactions: {str(e)}")
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 def get_transaction(
@@ -386,6 +488,7 @@ async def update_transaction(
     )
     
     return transaction
+
 
 @router.delete("/{transaction_id}")
 def delete_transaction(

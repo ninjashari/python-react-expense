@@ -9,6 +9,7 @@ class AccountSummary(BaseModel):
     id: uuid.UUID
     name: str
     type: str
+    balance: Decimal
     
     class Config:
         from_attributes = True
@@ -82,3 +83,7 @@ class TransactionSummary(BaseModel):
     total_expense: Decimal
     net_amount: Decimal
     transaction_count: int
+
+class TransactionBulkUpdate(BaseModel):
+    transaction_ids: List[uuid.UUID]
+    updates: TransactionUpdate

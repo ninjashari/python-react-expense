@@ -25,6 +25,8 @@ class Transaction(Base):
     description = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     date = Column(Date, nullable=False)
+    balance_after_transaction = Column(Numeric(12, 2), nullable=True)  # Account balance after this transaction
+    to_account_balance_after = Column(Numeric(12, 2), nullable=True)  # To-account balance after transfer (for transfers only)
     created_at = Column(DateTime, server_default=func.current_timestamp())
     updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     

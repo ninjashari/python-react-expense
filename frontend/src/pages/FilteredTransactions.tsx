@@ -22,8 +22,6 @@ import {
   FormControl,
   InputLabel,
   Select,
-  Divider,
-  Stack,
 } from '@mui/material';
 import { Clear, FilterList, Analytics, TrendingUp } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -250,15 +248,6 @@ const FilteredTransactions: React.FC = () => {
               Filter and analyze your transactions to gain insights into your spending patterns
             </Typography>
           </Box>
-          <Button
-            onClick={clearFilters}
-            disabled={!hasActiveFilters()}
-            startIcon={<Clear />}
-            variant="outlined"
-            size="large"
-          >
-            Clear All Filters
-          </Button>
         </Box>
         {hasActiveFilters() && (
           <Alert severity="info" icon={<TrendingUp />} sx={{ mt: 2 }}>
@@ -284,95 +273,100 @@ const FilteredTransactions: React.FC = () => {
             </Typography>
           </Box>
           
-          <Stack spacing={3}>
-            {/* Date Range Section */}
-            <Box>
-              <Typography variant="subtitle2" color="textSecondary" mb={2}>
+          <Grid container spacing={3} alignItems="flex-start">
+            {/* Date Filters Section */}
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" color="textSecondary" gutterBottom>
                 Date Range
               </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    label="Start Date"
-                    type="date"
-                    value={filters.startDate || ''}
-                    onChange={(e) => handleFilterChange('startDate', e.target.value || undefined)}
-                    fullWidth
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    label="End Date"
-                    type="date"
-                    value={filters.endDate || ''}
-                    onChange={(e) => handleFilterChange('endDate', e.target.value || undefined)}
-                    fullWidth
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-              </Grid>
-            </Box>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="Start Date"
+                type="date"
+                value={filters.startDate || ''}
+                onChange={(e) => handleFilterChange('startDate', e.target.value || undefined)}
+                fullWidth
+                size="small"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label="End Date"
+                type="date"
+                value={filters.endDate || ''}
+                onChange={(e) => handleFilterChange('endDate', e.target.value || undefined)}
+                fullWidth
+                size="small"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
 
-            <Divider />
-
-            {/* Transaction Type and Entity Filters */}
-            <Box>
-              <Typography variant="subtitle2" color="textSecondary" mb={2}>
+            {/* Transaction Filters Section */}
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" color="textSecondary" gutterBottom sx={{ mt: 2 }}>
                 Transaction Filters
               </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <TextField
-                    select
-                    label="Transaction Type"
-                    value={filters.transactionType || ''}
-                    onChange={(e) => handleFilterChange('transactionType', e.target.value || undefined)}
-                    fullWidth
-                    size="small"
-                  >
-                    {transactionTypes.map((option) => (
-                      <MenuItem key={option.value} value={option.value}>
-                        {option.label}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                </Grid>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                select
+                label="Transaction Type"
+                value={filters.transactionType || ''}
+                onChange={(e) => handleFilterChange('transactionType', e.target.value || undefined)}
+                fullWidth
+                size="small"
+              >
+                {transactionTypes.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <MultiSelectDropdown
+                label="Accounts"
+                options={formatAccountOptions(accounts)}
+                value={filters.accountIds}
+                onChange={(values) => handleFilterChange('accountIds', values || [])}
+                placeholder="Select accounts..."
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <MultiSelectDropdown
+                label="Categories"
+                options={formatCategoryOptions(categories)}
+                value={filters.categoryIds}
+                onChange={(values) => handleFilterChange('categoryIds', values || [])}
+                placeholder="Select categories..."
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <MultiSelectDropdown
+                label="Payees"
+                options={formatPayeeOptions(payees)}
+                value={filters.payeeIds}
+                onChange={(values) => handleFilterChange('payeeIds', values || [])}
+                placeholder="Select payees..."
+              />
+            </Grid>
 
-                <Grid item xs={12} sm={6} md={3}>
-                  <MultiSelectDropdown
-                    label="Accounts"
-                    options={formatAccountOptions(accounts)}
-                    value={filters.accountIds}
-                    onChange={(values) => handleFilterChange('accountIds', values || [])}
-                    placeholder="Select accounts..."
-                  />
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <MultiSelectDropdown
-                    label="Categories"
-                    options={formatCategoryOptions(categories)}
-                    value={filters.categoryIds}
-                    onChange={(values) => handleFilterChange('categoryIds', values || [])}
-                    placeholder="Select categories..."
-                  />
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <MultiSelectDropdown
-                    label="Payees"
-                    options={formatPayeeOptions(payees)}
-                    value={filters.payeeIds}
-                    onChange={(values) => handleFilterChange('payeeIds', values || [])}
-                    placeholder="Select payees..."
-                  />
-                </Grid>
-              </Grid>
-            </Box>
-          </Stack>
+            {/* Actions Section */}
+            <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+              <Button
+                onClick={clearFilters}
+                disabled={!hasActiveFilters()}
+                startIcon={<Clear />}
+                size="small"
+                variant="outlined"
+                color="secondary"
+              >
+                Clear All Filters
+              </Button>
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
 

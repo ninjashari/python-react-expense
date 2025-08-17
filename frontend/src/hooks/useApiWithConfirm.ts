@@ -1,5 +1,6 @@
 import { useMutation, useQuery, UseMutationOptions, UseQueryOptions } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { useToast } from '../contexts/ToastContext';
 
 interface ApiWithConfirmOptions {
   successMessage?: string;
@@ -8,7 +9,7 @@ interface ApiWithConfirmOptions {
   showErrorDialog?: boolean;
 }
 
-// Enhanced useMutation hook with automatic confirm dialogs
+// Enhanced useMutation hook with automatic MUI toast notifications
 export function useMutationWithConfirm<TData = unknown, TError = Error, TVariables = void, TContext = unknown>(
   mutationFn: (variables: TVariables) => Promise<TData>,
   options?: UseMutationOptions<TData, TError, TVariables, TContext> & ApiWithConfirmOptions
@@ -23,19 +24,21 @@ export function useMutationWithConfirm<TData = unknown, TError = Error, TVariabl
     ...mutationOptions
   } = options || {};
 
+  const { showSuccess, showError } = useToast();
+
   return useMutation({
     mutationFn,
     onSuccess: (data, variables, context) => {
       if (showSuccessDialog) {
         const message = successMessage || 'Operation completed successfully';
-        window.alert(message);
+        showSuccess(message);
       }
       onSuccess?.(data, variables, context);
     },
     onError: (error, variables, context) => {
       if (showErrorDialog) {
         const message = errorMessage || (error as any)?.message || 'An error occurred';
-        window.alert(`Error: ${message}`);
+        showError(message);
       }
       onError?.(error, variables, context);
     },
@@ -43,7 +46,7 @@ export function useMutationWithConfirm<TData = unknown, TError = Error, TVariabl
   });
 }
 
-// Enhanced useQuery hook with automatic error dialog notifications
+// Enhanced useQuery hook with automatic MUI toast error notifications
 export function useQueryWithConfirm<TQueryFnData = unknown, TError = Error, TData = TQueryFnData, TQueryKey extends readonly unknown[] = readonly unknown[]>(
   options: UseQueryOptions<TQueryFnData, TError, TData, TQueryKey> & {
     errorMessage?: string;
@@ -56,17 +59,18 @@ export function useQueryWithConfirm<TQueryFnData = unknown, TError = Error, TDat
     ...queryOptions
   } = options;
 
+  const { showError } = useToast();
   const result = useQuery({
     ...queryOptions,
   });
 
-  // Show error dialog when query fails
+  // Show error toast when query fails
   useEffect(() => {
     if (result.error && showErrorDialog) {
       const message = errorMessage || (result.error as any)?.message || 'Failed to fetch data';
-      window.alert(`Error: ${message}`);
+      showError(message);
     }
-  }, [result.error, showErrorDialog, errorMessage]);
+  }, [result.error, showErrorDialog, errorMessage, showError]);
 
   return result;
 }

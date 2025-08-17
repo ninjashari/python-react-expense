@@ -121,17 +121,24 @@ def recalculate_all_balances(
             db.commit()
             
             # Get all transactions for this account in chronological order
+            # Include both transactions where this account is source OR destination
             transactions = db.query(Transaction).filter(
-                Transaction.account_id == account.id
+                (Transaction.account_id == account.id) | 
+                (Transaction.to_account_id == account.id)
             ).order_by(Transaction.date, Transaction.created_at).all()
             
             # Apply each transaction to recalculate balance
             for txn in transactions:
-                if txn.type in ['income', 'expense']:
+                if txn.type in ['income', 'expense'] and txn.account_id == account.id:
+                    # Regular income/expense transaction where this account is the source
                     update_account_balance(db, account.id, float(txn.amount), txn.type)
                 elif txn.type == 'transfer':
-                    # For transfers, this account is the source (debit/expense side)
-                    update_account_balance(db, account.id, float(txn.amount), 'expense')
+                    if txn.account_id == account.id:
+                        # This account is the source (debit/expense side)
+                        update_account_balance(db, account.id, float(txn.amount), 'expense')
+                    elif txn.to_account_id == account.id:
+                        # This account is the destination (credit/income side)
+                        update_account_balance(db, account.id, float(txn.amount), 'income')
             
             # Get updated balance
             db.refresh(account)
