@@ -59,6 +59,8 @@ class TransactionUpdate(BaseModel):
 class TransactionResponse(TransactionBase):
     id: uuid.UUID
     user_id: uuid.UUID
+    balance_after_transaction: Optional[Decimal] = None
+    to_account_balance_after: Optional[Decimal] = None
     created_at: datetime
     updated_at: Optional[datetime]
     

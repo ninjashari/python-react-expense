@@ -37,6 +37,8 @@ export interface Transaction {
   to_account_id?: string;
   payee_id?: string;
   category_id?: string;
+  balance_after_transaction?: number;
+  to_account_balance_after?: number;
   created_at: string;
   updated_at?: string;
   account?: Account;

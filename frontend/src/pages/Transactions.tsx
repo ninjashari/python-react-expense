@@ -1145,24 +1145,24 @@ const Transactions: React.FC = () => {
                       <Typography 
                         variant="body2" 
                         fontWeight={500}
-                        color={transaction.account?.type === 'credit' && (transaction.account?.balance || 0) > 0 ? 'error.main' : 'text.primary'}
+                        color={transaction.account?.type === 'credit' && (transaction.balance_after_transaction || 0) > 0 ? 'error.main' : 'text.primary'}
                       >
-                        {formatCurrency(transaction.account?.balance || 0)}
+                        {formatCurrency(transaction.balance_after_transaction || 0)}
                       </Typography>
                       <Typography 
                         variant="caption" 
-                        color={transaction.to_account?.type === 'credit' && (transaction.to_account?.balance || 0) > 0 ? 'error.main' : 'text.secondary'}
+                        color={transaction.to_account?.type === 'credit' && (transaction.to_account_balance_after || 0) > 0 ? 'error.main' : 'text.secondary'}
                       >
-                        {formatCurrency(transaction.to_account?.balance || 0)}
+                        {formatCurrency(transaction.to_account_balance_after || 0)}
                       </Typography>
                     </Box>
                   ) : (
                     <Typography 
                       variant="body2" 
                       fontWeight={500}
-                      color={transaction.account?.type === 'credit' && (transaction.account?.balance || 0) > 0 ? 'error.main' : 'text.primary'}
+                      color={transaction.account?.type === 'credit' && (transaction.balance_after_transaction || 0) > 0 ? 'error.main' : 'text.primary'}
                     >
-                      {formatCurrency(transaction.account?.balance || 0)}
+                      {formatCurrency(transaction.balance_after_transaction || 0)}
                     </Typography>
                   )}
                 </TableCell>

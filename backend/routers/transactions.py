@@ -51,6 +51,35 @@ def update_account_balance(db: Session, account_id: uuid.UUID, amount: float, tr
     db.commit()
     return account
 
+def calculate_balance_after_transaction(db: Session, account_id: uuid.UUID, amount: float, transaction_type: str):
+    """Calculate what the account balance will be after applying this transaction"""
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    # Convert amount to Decimal to match the database field type
+    amount_decimal = Decimal(str(amount))
+    current_balance = account.balance
+    
+    if account.type == 'credit':
+        # For credit cards: balance represents amount owed
+        if transaction_type == "income":  # Payment to credit card
+            new_balance = current_balance - amount_decimal  # Reduces debt
+        elif transaction_type == "expense":  # Charge on credit card
+            new_balance = current_balance + amount_decimal  # Increases debt
+        else:
+            new_balance = current_balance
+    else:
+        # For regular accounts: balance represents money available
+        if transaction_type == "income":
+            new_balance = current_balance + amount_decimal
+        elif transaction_type == "expense":
+            new_balance = current_balance - amount_decimal
+        else:
+            new_balance = current_balance
+    
+    return new_balance
+
 @router.post("/", response_model=TransactionResponse)
 async def create_transaction(
     transaction: TransactionCreate, 
@@ -71,8 +100,31 @@ async def create_transaction(
         if transaction.type != "transfer":
             raise HTTPException(status_code=400, detail="to_account_id can only be used with transfer transactions")
     
+    # Calculate balance after transaction for both accounts (before updating actual balances)
+    balance_after_transaction = None
+    to_account_balance_after = None
+    
+    if transaction.type in ["income", "expense"]:
+        balance_after_transaction = calculate_balance_after_transaction(
+            db, transaction.account_id, transaction.amount, transaction.type
+        )
+    elif transaction.type == "transfer":
+        # Calculate balance for source account (debit)
+        balance_after_transaction = calculate_balance_after_transaction(
+            db, transaction.account_id, transaction.amount, "expense"
+        )
+        # Calculate balance for destination account (credit)
+        to_account_balance_after = calculate_balance_after_transaction(
+            db, transaction.to_account_id, transaction.amount, "income"
+        )
+    
     try:
-        db_transaction = Transaction(**transaction.dict(), user_id=current_user.id)
+        # Create transaction with calculated balances
+        transaction_data = transaction.dict()
+        transaction_data['balance_after_transaction'] = balance_after_transaction
+        transaction_data['to_account_balance_after'] = to_account_balance_after
+        
+        db_transaction = Transaction(**transaction_data, user_id=current_user.id)
         db.add(db_transaction)
         db.commit()
         db.refresh(db_transaction)
@@ -80,7 +132,7 @@ async def create_transaction(
         db.rollback()
         raise HTTPException(status_code=400, detail="Failed to create transaction")
     
-    # Update account balances
+    # Update account balances (this should match the calculated balances above)
     if transaction.type in ["income", "expense"]:
         update_account_balance(db, transaction.account_id, transaction.amount, transaction.type)
     elif transaction.type == "transfer":
@@ -352,7 +404,30 @@ async def bulk_update_transactions(
             for field, value in update_data.items():
                 setattr(transaction, field, value)
             
-            # Apply new balance changes
+            # Calculate new balances after transaction (before updating actual balances)
+            new_balance_after_transaction = None
+            new_to_account_balance_after = None
+            
+            if transaction.type in ["income", "expense"]:
+                new_balance_after_transaction = calculate_balance_after_transaction(
+                    db, transaction.account_id, transaction.amount, transaction.type
+                )
+            elif transaction.type == "transfer":
+                # Calculate balance for source account (debit)
+                new_balance_after_transaction = calculate_balance_after_transaction(
+                    db, transaction.account_id, transaction.amount, "expense"
+                )
+                # Calculate balance for destination account (credit)
+                if transaction.to_account_id:
+                    new_to_account_balance_after = calculate_balance_after_transaction(
+                        db, transaction.to_account_id, transaction.amount, "income"
+                    )
+            
+            # Update the calculated balances in the transaction
+            transaction.balance_after_transaction = new_balance_after_transaction
+            transaction.to_account_balance_after = new_to_account_balance_after
+            
+            # Apply new balance changes (this should match the calculated balances above)
             if transaction.type in ["income", "expense"]:
                 update_account_balance(db, transaction.account_id, transaction.amount, transaction.type)
             elif transaction.type == "transfer":
@@ -454,14 +529,36 @@ async def update_transaction(
         if original_to_account_id:
             update_account_balance(db, original_to_account_id, original_amount, "income", is_reversal=True)
     
-    # Update transaction
+    # Calculate new balances after transaction (before updating actual balances)
+    new_balance_after_transaction = None
+    new_to_account_balance_after = None
+    
+    if transaction.type in ["income", "expense"]:
+        new_balance_after_transaction = calculate_balance_after_transaction(
+            db, transaction.account_id, transaction.amount, transaction.type
+        )
+    elif transaction.type == "transfer":
+        # Calculate balance for source account (debit)
+        new_balance_after_transaction = calculate_balance_after_transaction(
+            db, transaction.account_id, transaction.amount, "expense"
+        )
+        # Calculate balance for destination account (credit)
+        if transaction.to_account_id:
+            new_to_account_balance_after = calculate_balance_after_transaction(
+                db, transaction.to_account_id, transaction.amount, "income"
+            )
+    
+    # Update transaction with new data and calculated balances
     update_data = transaction_update.dict(exclude_unset=True)
+    update_data['balance_after_transaction'] = new_balance_after_transaction
+    update_data['to_account_balance_after'] = new_to_account_balance_after
+    
     for field, value in update_data.items():
         setattr(transaction, field, value)
     
     db.commit()
     
-    # Apply new balance changes
+    # Apply new balance changes (this should match the calculated balances above)
     if transaction.type in ["income", "expense"]:
         update_account_balance(db, transaction.account_id, transaction.amount, transaction.type)
     elif transaction.type == "transfer":
