@@ -155,6 +155,8 @@ export const transactionsApi = {
   bulkUpdate: (transaction_ids: string[], updates: any): Promise<any> => 
     api.put('/transactions/bulk', { transaction_ids, updates }).then(res => res.data),
   delete: (id: string): Promise<void> => api.delete(`/transactions/${id}`).then(res => res.data),
+  recalculateAccountBalances: (accountId: string): Promise<any> => 
+    api.post(`/transactions/recalculate-balances/${accountId}`).then(res => res.data),
 };
 
 

@@ -18,10 +18,10 @@ import {
   Backdrop,
   Alert,
 } from '@mui/material';
-import { Add, Edit, Delete, Refresh } from '@mui/icons-material';
+import { Add, Edit, Delete, Refresh, Calculate } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
-import { accountsApi } from '../services/api';
+import { accountsApi, transactionsApi } from '../services/api';
 import { Account, CreateAccountDto } from '../types';
 import { formatCurrency, formatAccountType } from '../utils/formatters';
 import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
@@ -74,21 +74,7 @@ const Accounts: React.FC = () => {
 
   const { data: accounts, isLoading, error, refetch } = useQuery({
     queryKey: ['accounts'],
-    queryFn: async () => {
-      // Show specific loading state for recalculation
-      setIsRecalculating(true);
-      
-      try {
-        await accountsApi.recalculateBalances();
-      } catch (error) {
-        console.warn('Failed to recalculate balances:', error);
-        // Continue with fetching accounts even if recalculation fails
-      } finally {
-        setIsRecalculating(false);
-      }
-      
-      return accountsApi.getAll();
-    },
+    queryFn: accountsApi.getAll,
   });
 
   const createMutation = useCreateWithConfirm(accountsApi.create, {
@@ -172,6 +158,29 @@ const Accounts: React.FC = () => {
     }
   };
 
+  const handleRecalculateBalances = async (account: Account) => {
+    if (window.confirm(`Recalculate transaction balances for "${account.name}"?\n\nThis will recalculate the balance_after_transaction field for all transactions in this account. This is useful for maintaining data integrity.`)) {
+      setIsRecalculating(true);
+      try {
+        const result = await transactionsApi.recalculateAccountBalances(account.id);
+        
+        // Show success message
+        alert(`Success: ${result.message}\nTransactions updated: ${result.transactions_updated}`);
+        
+        // Refresh accounts and transactions data
+        queryClient.invalidateQueries({ queryKey: ['accounts'] });
+        queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        
+      } catch (error: any) {
+        console.error('Failed to recalculate balances:', error);
+        const errorMessage = error.response?.data?.detail || error.message || 'Failed to recalculate balances';
+        alert(`Error: ${errorMessage}`);
+      } finally {
+        setIsRecalculating(false);
+      }
+    }
+  };
+
   if (isLoading) {
     return (
       <Box>
@@ -189,10 +198,10 @@ const Accounts: React.FC = () => {
         <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" height="400px">
           <CircularProgress size={48} />
           <Typography variant="h6" mt={2} color="textSecondary">
-            {isRecalculating ? 'Recalculating account balances...' : 'Loading accounts...'}
+            Loading accounts...
           </Typography>
           <Typography variant="body2" color="textSecondary" mt={1}>
-            {isRecalculating ? 'Processing all transactions to ensure accurate balances' : 'Fetching your account data'}
+            Fetching your account data
           </Typography>
         </Box>
       </Box>
@@ -327,6 +336,14 @@ const Accounts: React.FC = () => {
                       onClick={() => handleOpenDialog(account)}
                     >
                       <Edit />
+                    </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => handleRecalculateBalances(account)}
+                      disabled={isRecalculating}
+                      title="Recalculate transaction balances"
+                    >
+                      {isRecalculating ? <CircularProgress size={16} /> : <Calculate />}
                     </IconButton>
                     <IconButton
                       size="small"

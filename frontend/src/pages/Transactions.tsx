@@ -29,6 +29,9 @@ import {
   Checkbox,
   Autocomplete,
   Chip,
+  Switch,
+  FormControlLabel,
+  Alert,
 } from '@mui/material';
 import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics, ArrowUpward, ArrowDownward } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -101,6 +104,8 @@ const Transactions: React.FC = () => {
     'transactions-filters',
     defaultFilters
   );
+  
+  const [showAll, setShowAll] = useState(false);
 
   // Initialize month/year dropdowns based on existing filter dates
   React.useEffect(() => {
@@ -141,10 +146,10 @@ const Transactions: React.FC = () => {
   const watchTransactionType = watch('type');
 
   const { data: transactionData, isLoading: transactionsLoading } = useQuery<PaginatedResponse<Transaction>>({
-    queryKey: ['transactions', filters],
+    queryKey: ['transactions', filters, showAll],
     queryFn: () => transactionsApi.getAll({ 
-      page: filters.page,
-      size: filters.size,
+      page: showAll ? 1 : filters.page,
+      size: showAll ? 10000 : filters.size, // Use large number for show all
       start_date: filters.startDate,
       end_date: filters.endDate,
       account_ids: filters.accountId,
@@ -152,6 +157,7 @@ const Transactions: React.FC = () => {
       payee_ids: filters.payeeIds?.join(','),
     }),
   });
+
 
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
@@ -619,14 +625,17 @@ const Transactions: React.FC = () => {
     { value: '12', label: 'December' },
   ];
 
-  // Helper function to generate year options (last 10 years + current + next 2 years)
+  // Helper function to generate year options from 2014 to current year
   const getYearOptions = () => {
     const currentYear = new Date().getFullYear();
     const years = [];
     years.push({ value: '', label: 'All Years' });
-    for (let year = currentYear - 10; year <= currentYear + 2; year++) {
+    
+    // Generate years from current year down to 2014
+    for (let year = currentYear; year >= 2014; year--) {
       years.push({ value: year.toString(), label: year.toString() });
     }
+    
     return years;
   };
 
@@ -1056,9 +1065,6 @@ const Transactions: React.FC = () => {
                   {getSortIcon('account')}
                 </Box>
               </TableCell>
-              <TableCell align="right">
-                Account Balance
-              </TableCell>
               <TableCell 
                 sx={{ cursor: 'pointer', userSelect: 'none' }} 
                 onClick={() => handleSort('payee')}
@@ -1137,33 +1143,6 @@ const Transactions: React.FC = () => {
                     </Box>
                   ) : (
                     transaction.account?.name
-                  )}
-                </TableCell>
-                <TableCell align="right">
-                  {transaction.type === 'transfer' ? (
-                    <Box>
-                      <Typography 
-                        variant="body2" 
-                        fontWeight={500}
-                        color={transaction.account?.type === 'credit' && (transaction.balance_after_transaction || 0) > 0 ? 'error.main' : 'text.primary'}
-                      >
-                        {formatCurrency(transaction.balance_after_transaction || 0)}
-                      </Typography>
-                      <Typography 
-                        variant="caption" 
-                        color={transaction.to_account?.type === 'credit' && (transaction.to_account_balance_after || 0) > 0 ? 'error.main' : 'text.secondary'}
-                      >
-                        {formatCurrency(transaction.to_account_balance_after || 0)}
-                      </Typography>
-                    </Box>
-                  ) : (
-                    <Typography 
-                      variant="body2" 
-                      fontWeight={500}
-                      color={transaction.account?.type === 'credit' && (transaction.balance_after_transaction || 0) > 0 ? 'error.main' : 'text.primary'}
-                    >
-                      {formatCurrency(transaction.balance_after_transaction || 0)}
-                    </Typography>
                   )}
                 </TableCell>
                 <TableCell sx={{ minWidth: 150 }}>
@@ -1253,29 +1232,57 @@ const Transactions: React.FC = () => {
           </TableBody>
         </Table>
         
+        {/* Performance Warning for Large Datasets */}
+        {showAll && transactionData && transactionData.total > 500 && (
+          <Alert severity="info" sx={{ m: 2 }}>
+            <Typography variant="body2">
+              Showing all {transactionData.total} transactions may affect performance. 
+              Consider using filters or pagination for better performance.
+            </Typography>
+          </Alert>
+        )}
+        
         {/* Pagination */}
         {transactionData && (
           <Box display="flex" justifyContent="space-between" alignItems="center" p={2} flexWrap="wrap" gap={2}>
             <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
               <Typography variant="body2" color="textSecondary">
-                Showing {((transactionData.page - 1) * transactionData.size) + 1} to {Math.min(transactionData.page * transactionData.size, transactionData.total)} of {transactionData.total} transactions
+                {showAll 
+                  ? `Showing all ${transactionData.total} transactions`
+                  : `Showing ${((transactionData.page - 1) * transactionData.size) + 1} to ${Math.min(transactionData.page * transactionData.size, transactionData.total)} of ${transactionData.total} transactions`
+                }
               </Typography>
-              <FormControl size="small" sx={{ minWidth: 120 }}>
-                <InputLabel>Per page</InputLabel>
-                <Select
-                  value={filters.size}
-                  label="Per page"
-                  onChange={handlePageSizeChange}
-                >
-                  {pageSizeOptions.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={showAll}
+                    onChange={(e) => setShowAll(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label="Show All"
+                sx={{ ml: 1 }}
+              />
+              
+              {!showAll && (
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <InputLabel>Per page</InputLabel>
+                  <Select
+                    value={filters.size}
+                    label="Per page"
+                    onChange={handlePageSizeChange}
+                  >
+                    {pageSizeOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
             </Box>
-            {transactionData.pages > 1 && (
+            {!showAll && transactionData.pages > 1 && (
               <Pagination
                 count={transactionData.pages}
                 page={transactionData.page}
