@@ -306,6 +306,16 @@ export const useAutoCategorization = () => {
 };
 
 /**
+ * Hook for enhanced auto-categorization using filtered transactions
+ */
+export const useEnhancedAutoCategorization = () => {
+  return useMutation({
+    mutationFn: (filters: any) => learningApi.autoCategorizeFilturedTransactions(filters),
+    retry: 1,
+  });
+};
+
+/**
  * Hook for bulk processing transactions
  */
 export const useBulkProcessing = () => {

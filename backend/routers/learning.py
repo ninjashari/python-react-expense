@@ -528,6 +528,290 @@ async def auto_categorize_transactions(
     }
 
 
+@router.post("/auto-categorize-filtered")
+async def auto_categorize_filtered_transactions(
+    filters: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Enhanced auto-categorization for filtered transactions using historical data training.
+    Trains model on historical data up to filter start date, then applies to filtered transactions.
+    """
+    from models.transactions import Transaction
+    from sqlalchemy import and_, or_
+    from datetime import datetime
+    
+    # Parse filters
+    start_date = filters.get('start_date')
+    end_date = filters.get('end_date')
+    account_ids = filters.get('account_ids', [])
+    category_ids = filters.get('category_ids', [])
+    payee_ids = filters.get('payee_ids', [])
+    
+    # Step 1: Get historical training data (transactions before start_date)
+    training_query = db.query(Transaction).filter(
+        Transaction.user_id == current_user.id,
+        Transaction.payee_id.isnot(None),
+        Transaction.category_id.isnot(None)
+    )
+    
+    if start_date:
+        training_query = training_query.filter(Transaction.date < start_date)
+    
+    training_transactions = training_query.all()
+    
+    # Step 2: Get filtered transactions to categorize
+    target_query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+    
+    # Apply filters to target transactions
+    if start_date:
+        target_query = target_query.filter(Transaction.date >= start_date)
+    if end_date:
+        target_query = target_query.filter(Transaction.date <= end_date)
+    if account_ids:
+        target_query = target_query.filter(Transaction.account_id.in_(account_ids))
+    if category_ids:
+        target_query = target_query.filter(
+            or_(Transaction.category_id.in_(category_ids), Transaction.category_id.is_(None))
+        )
+    if payee_ids:
+        target_query = target_query.filter(
+            or_(Transaction.payee_id.in_(payee_ids), Transaction.payee_id.is_(None))
+        )
+    
+    target_transactions = target_query.all()
+    
+    # Step 3: Enhanced training and prediction
+    auto_categorized = []
+    training_stats = {
+        "training_transactions_count": len(training_transactions),
+        "target_transactions_count": len(target_transactions),
+        "predictions_made": 0,
+        "high_confidence_applied": 0
+    }
+    
+    # Create enhanced feature-based training patterns
+    enhanced_patterns = _build_enhanced_patterns(training_transactions)
+    
+    for transaction in target_transactions:
+        updates = {}
+        applied_predictions = []
+        
+        # Enhanced prediction using multiple features
+        predictions = _predict_with_enhanced_features(
+            transaction, enhanced_patterns, training_transactions
+        )
+        
+        confidence_threshold = 0.7  # Higher threshold for filtered auto-categorization
+        
+        # Apply payee prediction if missing and high confidence
+        if not transaction.payee_id and predictions.get("payee"):
+            payee_pred = predictions["payee"]
+            if payee_pred["confidence"] >= confidence_threshold:
+                updates["payee_id"] = payee_pred["id"]
+                applied_predictions.append({
+                    "field": "payee",
+                    "name": payee_pred["name"],
+                    "confidence": payee_pred["confidence"],
+                    "reason": payee_pred["reason"]
+                })
+        
+        # Apply category prediction if missing and high confidence
+        if not transaction.category_id and predictions.get("category"):
+            category_pred = predictions["category"]
+            if category_pred["confidence"] >= confidence_threshold:
+                updates["category_id"] = category_pred["id"]
+                applied_predictions.append({
+                    "field": "category", 
+                    "name": category_pred["name"],
+                    "confidence": category_pred["confidence"],
+                    "reason": category_pred["reason"]
+                })
+        
+        # Apply updates if any predictions were made
+        if updates:
+            for field, value in updates.items():
+                setattr(transaction, field, value)
+            
+            training_stats["predictions_made"] += len(applied_predictions)
+            training_stats["high_confidence_applied"] += 1
+            
+            auto_categorized.append({
+                "transaction_id": str(transaction.id),
+                "description": transaction.description,
+                "amount": float(transaction.amount),
+                "date": transaction.date.isoformat(),
+                "account_type": transaction.account.type if transaction.account else None,
+                "updates": updates,
+                "predictions": applied_predictions
+            })
+            
+            # Record the enhanced auto-categorization for learning
+            for pred in applied_predictions:
+                TransactionLearningService.record_user_selection(
+                    db=db,
+                    user_id=str(current_user.id),
+                    transaction_id=str(transaction.id),
+                    field_type=pred["field"],
+                    selected_value_id=updates.get(f"{pred['field']}_id"),
+                    selected_value_name=pred["name"],
+                    transaction_description=transaction.description,
+                    transaction_amount=float(transaction.amount),
+                    account_type=transaction.account.type if transaction.account else None,
+                    was_suggested=True,
+                    suggestion_confidence=pred["confidence"],
+                    selection_method="enhanced_auto_categorization"
+                )
+    
+    db.commit()
+    
+    return {
+        "status": "success",
+        "message": f"Enhanced auto-categorization completed: {training_stats['high_confidence_applied']} transactions updated",
+        "categorized_transactions": auto_categorized,
+        "training_stats": training_stats,
+        "filters_applied": filters
+    }
+
+
+def _build_enhanced_patterns(training_transactions):
+    """Build enhanced patterns from training data using multiple features"""
+    patterns = {
+        "description_patterns": {},
+        "amount_ranges": {},
+        "account_patterns": {},
+        "combined_patterns": {}
+    }
+    
+    for tx in training_transactions:
+        if not tx.description:
+            continue
+            
+        # Description patterns
+        desc_lower = tx.description.lower().strip()
+        words = desc_lower.split()
+        
+        # Store exact descriptions
+        if desc_lower not in patterns["description_patterns"]:
+            patterns["description_patterns"][desc_lower] = {"payees": {}, "categories": {}}
+        
+        if tx.payee_id:
+            payee_name = tx.payee.name if tx.payee else "Unknown"
+            patterns["description_patterns"][desc_lower]["payees"][tx.payee_id] = {
+                "name": payee_name,
+                "count": patterns["description_patterns"][desc_lower]["payees"].get(tx.payee_id, {}).get("count", 0) + 1
+            }
+        
+        if tx.category_id:
+            category_name = tx.category.name if tx.category else "Unknown"
+            patterns["description_patterns"][desc_lower]["categories"][tx.category_id] = {
+                "name": category_name,
+                "count": patterns["description_patterns"][desc_lower]["categories"].get(tx.category_id, {}).get("count", 0) + 1
+            }
+        
+        # Amount range patterns
+        amount = float(tx.amount) if tx.amount else 0
+        amount_bucket = _get_amount_bucket(amount)
+        
+        if amount_bucket not in patterns["amount_ranges"]:
+            patterns["amount_ranges"][amount_bucket] = {"payees": {}, "categories": {}}
+        
+        # Account type patterns
+        account_type = tx.account.type if tx.account else "unknown"
+        if account_type not in patterns["account_patterns"]:
+            patterns["account_patterns"][account_type] = {"payees": {}, "categories": {}}
+    
+    return patterns
+
+
+def _get_amount_bucket(amount):
+    """Categorize amounts into buckets for pattern matching"""
+    if amount == 0:
+        return "zero"
+    elif amount < 10:
+        return "micro"
+    elif amount < 50:
+        return "small"
+    elif amount < 200:
+        return "medium" 
+    elif amount < 1000:
+        return "large"
+    else:
+        return "huge"
+
+
+def _predict_with_enhanced_features(transaction, patterns, training_transactions):
+    """Make enhanced predictions using multiple features"""
+    predictions = {}
+    
+    if not transaction.description:
+        return predictions
+    
+    desc_lower = transaction.description.lower().strip()
+    amount = float(transaction.amount) if transaction.amount else 0
+    amount_bucket = _get_amount_bucket(amount)
+    account_type = transaction.account.type if transaction.account else "unknown"
+    
+    # Exact description match
+    exact_match = patterns["description_patterns"].get(desc_lower)
+    if exact_match:
+        # Predict payee
+        if exact_match["payees"]:
+            best_payee = max(exact_match["payees"].items(), key=lambda x: x[1]["count"])
+            predictions["payee"] = {
+                "id": best_payee[0],
+                "name": best_payee[1]["name"],
+                "confidence": min(0.95, 0.6 + (best_payee[1]["count"] * 0.1)),
+                "reason": f"Exact description match (used {best_payee[1]['count']} times)"
+            }
+        
+        # Predict category
+        if exact_match["categories"]:
+            best_category = max(exact_match["categories"].items(), key=lambda x: x[1]["count"])
+            predictions["category"] = {
+                "id": best_category[0],
+                "name": best_category[1]["name"],
+                "confidence": min(0.95, 0.6 + (best_category[1]["count"] * 0.1)),
+                "reason": f"Exact description match (used {best_category[1]['count']} times)"
+            }
+    
+    # Partial description match using keywords
+    if not predictions.get("payee") or not predictions.get("category"):
+        desc_words = set(desc_lower.split())
+        
+        # Find partial matches
+        for pattern_desc, pattern_data in patterns["description_patterns"].items():
+            pattern_words = set(pattern_desc.split())
+            common_words = desc_words.intersection(pattern_words)
+            
+            if len(common_words) >= 2:  # At least 2 words in common
+                similarity = len(common_words) / len(pattern_words.union(desc_words))
+                confidence_boost = similarity * 0.4
+                
+                if not predictions.get("payee") and pattern_data["payees"]:
+                    best_payee = max(pattern_data["payees"].items(), key=lambda x: x[1]["count"])
+                    base_confidence = 0.4 + confidence_boost
+                    predictions["payee"] = {
+                        "id": best_payee[0],
+                        "name": best_payee[1]["name"],
+                        "confidence": min(0.85, base_confidence),
+                        "reason": f"Partial description match ({len(common_words)} common words)"
+                    }
+                
+                if not predictions.get("category") and pattern_data["categories"]:
+                    best_category = max(pattern_data["categories"].items(), key=lambda x: x[1]["count"])
+                    base_confidence = 0.4 + confidence_boost
+                    predictions["category"] = {
+                        "id": best_category[0],
+                        "name": best_category[1]["name"],
+                        "confidence": min(0.85, base_confidence),
+                        "reason": f"Partial description match ({len(common_words)} common words)"
+                    }
+    
+    return predictions
+
+
 @router.post("/bulk-process")
 async def bulk_process_transactions(
     transaction_ids: List[str],

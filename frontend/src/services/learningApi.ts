@@ -135,9 +135,25 @@ export interface AutoCategorizationResult {
     transaction_id: string;
     description: string;
     updates: Record<string, string>;
-    confidence: number;
+    confidence?: number;
+    amount?: number;
+    date?: string;
+    account_type?: string;
+    predictions?: Array<{
+      field: string;
+      name: string;
+      confidence: number;
+      reason: string;
+    }>;
   }>;
   total_processed: number;
+  training_stats?: {
+    training_transactions_count: number;
+    target_transactions_count: number;
+    predictions_made: number;
+    high_confidence_applied: number;
+  };
+  filters_applied?: any;
 }
 
 export interface BulkProcessResult {
@@ -507,6 +523,13 @@ class LearningApiService {
    */
   async autoCategorizeTransactions(): Promise<AutoCategorizationResult> {
     return api.post('/learning/auto-categorize').then(res => res.data);
+  }
+
+  /**
+   * Enhanced auto-categorization for filtered transactions using historical training
+   */
+  async autoCategorizeFilturedTransactions(filters: any): Promise<AutoCategorizationResult> {
+    return api.post('/learning/auto-categorize-filtered', filters).then(res => res.data);
   }
 
   /**

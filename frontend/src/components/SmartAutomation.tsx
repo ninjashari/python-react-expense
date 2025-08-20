@@ -33,7 +33,7 @@ import {
   PlayArrow,
 } from '@mui/icons-material';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAutoCategorization, useBulkProcessing } from '../hooks/useLearning';
+import { useAutoCategorization, useEnhancedAutoCategorization, useBulkProcessing } from '../hooks/useLearning';
 // import { useToast } from '../contexts/ToastContext'; // Replaced with confirm dialogs
 
 interface SmartAutomationProps {
@@ -60,15 +60,59 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
 
   const queryClient = useQueryClient();
   const autoCategorizeMutation = useAutoCategorization();
+  const enhancedAutoCategorizeMutation = useEnhancedAutoCategorization();
   const bulkProcessMutation = useBulkProcessing();
   // const toast = useToast(); // Replaced with confirm dialogs
 
   const handleAutoCategorize = async () => {
     try {
-      const result = await autoCategorizeMutation.mutateAsync();
+      let result;
       
-      // Show success message
-      window.alert(`Successfully auto-categorized ${result.categorized_transactions.length} transactions!`);
+      // Check if we have filters applied - use enhanced categorization
+      const hasFilters = currentFilters && (
+        currentFilters.startDate || 
+        currentFilters.endDate || 
+        currentFilters.accountId || 
+        (currentFilters.categoryIds && currentFilters.categoryIds.length > 0) ||
+        (currentFilters.payeeIds && currentFilters.payeeIds.length > 0)
+      );
+      
+      if (hasFilters) {
+        // Prepare filters for backend
+        const apiFilters: any = {};
+        
+        if (currentFilters.startDate) apiFilters.start_date = currentFilters.startDate;
+        if (currentFilters.endDate) apiFilters.end_date = currentFilters.endDate;
+        if (currentFilters.accountId) apiFilters.account_ids = [currentFilters.accountId];
+        if (currentFilters.categoryIds && currentFilters.categoryIds.length > 0) {
+          apiFilters.category_ids = currentFilters.categoryIds;
+        }
+        if (currentFilters.payeeIds && currentFilters.payeeIds.length > 0) {
+          apiFilters.payee_ids = currentFilters.payeeIds;
+        }
+        
+        result = await enhancedAutoCategorizeMutation.mutateAsync(apiFilters);
+        
+        // Enhanced success message with training stats
+        const trainingStats = result.training_stats || {
+          training_transactions_count: 0,
+          target_transactions_count: 0,
+          predictions_made: 0,
+          high_confidence_applied: 0
+        };
+        window.alert(
+          `Enhanced Auto-Categorization Complete!\n\n` +
+          `✅ Transactions Updated: ${result.categorized_transactions.length}\n` +
+          `📊 Training Data: ${trainingStats.training_transactions_count} historical transactions\n` +
+          `🎯 Target Transactions: ${trainingStats.target_transactions_count}\n` +
+          `🤖 Predictions Made: ${trainingStats.predictions_made}\n` +
+          `📈 High Confidence Applied: ${trainingStats.high_confidence_applied}`
+        );
+      } else {
+        // Use standard auto-categorization for uncategorized transactions
+        result = await autoCategorizeMutation.mutateAsync();
+        window.alert(`Successfully auto-categorized ${result.categorized_transactions.length} transactions!`);
+      }
       
       // Refresh transaction data
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -112,8 +156,19 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
     <Box>
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2">
-          Auto-categorize uses AI to automatically assign payees and categories to uncategorized transactions 
-          with high confidence (≥60%).
+          {currentFilters && (currentFilters.startDate || currentFilters.endDate || currentFilters.accountId || 
+           (currentFilters.categoryIds && currentFilters.categoryIds.length > 0) || 
+           (currentFilters.payeeIds && currentFilters.payeeIds.length > 0)) ? (
+            <>
+              🎯 <strong>Enhanced Mode:</strong> Training AI model on historical data (before {currentFilters.startDate || 'all dates'}) 
+              to predict payees and categories for filtered transactions using description, account, amount, and transaction patterns.
+            </>
+          ) : (
+            <>
+              Auto-categorize uses AI to automatically assign payees and categories to uncategorized transactions 
+              with high confidence (≥60%).
+            </>
+          )}
         </Typography>
       </Alert>
 
@@ -191,10 +246,10 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
               <ListItem key={transaction.transaction_id}>
                 <ListItemText
                   primary={transaction.description}
-                  secondary={`Confidence: ${(transaction.confidence * 100).toFixed(1)}%`}
+                  secondary={`Confidence: ${((transaction.confidence || 0) * 100).toFixed(1)}%`}
                 />
                 <Chip 
-                  label={`${(transaction.confidence * 100).toFixed(0)}%`} 
+                  label={`${((transaction.confidence || 0) * 100).toFixed(0)}%`} 
                   size="small" 
                   color="success" 
                 />
