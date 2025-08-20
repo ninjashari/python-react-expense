@@ -1142,3 +1142,25 @@ async def manually_train_model(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to train model: {str(e)}")
+
+
+@router.post("/cleanup-selection-history")
+async def cleanup_selection_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    One-time cleanup to reduce user_selection_history table to 10 most recent entries per user.
+    This endpoint is for maintenance and performance optimization.
+    """
+    try:
+        # Run the cleanup for all users (including current user)
+        result = TransactionLearningService.cleanup_all_users_selection_history(db)
+        
+        return {
+            "status": "success",
+            **result
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to cleanup selection history: {str(e)}")

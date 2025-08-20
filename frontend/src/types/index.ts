@@ -4,6 +4,16 @@ export interface Account {
   type: 'checking' | 'savings' | 'credit' | 'cash' | 'investment';
   balance: number;
   opening_date: string;
+  
+  // Account details
+  account_number?: string;
+  
+  // Card details
+  card_number?: string;  // Last 4 digits only for security
+  card_expiry_month?: number;  // 1-12
+  card_expiry_year?: number;   // YYYY format
+  
+  // Credit card specific fields
   credit_limit?: number;
   bill_generation_date?: number;
   payment_due_date?: number;
@@ -52,6 +62,16 @@ export interface CreateAccountDto {
   type: Account['type'];
   balance?: number;
   opening_date: string;
+  
+  // Account details
+  account_number?: string;
+  
+  // Card details
+  card_number?: string;
+  card_expiry_month?: number;
+  card_expiry_year?: number;
+  
+  // Credit card specific fields
   credit_limit?: number;
   bill_generation_date?: number;
   payment_due_date?: number;

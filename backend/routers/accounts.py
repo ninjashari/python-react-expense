@@ -31,12 +31,11 @@ def create_account(
 
 @router.get("/", response_model=List[AccountResponse])
 def get_accounts(
-    skip: int = 0, 
-    limit: int = 100, 
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    accounts = db.query(Account).filter(Account.user_id == current_user.id).offset(skip).limit(limit).all()
+    # Order by creation date descending (newest first) and return all accounts
+    accounts = db.query(Account).filter(Account.user_id == current_user.id).order_by(Account.created_at.desc()).all()
     return accounts
 
 @router.get("/{account_id}", response_model=AccountResponse)

@@ -17,7 +17,7 @@ def create_slug(text: str) -> str:
         create_slug("AT&T Mobile") -> "att-mobile"
     """
     if not text:
-        return ""
+        return "unnamed"
     
     # Normalize unicode characters (convert accented chars to base chars)
     text = unicodedata.normalize('NFKD', text)
@@ -54,5 +54,9 @@ def create_slug(text: str) -> str:
     
     # Remove trailing hyphen if truncation created one
     text = text.rstrip('-')
+    
+    # Ensure we never return an empty string (database constraint)
+    if not text:
+        return 'unnamed'
     
     return text

@@ -52,6 +52,9 @@ const PayeeSelect: React.FC<PayeeSelectProps> = ({
   });
 
   const handleCreate = (data: CreatePayeeDto) => {
+    if (createMutation.isPending) {
+      return;
+    }
     createMutation.mutate(data);
   };
 

@@ -67,6 +67,10 @@ const Accounts: React.FC = () => {
       type: 'checking',
       balance: 0,
       opening_date: new Date().toISOString().split('T')[0],
+      account_number: '',
+      card_number: '',
+      card_expiry_month: undefined,
+      card_expiry_year: undefined,
     },
   });
 
@@ -112,6 +116,10 @@ const Accounts: React.FC = () => {
         type: account.type,
         balance: account.balance,
         opening_date: account.opening_date,
+        account_number: account.account_number || '',
+        card_number: account.card_number || '',
+        card_expiry_month: account.card_expiry_month,
+        card_expiry_year: account.card_expiry_year,
         credit_limit: account.credit_limit,
         bill_generation_date: account.bill_generation_date,
         payment_due_date: account.payment_due_date,
@@ -123,6 +131,10 @@ const Accounts: React.FC = () => {
         type: 'checking',
         balance: 0,
         opening_date: new Date().toISOString().split('T')[0],
+        account_number: '',
+        card_number: '',
+        card_expiry_month: undefined,
+        card_expiry_year: undefined,
       });
     }
     setDialogOpen(true);
@@ -139,6 +151,10 @@ const Accounts: React.FC = () => {
     const submitData = {
       ...data,
       balance: Number(data.balance) || 0,
+      account_number: data.account_number || undefined,
+      card_number: data.card_number || undefined,
+      card_expiry_month: data.card_expiry_month ? Number(data.card_expiry_month) : undefined,
+      card_expiry_year: data.card_expiry_year ? Number(data.card_expiry_year) : undefined,
       credit_limit: data.credit_limit ? Number(data.credit_limit) : undefined,
       bill_generation_date: data.bill_generation_date ? Number(data.bill_generation_date) : undefined,
       payment_due_date: data.payment_due_date ? Number(data.payment_due_date) : undefined,
@@ -460,6 +476,73 @@ const Accounts: React.FC = () => {
                 />
               )}
             />
+
+            <Controller
+              name="account_number"
+              control={control}
+              render={({ field }) => (
+                <TextField
+                  {...field}
+                  label="Account Number"
+                  fullWidth
+                  margin="normal"
+                  helperText="Bank account number (optional)"
+                />
+              )}
+            />
+
+            {(watchAccountType === 'checking' || watchAccountType === 'savings' || watchAccountType === 'credit') && (
+              <>
+                <Controller
+                  name="card_number"
+                  control={control}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      label="Card Number (Last 4 digits)"
+                      fullWidth
+                      margin="normal"
+                      inputProps={{ maxLength: 4, pattern: '[0-9]*' }}
+                      helperText="Only enter last 4 digits for security"
+                    />
+                  )}
+                />
+
+                <Box display="flex" gap={2}>
+                  <Controller
+                    name="card_expiry_month"
+                    control={control}
+                    render={({ field }) => (
+                      <TextField
+                        {...field}
+                        label="Expiry Month"
+                        type="number"
+                        fullWidth
+                        margin="normal"
+                        inputProps={{ min: 1, max: 12 }}
+                        helperText="MM (1-12)"
+                      />
+                    )}
+                  />
+
+                  <Controller
+                    name="card_expiry_year"
+                    control={control}
+                    render={({ field }) => (
+                      <TextField
+                        {...field}
+                        label="Expiry Year"
+                        type="number"
+                        fullWidth
+                        margin="normal"
+                        inputProps={{ min: new Date().getFullYear(), max: new Date().getFullYear() + 20 }}
+                        helperText="YYYY"
+                      />
+                    )}
+                  />
+                </Box>
+              </>
+            )}
 
             {watchAccountType === 'credit' && (
               <>

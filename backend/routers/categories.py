@@ -51,8 +51,6 @@ def create_category(
 
 @router.get("/", response_model=List[CategoryResponse])
 def get_categories(
-    skip: int = 0, 
-    limit: int = 100, 
     search: str = "", 
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -60,7 +58,11 @@ def get_categories(
     query = db.query(Category).filter(Category.user_id == current_user.id)
     if search:
         query = query.filter(Category.name.ilike(f"%{search}%"))
-    categories = query.offset(skip).limit(limit).all()
+    
+    # Order by creation date descending (newest first)
+    query = query.order_by(Category.created_at.desc())
+    
+    categories = query.all()  # No pagination - return all results
     
     # Auto-assign colors to categories that don't have them
     needs_update = False

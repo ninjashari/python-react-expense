@@ -33,7 +33,7 @@ import {
   FormControlLabel,
   Alert,
 } from '@mui/material';
-import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics, ArrowUpward, ArrowDownward } from '@mui/icons-material';
+import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics, ArrowUpward, ArrowDownward, CleaningServices } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
@@ -131,6 +131,8 @@ const Transactions: React.FC = () => {
   const [sortState, setSortState] = useState<SortState>({ field: null, direction: 'asc' });
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<string>('');
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<any>(null);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -419,6 +421,46 @@ const Transactions: React.FC = () => {
 
   const handleCancelBatchDelete = () => {
     setBatchDeleteDialogOpen(false);
+  };
+
+  // Description cleanup handler
+  const handleCleanupDescriptions = async () => {
+    const confirmed = window.confirm(
+      'This will clean up transaction descriptions:\n\n' +
+      '1. Remove "| " from descriptions of currently filtered transactions\n' +
+      '2. Remove trailing whitespaces from all your transactions\n\n' +
+      'Continue?'
+    );
+
+    if (!confirmed) return;
+
+    setIsCleaningUp(true);
+    setCleanupResult(null);
+
+    try {
+      // Prepare filters to send to backend
+      const cleanupFilters: any = {};
+      
+      if (filters.startDate) cleanupFilters.start_date = filters.startDate;
+      if (filters.endDate) cleanupFilters.end_date = filters.endDate;
+      if (filters.accountId) cleanupFilters.account_ids = [filters.accountId];
+      if (filters.categoryIds && filters.categoryIds.length > 0) cleanupFilters.category_ids = filters.categoryIds;
+      if (filters.payeeIds && filters.payeeIds.length > 0) cleanupFilters.payee_ids = filters.payeeIds;
+
+      const result = await transactionsApi.cleanupDescriptions(cleanupFilters);
+      setCleanupResult(result);
+      
+      // Refresh transactions to show updated descriptions
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      
+    } catch (error: any) {
+      setCleanupResult({
+        error: true,
+        message: error.response?.data?.detail || 'Failed to cleanup descriptions'
+      });
+    } finally {
+      setIsCleaningUp(false);
+    }
   };
 
   // Bulk category edit functions
@@ -809,9 +851,20 @@ const Transactions: React.FC = () => {
           >
             Import
           </Button>
+          <Button
+            variant="outlined"
+            startIcon={<CleaningServices />}
+            sx={{ mr: 2 }}
+            onClick={handleCleanupDescriptions}
+            disabled={isCleaningUp}
+            color="secondary"
+          >
+            {isCleaningUp ? 'Cleaning...' : 'Clean Descriptions'}
+          </Button>
           <SmartAutomation 
             uncategorizedCount={uncategorizedCount}
             selectedTransactionIds={Array.from(selectedTransactions)}
+            currentFilters={filters}
             onAutomationComplete={() => {
               // Refresh data after automation
               queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -1025,6 +1078,34 @@ const Transactions: React.FC = () => {
             </Grid>
           </CardContent>
         </Card>
+      )}
+
+      {/* Cleanup Results */}
+      {cleanupResult && (
+        <Alert 
+          severity={cleanupResult.error ? 'error' : 'success'}
+          onClose={() => setCleanupResult(null)}
+          sx={{ mb: 2 }}
+        >
+          {cleanupResult.error ? (
+            cleanupResult.message
+          ) : (
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                {cleanupResult.message}
+              </Typography>
+              <Typography variant="body2">
+                • Removed "| " from {cleanupResult.pipe_symbol_removals} transaction descriptions
+              </Typography>
+              <Typography variant="body2">
+                • Removed trailing whitespace from {cleanupResult.trailing_whitespace_removals} transaction descriptions
+              </Typography>
+              <Typography variant="body2">
+                • Total transactions processed: {cleanupResult.total_transactions_processed}
+              </Typography>
+            </Box>
+          )}
+        </Alert>
       )}
 
       <TableContainer component={Paper}>

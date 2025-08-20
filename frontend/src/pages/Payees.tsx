@@ -107,8 +107,14 @@ const Payees: React.FC = () => {
     };
 
     if (editingPayee) {
+      if (updateMutation.isPending) {
+        return;
+      }
       updateMutation.mutate({ id: editingPayee.id, data: submitData });
     } else {
+      if (createMutation.isPending) {
+        return;
+      }
       createMutation.mutate(submitData);
     }
   };

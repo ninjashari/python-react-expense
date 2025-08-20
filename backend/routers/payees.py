@@ -20,15 +20,33 @@ def create_payee(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
+        # Validate input
+        if not payee.name or not payee.name.strip():
+            raise HTTPException(status_code=400, detail="Payee name is required and cannot be empty")
+        
+        # Trim whitespace from name
+        payee.name = payee.name.strip()
+        
+        # Check for case-insensitive name conflicts
         existing_payee = db.query(Payee).filter(
-            Payee.name == payee.name,
+            Payee.name.ilike(payee.name),
             Payee.user_id == current_user.id
         ).first()
         if existing_payee:
-            raise HTTPException(status_code=400, detail="Payee with this name already exists")
+            raise HTTPException(status_code=400, detail=f"Payee with name '{existing_payee.name}' already exists")
         
-        # Generate slug from name
-        slug = create_slug(payee.name)
+        # Generate unique slug from name
+        base_slug = create_slug(payee.name)
+        slug = base_slug
+        counter = 1
+        
+        # Ensure slug is unique for this user
+        while db.query(Payee).filter(
+            Payee.slug == slug,
+            Payee.user_id == current_user.id
+        ).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
         
         # Generate color if not provided
         color = payee.color or generate_unique_color(db, payee.name, str(current_user.id), "payees")
@@ -47,12 +65,17 @@ def create_payee(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Failed to create payee")
+        # Provide more specific error message
+        error_msg = str(e)
+        if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="A payee with this name or identifier already exists")
+        elif "not null" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="Required payee information is missing")
+        else:
+            raise HTTPException(status_code=400, detail=f"Failed to create payee: {error_msg}")
 
 @router.get("/", response_model=List[PayeeResponse])
 def get_payees(
-    skip: int = 0, 
-    limit: int = 100, 
     search: str = "", 
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -60,7 +83,11 @@ def get_payees(
     query = db.query(Payee).filter(Payee.user_id == current_user.id)
     if search:
         query = query.filter(Payee.name.ilike(f"%{search}%"))
-    payees = query.offset(skip).limit(limit).all()
+    
+    # Order by creation date descending (newest first) to ensure new payees appear
+    query = query.order_by(Payee.created_at.desc())
+    
+    payees = query.all()  # No pagination - return all results
     
     # Auto-assign colors to payees that don't have them
     needs_update = False
@@ -161,9 +188,22 @@ def update_payee(
         
         update_data = payee_update.dict(exclude_unset=True)
         
-        # If name is being updated, regenerate slug
+        # If name is being updated, regenerate unique slug
         if 'name' in update_data:
-            update_data['slug'] = create_slug(update_data['name'])
+            base_slug = create_slug(update_data['name'])
+            slug = base_slug
+            counter = 1
+            
+            # Ensure slug is unique for this user (excluding current payee)
+            while db.query(Payee).filter(
+                Payee.slug == slug,
+                Payee.user_id == current_user.id,
+                Payee.id != payee_id
+            ).first():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            
+            update_data['slug'] = slug
         
         for field, value in update_data.items():
             setattr(payee, field, value)
@@ -175,7 +215,14 @@ def update_payee(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Failed to update payee")
+        # Provide more specific error message
+        error_msg = str(e)
+        if "duplicate key" in error_msg.lower() or "unique constraint" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="A payee with this name or identifier already exists")
+        elif "not null" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="Required payee information is missing")
+        else:
+            raise HTTPException(status_code=400, detail=f"Failed to update payee: {error_msg}")
 
 @router.delete("/{payee_id}")
 def delete_payee(

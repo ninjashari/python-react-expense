@@ -39,12 +39,14 @@ import { useAutoCategorization, useBulkProcessing } from '../hooks/useLearning';
 interface SmartAutomationProps {
   uncategorizedCount?: number;
   selectedTransactionIds?: string[];
+  currentFilters?: any;
   onAutomationComplete?: () => void;
 }
 
 const SmartAutomation: React.FC<SmartAutomationProps> = ({
   uncategorizedCount = 0,
   selectedTransactionIds = [],
+  currentFilters,
   onAutomationComplete
 }) => {
   const [dialogOpen, setDialogOpen] = useState(false);

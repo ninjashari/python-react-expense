@@ -16,6 +16,14 @@ class Account(Base):
     created_at = Column(DateTime, server_default=func.current_timestamp())
     updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     
+    # Account details
+    account_number = Column(String(50), nullable=True)  # Bank account number
+    
+    # Card details (for debit/credit cards)
+    card_number = Column(String(20), nullable=True)  # Masked card number (last 4 digits)
+    card_expiry_month = Column(Integer, nullable=True)  # 1-12
+    card_expiry_year = Column(Integer, nullable=True)   # YYYY format
+    
     # Credit card specific fields
     credit_limit = Column(Numeric(12, 2), nullable=True)
     bill_generation_date = Column(Integer, nullable=True)

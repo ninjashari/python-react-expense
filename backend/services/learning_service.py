@@ -47,12 +47,36 @@ class TransactionLearningService:
         db.add(selection_record)
         db.commit()
         
+        # Clean up old selection history - keep only 10 most recent entries per user
+        TransactionLearningService._cleanup_selection_history(db, user_id)
+        
         # Update or create learning patterns based on this selection
         TransactionLearningService._update_learning_patterns(
             db, selection_record
         )
         
         return selection_record
+    
+    @staticmethod
+    def _cleanup_selection_history(db: Session, user_id: str):
+        """Keep only the 10 most recent selection history entries per user"""
+        try:
+            # Get all selection history for this user, ordered by creation date desc
+            all_selections = db.query(UserSelectionHistory).filter(
+                UserSelectionHistory.user_id == user_id
+            ).order_by(UserSelectionHistory.created_at.desc()).all()
+            
+            # If we have more than 10 entries, delete the oldest ones
+            if len(all_selections) > 10:
+                selections_to_delete = all_selections[10:]  # Keep first 10 (newest), delete rest
+                
+                for selection in selections_to_delete:
+                    db.delete(selection)
+                
+                db.commit()
+                
+        except Exception as e:
+            db.rollback()
     
     @staticmethod
     def _update_learning_patterns(
@@ -323,3 +347,40 @@ class TransactionLearningService:
             "payee_suggestions": payee_suggestions[:5],  # Top 5 suggestions
             "category_suggestions": category_suggestions[:5]
         }
+    
+    @staticmethod
+    def cleanup_all_users_selection_history(db: Session):
+        """One-time cleanup for all users - keep only 10 most recent entries per user"""
+        try:
+            # Get all users who have selection history
+            from sqlalchemy import func
+            users_with_history = db.query(UserSelectionHistory.user_id).distinct().all()
+            
+            total_cleaned = 0
+            
+            for (user_id,) in users_with_history:
+                # Get all selections for this user
+                all_selections = db.query(UserSelectionHistory).filter(
+                    UserSelectionHistory.user_id == user_id
+                ).order_by(UserSelectionHistory.created_at.desc()).all()
+                
+                # If more than 10, delete the oldest ones
+                if len(all_selections) > 10:
+                    selections_to_delete = all_selections[10:]
+                    
+                    for selection in selections_to_delete:
+                        db.delete(selection)
+                    
+                    total_cleaned += len(selections_to_delete)
+            
+            db.commit()
+            
+            return {
+                "message": f"Successfully cleaned up {total_cleaned} old selection history entries",
+                "users_processed": len(users_with_history),
+                "total_entries_removed": total_cleaned
+            }
+            
+        except Exception as e:
+            db.rollback()
+            raise
