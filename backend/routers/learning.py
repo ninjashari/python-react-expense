@@ -603,30 +603,28 @@ async def auto_categorize_filtered_transactions(
             transaction, enhanced_patterns, training_transactions
         )
         
-        confidence_threshold = 0.7  # Higher threshold for filtered auto-categorization
+        # Enhanced categorization using multiple features
         
-        # Apply payee prediction if missing and high confidence
-        if not transaction.payee_id and predictions.get("payee"):
-            payee_pred = predictions["payee"]
-            if payee_pred["confidence"] >= confidence_threshold:
-                updates["payee_id"] = payee_pred["id"]
+        # Apply payee prediction if confident and not already set
+        if predictions.get('payee') and not transaction.payee_id:
+            payee_pred = predictions['payee']
+            if payee_pred['confidence'] >= 0.6:  # High confidence threshold
+                updates["payee_id"] = payee_pred['payee_id']
                 applied_predictions.append({
                     "field": "payee",
-                    "name": payee_pred["name"],
-                    "confidence": payee_pred["confidence"],
-                    "reason": payee_pred["reason"]
+                    "value": payee_pred['payee_name'],
+                    "confidence": payee_pred['confidence']
                 })
         
-        # Apply category prediction if missing and high confidence
-        if not transaction.category_id and predictions.get("category"):
-            category_pred = predictions["category"]
-            if category_pred["confidence"] >= confidence_threshold:
-                updates["category_id"] = category_pred["id"]
+        # Apply category prediction if confident and not already set
+        if predictions.get('category') and not transaction.category_id:
+            category_pred = predictions['category']
+            if category_pred['confidence'] >= 0.6:  # High confidence threshold
+                updates["category_id"] = category_pred['category_id']
                 applied_predictions.append({
                     "field": "category", 
-                    "name": category_pred["name"],
-                    "confidence": category_pred["confidence"],
-                    "reason": category_pred["reason"]
+                    "value": category_pred['category_name'],
+                    "confidence": category_pred['confidence']
                 })
         
         # Apply updates if any predictions were made
@@ -644,31 +642,32 @@ async def auto_categorize_filtered_transactions(
                 "date": transaction.date.isoformat(),
                 "account_type": transaction.account.type if transaction.account else None,
                 "updates": updates,
-                "predictions": applied_predictions
+                "predictions": applied_predictions,
+                "confidence": max([p['confidence'] for p in applied_predictions]) if applied_predictions else 0.0
             })
             
-            # Record the enhanced auto-categorization for learning
-            for pred in applied_predictions:
+            # Record the categorization for learning
+            for prediction in applied_predictions:
                 TransactionLearningService.record_user_selection(
                     db=db,
                     user_id=str(current_user.id),
                     transaction_id=str(transaction.id),
-                    field_type=pred["field"],
-                    selected_value_id=updates.get(f"{pred['field']}_id"),
-                    selected_value_name=pred["name"],
+                    field_type=prediction['field'],
+                    selected_value_id=updates.get(f"{prediction['field']}_id"),
+                    selected_value_name=prediction['value'],
                     transaction_description=transaction.description,
                     transaction_amount=float(transaction.amount),
                     account_type=transaction.account.type if transaction.account else None,
                     was_suggested=True,
-                    suggestion_confidence=pred["confidence"],
-                    selection_method="enhanced_auto_categorization"
+                    suggestion_confidence=prediction['confidence'],
+                    selection_method="enhanced_auto_categorize"
                 )
     
     db.commit()
     
     return {
         "status": "success",
-        "message": f"Enhanced auto-categorization completed: {training_stats['high_confidence_applied']} transactions updated",
+        "message": f"Enhanced auto-categorization completed: {training_stats['high_confidence_applied']} transactions categorized",
         "categorized_transactions": auto_categorized,
         "training_stats": training_stats,
         "filters_applied": filters

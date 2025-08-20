@@ -159,6 +159,8 @@ export const transactionsApi = {
     api.post(`/transactions/recalculate-balances/${accountId}`).then(res => res.data),
   cleanupDescriptions: (filters?: any): Promise<any> => 
     api.post('/transactions/cleanup-descriptions', filters || {}).then(res => res.data),
+  clearFields: (filters?: any): Promise<any> => 
+    api.post('/transactions/clear-fields', filters || {}).then(res => res.data),
 };
 
 

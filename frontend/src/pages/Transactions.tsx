@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -33,7 +32,7 @@ import {
   FormControlLabel,
   Alert,
 } from '@mui/material';
-import { Add, Edit, Delete, Upload, FilterList, Clear, Analytics, ArrowUpward, ArrowDownward, CleaningServices } from '@mui/icons-material';
+import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
@@ -91,7 +90,6 @@ interface SortState {
 
 const Transactions: React.FC = () => {
   usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
-  const navigate = useNavigate();
   const { showError } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -133,6 +131,8 @@ const Transactions: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<string>('');
   const [isCleaningUp, setIsCleaningUp] = useState(false);
   const [cleanupResult, setCleanupResult] = useState<any>(null);
+  const [isRecalculatingBalances, setIsRecalculatingBalances] = useState(false);
+  const [recalculateResult, setRecalculateResult] = useState<any>(null);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -460,6 +460,49 @@ const Transactions: React.FC = () => {
       });
     } finally {
       setIsCleaningUp(false);
+    }
+  };
+
+
+  // Recalculate balances handler
+  const handleRecalculateBalances = async () => {
+    if (!filters.accountId) {
+      window.alert('Please select an account to recalculate balances for.');
+      return;
+    }
+
+    const selectedAccount = accounts?.find(acc => acc.id === filters.accountId);
+    const confirmed = window.confirm(
+      `This will recalculate per-transaction balances for account "${selectedAccount?.name}".\n\n` +
+      'This process will update all transaction balances for this account based on chronological order. Continue?'
+    );
+    if (!confirmed) return;
+
+    setIsRecalculatingBalances(true);
+    setRecalculateResult(null);
+
+    try {
+      const result = await transactionsApi.recalculateAccountBalances(filters.accountId);
+      
+      setRecalculateResult({
+        success: true,
+        message: result.message,
+        transactions_updated: result.transactions_updated,
+        account_name: result.account_name
+      });
+
+      // Refresh transaction data
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+
+    } catch (error: any) {
+      console.error('Error recalculating balances:', error);
+      setRecalculateResult({
+        error: true,
+        message: error.response?.data?.detail || 'Failed to recalculate balances'
+      });
+    } finally {
+      setIsRecalculatingBalances(false);
     }
   };
 
@@ -837,22 +880,6 @@ const Transactions: React.FC = () => {
           </Button>
           <Button
             variant="outlined"
-            startIcon={<Analytics />}
-            sx={{ mr: 2 }}
-            onClick={() => navigate('/transactions/analysis')}
-          >
-            Analysis
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<Upload />}
-            sx={{ mr: 2 }}
-            onClick={() => navigate('/import')}
-          >
-            Import
-          </Button>
-          <Button
-            variant="outlined"
             startIcon={<CleaningServices />}
             sx={{ mr: 2 }}
             onClick={handleCleanupDescriptions}
@@ -860,6 +887,16 @@ const Transactions: React.FC = () => {
             color="secondary"
           >
             {isCleaningUp ? 'Cleaning...' : 'Clean Descriptions'}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<Calculate />}
+            sx={{ mr: 2 }}
+            onClick={handleRecalculateBalances}
+            disabled={isRecalculatingBalances || !filters.accountId}
+            color="info"
+          >
+            {isRecalculatingBalances ? 'Recalculating...' : 'Recalculate Balances'}
           </Button>
           <SmartAutomation 
             uncategorizedCount={uncategorizedCount}
@@ -1108,6 +1145,31 @@ const Transactions: React.FC = () => {
         </Alert>
       )}
 
+      {/* Recalculate Balances Results */}
+      {recalculateResult && (
+        <Alert 
+          severity={recalculateResult.error ? 'error' : 'success'}
+          onClose={() => setRecalculateResult(null)}
+          sx={{ mb: 2 }}
+        >
+          {recalculateResult.error ? (
+            recalculateResult.message
+          ) : (
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                {recalculateResult.message}
+              </Typography>
+              <Typography variant="body2">
+                • Account: {recalculateResult.account_name}
+              </Typography>
+              <Typography variant="body2">
+                • Transactions updated: {recalculateResult.transactions_updated}
+              </Typography>
+            </Box>
+          )}
+        </Alert>
+      )}
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -1183,6 +1245,7 @@ const Transactions: React.FC = () => {
                   {getSortIcon('amount')}
                 </Box>
               </TableCell>
+              <TableCell align="right">Balance</TableCell>
               <TableCell align="center">Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -1290,6 +1353,45 @@ const Transactions: React.FC = () => {
                     >
                       {transaction.type === 'income' ? '+' : '-'}
                       {formatCurrency(transaction.amount)}
+                    </Typography>
+                  )}
+                </TableCell>
+                <TableCell align="right" sx={{ minWidth: 120 }}>
+                  {transaction.type === 'transfer' ? (
+                    <Box>
+                      <Typography 
+                        variant="body2" 
+                        color={
+                          transaction.balance_after_transaction && transaction.balance_after_transaction < 0
+                            ? 'error.main'
+                            : 'text.primary'
+                        }
+                      >
+                        {transaction.balance_after_transaction !== undefined 
+                          ? formatCurrency(transaction.balance_after_transaction)
+                          : '-'
+                        }
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        → {transaction.to_account_balance_after !== undefined 
+                          ? formatCurrency(transaction.to_account_balance_after)
+                          : '-'
+                        }
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Typography 
+                      variant="body2" 
+                      color={
+                        transaction.balance_after_transaction && transaction.balance_after_transaction < 0
+                          ? 'error.main'
+                          : 'text.primary'
+                      }
+                    >
+                      {transaction.balance_after_transaction !== undefined 
+                        ? formatCurrency(transaction.balance_after_transaction)
+                        : '-'
+                      }
                     </Typography>
                   )}
                 </TableCell>

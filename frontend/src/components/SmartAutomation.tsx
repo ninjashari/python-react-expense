@@ -102,9 +102,9 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
         };
         window.alert(
           `Enhanced Auto-Categorization Complete!\n\n` +
-          `✅ Transactions Updated: ${result.categorized_transactions.length}\n` +
-          `📊 Training Data: ${trainingStats.training_transactions_count} historical transactions\n` +
+          `✅ Transactions Categorized: ${result.categorized_transactions.length}\n` +
           `🎯 Target Transactions: ${trainingStats.target_transactions_count}\n` +
+          `📊 Training Data: ${trainingStats.training_transactions_count} transactions\n` +
           `🤖 Predictions Made: ${trainingStats.predictions_made}\n` +
           `📈 High Confidence Applied: ${trainingStats.high_confidence_applied}`
         );
@@ -160,8 +160,7 @@ const SmartAutomation: React.FC<SmartAutomationProps> = ({
            (currentFilters.categoryIds && currentFilters.categoryIds.length > 0) || 
            (currentFilters.payeeIds && currentFilters.payeeIds.length > 0)) ? (
             <>
-              🎯 <strong>Enhanced Mode:</strong> Training AI model on historical data (before {currentFilters.startDate || 'all dates'}) 
-              to predict payees and categories for filtered transactions using description, account, amount, and transaction patterns.
+              🎯 <strong>Enhanced Mode:</strong> Use historical data training to intelligently categorize filtered transactions with advanced pattern recognition.
             </>
           ) : (
             <>

@@ -1006,3 +1006,54 @@ async def cleanup_transaction_descriptions(
         "trailing_whitespace_removals": whitespace_removals,
         "total_transactions_processed": len(all_transactions)
     }
+
+
+@router.post("/clear-fields")
+async def clear_transaction_fields(
+    filters: Optional[dict] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Clear payee and category fields from filtered transactions
+    """
+    
+    # Build query for filtered transactions
+    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+    
+    # Apply filters if provided
+    if filters:
+        if filters.get('start_date'):
+            query = query.filter(Transaction.date >= filters['start_date'])
+        if filters.get('end_date'):
+            query = query.filter(Transaction.date <= filters['end_date'])
+        if filters.get('account_ids'):
+            query = query.filter(Transaction.account_id.in_(filters['account_ids']))
+        if filters.get('category_ids'):
+            query = query.filter(Transaction.category_id.in_(filters['category_ids']))
+        if filters.get('payee_ids'):
+            query = query.filter(Transaction.payee_id.in_(filters['payee_ids']))
+    
+    # Get filtered transactions
+    filtered_transactions = query.all()
+    
+    payee_clearings = 0
+    category_clearings = 0
+    
+    # Clear payee and category fields
+    for transaction in filtered_transactions:
+        if transaction.payee_id:
+            transaction.payee_id = None
+            payee_clearings += 1
+        if transaction.category_id:
+            transaction.category_id = None
+            category_clearings += 1
+    
+    db.commit()
+    
+    return {
+        "message": "Transaction fields cleared successfully",
+        "payee_clearings": payee_clearings,
+        "category_clearings": category_clearings,
+        "total_transactions_processed": len(filtered_transactions)
+    }
