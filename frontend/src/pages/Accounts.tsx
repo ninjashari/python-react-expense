@@ -41,6 +41,7 @@ const Accounts: React.FC = () => {
   const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
   const [accountToRecalculate, setAccountToRecalculate] = useState<Account | null>(null);
   const [recalculateResult, setRecalculateResult] = useState<any>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const queryClient = useQueryClient();
 
   // Helper function to calculate credit utilization percentage
@@ -182,6 +183,22 @@ const Accounts: React.FC = () => {
     setRecalculateDialogOpen(true);
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // Refresh accounts data
+      await refetch();
+      
+      // Also invalidate related queries for a comprehensive refresh
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    } catch (error) {
+      console.error('Failed to refresh accounts:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const handleConfirmRecalculate = async () => {
     if (!accountToRecalculate) return;
     
@@ -259,8 +276,8 @@ const Accounts: React.FC = () => {
         <Alert 
           severity="error" 
           action={
-            <Button color="inherit" size="small" onClick={() => refetch()}>
-              Retry
+            <Button color="inherit" size="small" onClick={handleRefresh} disabled={isRefreshing}>
+              {isRefreshing ? 'Retrying...' : 'Retry'}
             </Button>
           }
         >
@@ -278,10 +295,10 @@ const Accounts: React.FC = () => {
           <Button
             variant="outlined"
             startIcon={<Refresh />}
-            onClick={() => refetch()}
-            disabled={isRecalculating}
+            onClick={handleRefresh}
+            disabled={isRecalculating || isRefreshing}
           >
-            {isRecalculating ? 'Recalculating...' : 'Refresh'}
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
           </Button>
           <Button
             variant="contained"
