@@ -208,10 +208,10 @@ def reassign_category_colors(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Golden Ratio Color Distribution - Reassign mathematically optimal unique colors to all categories.
+    Color Distribution - Reassign unique colors to all categories.
     
-    Uses the golden angle (137.5°) to create maximally distributed colors in perceptual color space.
-    Each category gets a unique, visually distinct, and accessible color using elegant mathematical principles.
+    Creates visually distinct and accessible colors for all categories.
+    Each category gets a unique color optimized for visual distinction.
     """
     try:
         # Get all categories for the current user
@@ -225,7 +225,7 @@ def reassign_category_colors(
                 "updated_categories": []
             }
         
-        # Clear all existing colors first to enable fresh golden distribution
+        # Clear all existing colors first to enable fresh distribution
         old_colors = {}
         for category in categories:
             old_colors[category.id] = category.color
@@ -242,7 +242,7 @@ def reassign_category_colors(
         
         for category in sorted_categories:
             try:
-                # Generate unique color using golden ratio distribution
+                # Generate unique color using optimized distribution
                 new_color = generate_unique_color(db, category.name, str(current_user.id), "categories")
                 category.color = new_color
                 
@@ -264,11 +264,11 @@ def reassign_category_colors(
         db.commit()
         
         return {
-            "message": f"Golden ratio distribution complete - {colors_assigned} unique colors assigned",
+            "message": f"Color distribution complete - {colors_assigned} unique colors assigned",
             "categories_updated": colors_assigned,
             "total_categories": len(categories),
             "updated_categories": updated_categories,
-            "distribution_method": "Golden Angle (137.5°) Mathematical Distribution"
+            "distribution_method": "Optimized Color Distribution"
         }
         
     except Exception as e:

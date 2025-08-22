@@ -21,7 +21,7 @@ import {
   Alert,
   Tooltip,
 } from '@mui/material';
-import { Add, Edit, Delete, Palette, CleaningServices } from '@mui/icons-material';
+import { Add, Edit, Delete, Palette, CleaningServices, Check, Close } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { categoriesApi } from '../services/api';
@@ -32,6 +32,11 @@ import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from
 const Categories: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [inlineEditingId, setInlineEditingId] = useState<string | null>(null);
+  const [inlineEditValue, setInlineEditValue] = useState('');
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [isReassigning, setIsReassigning] = useState(false);
   const [reassignResult, setReassignResult] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -114,8 +119,32 @@ const Categories: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this category?')) {
+    setConfirmMessage('Are you sure you want to delete this category?');
+    setConfirmAction(() => () => {
       deleteMutation.mutate(id);
+      setConfirmDialogOpen(false);
+    });
+    setConfirmDialogOpen(true);
+  };
+
+  const handleInlineEdit = (category: Category) => {
+    setInlineEditingId(category.id);
+    setInlineEditValue(category.name);
+  };
+
+  const handleInlineCancel = () => {
+    setInlineEditingId(null);
+    setInlineEditValue('');
+  };
+
+  const handleInlineSave = () => {
+    if (inlineEditingId && inlineEditValue.trim()) {
+      updateMutation.mutate({ 
+        id: inlineEditingId, 
+        data: { name: inlineEditValue.trim() } 
+      });
+      setInlineEditingId(null);
+      setInlineEditValue('');
     }
   };
 
@@ -124,32 +153,33 @@ const Categories: React.FC = () => {
       return;
     }
 
-    const confirmed = window.confirm(
-      'This will generate mathematically optimal unique colors using Golden Ratio distribution. ' +
-      'Each category will get a visually distinct color positioned at 137.5° intervals ' +
-      'around the color wheel for maximum visual separation. Continue?'
+    setConfirmMessage(
+      'This will generate mathematically optimal unique colors. ' +
+      'Each category will get a visually distinct color for maximum visual separation. Continue?'
     );
+    setConfirmAction(() => async () => {
+      setConfirmDialogOpen(false);
 
-    if (!confirmed) return;
+      setIsReassigning(true);
+      setReassignResult(null);
 
-    setIsReassigning(true);
-    setReassignResult(null);
-
-    try {
-      const result = await categoriesApi.reassignColors();
-      setReassignResult(result);
-      
-      // Refresh categories to show new colors
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      
-    } catch (error: any) {
-      setReassignResult({
-        error: true,
-        message: error.response?.data?.detail || 'Failed to reassign colors'
-      });
-    } finally {
-      setIsReassigning(false);
-    }
+      try {
+        const result = await categoriesApi.reassignColors();
+        setReassignResult(result);
+        
+        // Refresh categories to show new colors
+        queryClient.invalidateQueries({ queryKey: ['categories'] });
+        
+      } catch (error: any) {
+        setReassignResult({
+          error: true,
+          message: error.response?.data?.detail || 'Failed to reassign colors'
+        });
+      } finally {
+        setIsReassigning(false);
+      }
+    });
+    setConfirmDialogOpen(true);
   };
 
   const handleDeleteUnused = async () => {
@@ -157,31 +187,33 @@ const Categories: React.FC = () => {
       return;
     }
 
-    const confirmed = window.confirm(
+    setConfirmMessage(
       'This will permanently delete all categories that are not referenced by any transactions. ' +
       'This action cannot be undone. Continue?'
     );
+    setConfirmAction(() => async () => {
+      setConfirmDialogOpen(false);
 
-    if (!confirmed) return;
+      setIsDeleting(true);
+      setDeleteResult(null);
 
-    setIsDeleting(true);
-    setDeleteResult(null);
-
-    try {
-      const result = await categoriesApi.deleteUnused();
-      setDeleteResult(result);
-      
-      // Refresh categories to show updated list
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      
-    } catch (error: any) {
-      setDeleteResult({
-        error: true,
-        message: error.response?.data?.detail || 'Failed to delete unused categories'
-      });
-    } finally {
-      setIsDeleting(false);
-    }
+      try {
+        const result = await categoriesApi.deleteUnused();
+        setDeleteResult(result);
+        
+        // Refresh categories to show updated list
+        queryClient.invalidateQueries({ queryKey: ['categories'] });
+        
+      } catch (error: any) {
+        setDeleteResult({
+          error: true,
+          message: error.response?.data?.detail || 'Failed to delete unused categories'
+        });
+      } finally {
+        setIsDeleting(false);
+      }
+    });
+    setConfirmDialogOpen(true);
   };
 
   if (isLoading) {
@@ -208,14 +240,14 @@ const Categories: React.FC = () => {
               {isDeleting ? 'Deleting...' : 'Remove Unused'}
             </Button>
           </Tooltip>
-          <Tooltip title="Generate mathematically optimal unique colors using Golden Ratio distribution">
+          <Tooltip title="Generate unique colors for visual distinction">
             <Button
               variant="outlined"
               startIcon={<Palette />}
               onClick={handleReassignColors}
               disabled={isReassigning || !categories || categories.length === 0}
             >
-              {isReassigning ? 'Distributing...' : 'Golden Ratio Colors'}
+              {isReassigning ? 'Distributing...' : 'Reassign Colors'}
             </Button>
           </Tooltip>
           <Button
@@ -285,7 +317,7 @@ const Categories: React.FC = () => {
                 • Distribution method: {reassignResult.distribution_method || 'Golden Ratio (137.5°)'}
               </Typography>
               <Typography variant="body2" sx={{ mt: 1 }}>
-                Each color is mathematically positioned for optimal visual distinction and accessibility.
+                Each color is positioned for optimal visual distinction and accessibility.
               </Typography>
             </Box>
           )}
@@ -306,7 +338,36 @@ const Categories: React.FC = () => {
             {categories?.sort((a, b) => a.name.localeCompare(b.name)).map((category) => (
               <TableRow key={category.id}>
                 <TableCell>
-                  <Typography variant="body1">{category.name}</Typography>
+                  {inlineEditingId === category.id ? (
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <TextField
+                        value={inlineEditValue}
+                        onChange={(e) => setInlineEditValue(e.target.value)}
+                        size="small"
+                        autoFocus
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            handleInlineSave();
+                          } else if (e.key === 'Escape') {
+                            handleInlineCancel();
+                          }
+                        }}
+                      />
+                      <IconButton size="small" onClick={handleInlineSave} color="primary">
+                        <Check />
+                      </IconButton>
+                      <IconButton size="small" onClick={handleInlineCancel}>
+                        <Close />
+                      </IconButton>
+                    </Box>
+                  ) : (
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="body1">{category.name}</Typography>
+                      <IconButton size="small" onClick={() => handleInlineEdit(category)}>
+                        <Edit fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  )}
                 </TableCell>
                 <TableCell>
                   <Box display="flex" alignItems="center" gap={1}>
@@ -333,12 +394,6 @@ const Categories: React.FC = () => {
                 </TableCell>
                 <TableCell>{formatDateTime(category.created_at)}</TableCell>
                 <TableCell align="center">
-                  <IconButton
-                    size="small"
-                    onClick={() => handleOpenDialog(category)}
-                  >
-                    <Edit />
-                  </IconButton>
                   <IconButton
                     size="small"
                     onClick={() => handleDelete(category.id)}
@@ -403,6 +458,24 @@ const Categories: React.FC = () => {
             </Button>
           </DialogActions>
         </form>
+      </Dialog>
+
+      {/* Confirmation Dialog */}
+      <Dialog open={confirmDialogOpen} onClose={() => setConfirmDialogOpen(false)}>
+        <DialogTitle>Confirm Action</DialogTitle>
+        <DialogContent>
+          <Typography>{confirmMessage}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={() => confirmAction && confirmAction()} 
+            color="primary" 
+            variant="contained"
+          >
+            Confirm
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

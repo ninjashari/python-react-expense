@@ -253,10 +253,10 @@ def reassign_payee_colors(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Golden Ratio Color Distribution - Reassign mathematically optimal unique colors to all payees.
+    Color Distribution - Reassign unique colors to all payees.
     
-    Uses the golden angle (137.5°) to create maximally distributed colors in perceptual color space.
-    Each payee gets a unique, visually distinct, and accessible color using elegant mathematical principles.
+    Creates visually distinct and accessible colors for all payees.
+    Each payee gets a unique color optimized for visual distinction.
     """
     try:
         # Get all payees for the current user
@@ -270,7 +270,7 @@ def reassign_payee_colors(
                 "updated_payees": []
             }
         
-        # Clear all existing colors first to enable fresh golden distribution
+        # Clear all existing colors first to enable fresh distribution
         old_colors = {}
         for payee in payees:
             old_colors[payee.id] = payee.color
@@ -287,7 +287,7 @@ def reassign_payee_colors(
         
         for payee in sorted_payees:
             try:
-                # Generate unique color using golden ratio distribution
+                # Generate unique color using optimized distribution
                 new_color = generate_unique_color(db, payee.name, str(current_user.id), "payees")
                 payee.color = new_color
                 
@@ -309,11 +309,11 @@ def reassign_payee_colors(
         db.commit()
         
         return {
-            "message": f"Golden ratio distribution complete - {colors_assigned} unique colors assigned",
+            "message": f"Color distribution complete - {colors_assigned} unique colors assigned",
             "payees_updated": colors_assigned,
             "total_payees": len(payees),
             "updated_payees": updated_payees,
-            "distribution_method": "Golden Angle (137.5°) Mathematical Distribution"
+            "distribution_method": "Optimized Color Distribution"
         }
         
     except Exception as e:

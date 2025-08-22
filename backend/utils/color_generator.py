@@ -401,25 +401,19 @@ def is_color_accessible(color: str, background: str = '#FFFFFF') -> bool:
 
 def generate_unique_color(db: Session, entity_name: Optional[str] = None, user_id: Optional[str] = None, entity_type: str = "categories") -> str:
     """
-    Golden Ratio Color Distribution System - Mathematically elegant unique color generation.
+    Generate unique, accessible colors for visual distinction.
     
-    Uses the golden angle (137.5°) to create maximally distributed colors in perceptual color space.
-    Each color is guaranteed to be visually distinct, accessible, and aesthetically pleasing.
-    
-    Algorithm:
-    1. Count existing colors to determine position in golden sequence
-    2. Apply golden angle rotation for optimal spacing
-    3. Use perceptual lightness and saturation curves for visual harmony
-    4. Ensure WCAG AA accessibility compliance
+    Uses a combination of predefined accessible colors and generated variations
+    to ensure good contrast and visual separation.
     
     Args:
         db: Database session
-        entity_name: Entity name (used for deterministic seed, not semantic matching)
+        entity_name: Entity name (used for deterministic colors if needed)
         user_id: User ID to scope uniqueness
         entity_type: Type of entity ("categories" or "payees")
         
     Returns:
-        A unique, mathematically distributed hex color string
+        A unique, accessible hex color string
     """
     # Import models dynamically based on entity type
     if entity_type == "categories":
@@ -429,7 +423,7 @@ def generate_unique_color(db: Session, entity_name: Optional[str] = None, user_i
     else:
         raise ValueError(f"Unsupported entity_type: {entity_type}")
     
-    # Get existing colors to determine sequence position
+    # Get existing colors to determine what's already used
     query = db.query(Model.color)
     if user_id:
         query = query.filter(Model.user_id == user_id)
@@ -437,68 +431,42 @@ def generate_unique_color(db: Session, entity_name: Optional[str] = None, user_i
     existing_colors = [color[0] for color in query.all() if color[0]]
     existing_colors_set = set(existing_colors)
     
-    # Golden ratio and angle constants for optimal distribution
-    GOLDEN_RATIO = 1.618033988749
-    GOLDEN_ANGLE = 137.50776405  # 360 / φ²
+    # Try semantic color first if entity has a name
+    if entity_name:
+        semantic_color = get_semantic_color_for_category(entity_name)
+        if semantic_color and semantic_color not in existing_colors_set:
+            return semantic_color
     
-    # High-quality color parameters for UI design
-    SATURATION_RANGE = (65, 85)  # Vibrant but not overwhelming
-    LIGHTNESS_RANGE = (35, 55)   # Dark enough for accessibility, light enough for visibility
-    
-    def get_deterministic_seed(name: str) -> int:
-        """Generate consistent seed from category name for deterministic colors."""
-        if not name:
-            return 0
-        return sum(ord(c) * (i + 1) for i, c in enumerate(name.lower())) % 1000
-    
-    def calculate_golden_hue(index: int, seed: int = 0) -> float:
-        """Calculate hue using golden angle distribution with optional deterministic offset."""
-        base_hue = (index * GOLDEN_ANGLE + seed * 23) % 360
-        return base_hue
-    
-    def get_perceptual_saturation(index: int) -> int:
-        """Generate saturation using sinusoidal variation for visual rhythm."""
-        base_sat = SATURATION_RANGE[0]
-        sat_range = SATURATION_RANGE[1] - SATURATION_RANGE[0]
-        variation = math.sin(index * 0.7) * 0.5 + 0.5  # [0, 1]
-        return int(base_sat + variation * sat_range)
-    
-    def get_perceptual_lightness(index: int) -> int:
-        """Generate lightness using golden ratio variation for aesthetic harmony."""
-        base_light = LIGHTNESS_RANGE[0]
-        light_range = LIGHTNESS_RANGE[1] - LIGHTNESS_RANGE[0]
-        variation = ((index * GOLDEN_RATIO) % 1)  # [0, 1)
-        return int(base_light + variation * light_range)
-    
-    # Start with existing color count as base index
-    start_index = len(existing_colors)
-    seed = get_deterministic_seed(entity_name) if entity_name else 0
-    
-    # Generate up to 1000 colors using golden distribution
-    for i in range(1000):
-        index = start_index + i
-        
-        # Calculate color components using mathematical distribution
-        hue = calculate_golden_hue(index, seed)
-        saturation = get_perceptual_saturation(index)
-        lightness = get_perceptual_lightness(index)
-        
-        # Convert to RGB and hex
-        r, g, b = hsl_to_rgb(hue, saturation, lightness)
-        color = rgb_to_hex(r, g, b)
-        
-        # Ensure uniqueness and accessibility
+    # Use predefined accessible colors first
+    predefined_colors = generate_ux_optimized_colors()
+    for color in predefined_colors:
         if (color not in existing_colors_set and 
             is_color_accessible(color) and
             all(color_distance(color, existing) > 45 for existing in existing_colors)):
             return color
     
-    # Fallback: Pure mathematical generation with timestamp microseconds
-    import time
-    microseed = int(time.time() * 1000000) % 1000
-    hue = (microseed * GOLDEN_ANGLE) % 360
-    saturation = 75
-    lightness = 45
+    # Generate additional colors using simple hue rotation
+    base_hue = len(existing_colors) * 137  # Use simple angle distribution
     
-    r, g, b = hsl_to_rgb(hue, saturation, lightness)
+    for i in range(100):  # Try up to 100 variations
+        hue = (base_hue + i * 37) % 360  # Simple angle stepping
+        saturation = 70 + (i % 3) * 10  # Vary saturation slightly
+        lightness = 45 + (i % 2) * 10   # Vary lightness slightly
+        
+        r, g, b = hsl_to_rgb(hue, saturation, lightness)
+        color = rgb_to_hex(r, g, b)
+        
+        if (color not in existing_colors_set and 
+            is_color_accessible(color) and
+            all(color_distance(color, existing) > 45 for existing in existing_colors)):
+            return color
+    
+    # Final fallback: hash-based color
+    if entity_name:
+        return generate_category_color_from_name(entity_name)
+    
+    # Ultimate fallback
+    import time
+    seed = int(time.time() * 1000000) % 360
+    r, g, b = hsl_to_rgb(seed, 75, 45)
     return rgb_to_hex(r, g, b)

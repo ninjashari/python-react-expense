@@ -21,7 +21,7 @@ import {
   Alert,
   Tooltip,
 } from '@mui/material';
-import { Add, Edit, Delete, Palette, CleaningServices } from '@mui/icons-material';
+import { Add, Edit, Delete, Palette, CleaningServices, Check, Close } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { payeesApi } from '../services/api';
@@ -32,6 +32,11 @@ import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from
 const Payees: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPayee, setEditingPayee] = useState<Payee | null>(null);
+  const [inlineEditingId, setInlineEditingId] = useState<string | null>(null);
+  const [inlineEditValue, setInlineEditValue] = useState('');
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState('');
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [isReassigning, setIsReassigning] = useState(false);
   const [reassignResult, setReassignResult] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -120,8 +125,32 @@ const Payees: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this payee?')) {
+    setConfirmMessage('Are you sure you want to delete this payee?');
+    setConfirmAction(() => () => {
       deleteMutation.mutate(id);
+      setConfirmDialogOpen(false);
+    });
+    setConfirmDialogOpen(true);
+  };
+
+  const handleInlineEdit = (payee: Payee) => {
+    setInlineEditingId(payee.id);
+    setInlineEditValue(payee.name);
+  };
+
+  const handleInlineCancel = () => {
+    setInlineEditingId(null);
+    setInlineEditValue('');
+  };
+
+  const handleInlineSave = () => {
+    if (inlineEditingId && inlineEditValue.trim()) {
+      updateMutation.mutate({ 
+        id: inlineEditingId, 
+        data: { name: inlineEditValue.trim() } 
+      });
+      setInlineEditingId(null);
+      setInlineEditValue('');
     }
   };
 
@@ -130,32 +159,33 @@ const Payees: React.FC = () => {
       return;
     }
 
-    const confirmed = window.confirm(
-      'This will generate mathematically optimal unique colors using Golden Ratio distribution. ' +
-      'Each payee will get a visually distinct color positioned at 137.5° intervals ' +
-      'around the color wheel for maximum visual separation. Continue?'
+    setConfirmMessage(
+      'This will generate mathematically optimal unique colors. ' +
+      'Each payee will get a visually distinct color for maximum visual separation. Continue?'
     );
+    setConfirmAction(() => async () => {
+      setConfirmDialogOpen(false);
 
-    if (!confirmed) return;
+      setIsReassigning(true);
+      setReassignResult(null);
 
-    setIsReassigning(true);
-    setReassignResult(null);
-
-    try {
-      const result = await payeesApi.reassignColors();
-      setReassignResult(result);
-      
-      // Refresh payees to show new colors
-      queryClient.invalidateQueries({ queryKey: ['payees'] });
-      
-    } catch (error: any) {
-      setReassignResult({
-        error: true,
-        message: error.response?.data?.detail || 'Failed to reassign colors'
-      });
-    } finally {
-      setIsReassigning(false);
-    }
+      try {
+        const result = await payeesApi.reassignColors();
+        setReassignResult(result);
+        
+        // Refresh payees to show new colors
+        queryClient.invalidateQueries({ queryKey: ['payees'] });
+        
+      } catch (error: any) {
+        setReassignResult({
+          error: true,
+          message: error.response?.data?.detail || 'Failed to reassign colors'
+        });
+      } finally {
+        setIsReassigning(false);
+      }
+    });
+    setConfirmDialogOpen(true);
   };
 
   const handleDeleteUnused = async () => {
@@ -163,31 +193,33 @@ const Payees: React.FC = () => {
       return;
     }
 
-    const confirmed = window.confirm(
+    setConfirmMessage(
       'This will permanently delete all payees that are not referenced by any transactions. ' +
       'This action cannot be undone. Continue?'
     );
+    setConfirmAction(() => async () => {
+      setConfirmDialogOpen(false);
 
-    if (!confirmed) return;
+      setIsDeleting(true);
+      setDeleteResult(null);
 
-    setIsDeleting(true);
-    setDeleteResult(null);
-
-    try {
-      const result = await payeesApi.deleteUnused();
-      setDeleteResult(result);
-      
-      // Refresh payees to show updated list
-      queryClient.invalidateQueries({ queryKey: ['payees'] });
-      
-    } catch (error: any) {
-      setDeleteResult({
-        error: true,
-        message: error.response?.data?.detail || 'Failed to delete unused payees'
-      });
-    } finally {
-      setIsDeleting(false);
-    }
+      try {
+        const result = await payeesApi.deleteUnused();
+        setDeleteResult(result);
+        
+        // Refresh payees to show updated list
+        queryClient.invalidateQueries({ queryKey: ['payees'] });
+        
+      } catch (error: any) {
+        setDeleteResult({
+          error: true,
+          message: error.response?.data?.detail || 'Failed to delete unused payees'
+        });
+      } finally {
+        setIsDeleting(false);
+      }
+    });
+    setConfirmDialogOpen(true);
   };
 
   if (isLoading) {
@@ -214,14 +246,14 @@ const Payees: React.FC = () => {
               {isDeleting ? 'Deleting...' : 'Remove Unused'}
             </Button>
           </Tooltip>
-          <Tooltip title="Generate mathematically optimal unique colors using Golden Ratio distribution">
+          <Tooltip title="Generate unique colors for visual distinction">
             <Button
               variant="outlined"
               startIcon={<Palette />}
               onClick={handleReassignColors}
               disabled={isReassigning || !payees || payees.length === 0}
             >
-              {isReassigning ? 'Distributing...' : 'Golden Ratio Colors'}
+              {isReassigning ? 'Distributing...' : 'Reassign Colors'}
             </Button>
           </Tooltip>
           <Button
@@ -291,7 +323,7 @@ const Payees: React.FC = () => {
                 • Distribution method: {reassignResult.distribution_method || 'Golden Ratio (137.5°)'}
               </Typography>
               <Typography variant="body2" sx={{ mt: 1 }}>
-                Each color is mathematically positioned for optimal visual distinction and accessibility.
+                Each color is positioned for optimal visual distinction and accessibility.
               </Typography>
             </Box>
           )}
@@ -312,7 +344,36 @@ const Payees: React.FC = () => {
             {payees?.sort((a, b) => a.name.localeCompare(b.name)).map((payee) => (
               <TableRow key={payee.id}>
                 <TableCell>
-                  <Typography variant="body1">{payee.name}</Typography>
+                  {inlineEditingId === payee.id ? (
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <TextField
+                        value={inlineEditValue}
+                        onChange={(e) => setInlineEditValue(e.target.value)}
+                        size="small"
+                        autoFocus
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            handleInlineSave();
+                          } else if (e.key === 'Escape') {
+                            handleInlineCancel();
+                          }
+                        }}
+                      />
+                      <IconButton size="small" onClick={handleInlineSave} color="primary">
+                        <Check />
+                      </IconButton>
+                      <IconButton size="small" onClick={handleInlineCancel}>
+                        <Close />
+                      </IconButton>
+                    </Box>
+                  ) : (
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="body1">{payee.name}</Typography>
+                      <IconButton size="small" onClick={() => handleInlineEdit(payee)}>
+                        <Edit fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  )}
                 </TableCell>
                 <TableCell>
                   <Box display="flex" alignItems="center" gap={1}>
@@ -339,12 +400,6 @@ const Payees: React.FC = () => {
                 </TableCell>
                 <TableCell>{formatDateTime(payee.created_at)}</TableCell>
                 <TableCell align="center">
-                  <IconButton
-                    size="small"
-                    onClick={() => handleOpenDialog(payee)}
-                  >
-                    <Edit />
-                  </IconButton>
                   <IconButton
                     size="small"
                     onClick={() => handleDelete(payee.id)}
@@ -409,6 +464,24 @@ const Payees: React.FC = () => {
             </Button>
           </DialogActions>
         </form>
+      </Dialog>
+
+      {/* Confirmation Dialog */}
+      <Dialog open={confirmDialogOpen} onClose={() => setConfirmDialogOpen(false)}>
+        <DialogTitle>Confirm Action</DialogTitle>
+        <DialogContent>
+          <Typography>{confirmMessage}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={() => confirmAction && confirmAction()} 
+            color="primary" 
+            variant="contained"
+          >
+            Confirm
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );
