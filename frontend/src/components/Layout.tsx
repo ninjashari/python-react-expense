@@ -40,7 +40,7 @@ const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/' },
   { text: 'Accounts', icon: <AccountBalance />, path: '/accounts' },
   { text: 'Transactions', icon: <Receipt />, path: '/transactions' },
-  { text: 'Analysis', icon: <Analytics />, path: '/transactions/analysis' },
+  { text: 'Reports', icon: <Analytics />, path: '/reports' },
   { text: 'Learning', icon: <Psychology />, path: '/learning' },
   { text: 'Advanced Insights', icon: <Insights />, path: '/insights' },
   { text: 'Import', icon: <Upload />, path: '/import' },

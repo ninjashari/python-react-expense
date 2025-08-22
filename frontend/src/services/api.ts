@@ -161,6 +161,17 @@ export const transactionsApi = {
     api.post('/transactions/cleanup-descriptions', filters || {}).then(res => res.data),
   clearFields: (filters?: any): Promise<any> => 
     api.post('/transactions/clear-fields', filters || {}).then(res => res.data),
+  exportToExcel: (params?: {
+    account_ids?: string;
+    category_ids?: string;
+    payee_ids?: string;
+    transaction_type?: string;
+    start_date?: string;
+    end_date?: string;
+  }) => api.get('/transactions/export', { 
+    params, 
+    responseType: 'blob' 
+  }).then(res => res),
 };
 
 

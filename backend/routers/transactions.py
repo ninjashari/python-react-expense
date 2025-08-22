@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import List, Optional
@@ -6,6 +7,8 @@ import uuid
 import math
 from decimal import Decimal
 from datetime import date, datetime
+import pandas as pd
+import io
 from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
@@ -418,7 +421,13 @@ def get_transactions(
             query = query.filter(Transaction.payee_id.in_(payee_id_list))
     
     if transaction_type:
-        query = query.filter(Transaction.type == transaction_type)
+        transaction_type_parts = [type.strip() for type in transaction_type.split(',') if type.strip()]
+        if len(transaction_type_parts) == 1:
+            # Single transaction type
+            query = query.filter(Transaction.type == transaction_type_parts[0])
+        else:
+            # Multiple transaction types
+            query = query.filter(Transaction.type.in_(transaction_type_parts))
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
@@ -505,7 +514,13 @@ def get_transaction_summary(
             query = query.filter(Transaction.payee_id.in_(payee_id_list))
     
     if transaction_type:
-        query = query.filter(Transaction.type == transaction_type)
+        transaction_type_parts = [type.strip() for type in transaction_type.split(',') if type.strip()]
+        if len(transaction_type_parts) == 1:
+            # Single transaction type
+            query = query.filter(Transaction.type == transaction_type_parts[0])
+        else:
+            # Multiple transaction types
+            query = query.filter(Transaction.type.in_(transaction_type_parts))
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
@@ -1057,3 +1072,130 @@ async def clear_transaction_fields(
         "category_clearings": category_clearings,
         "total_transactions_processed": len(filtered_transactions)
     }
+
+@router.get("/export")
+async def export_transactions(
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
+    payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs"),
+    transaction_type: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Export filtered transactions to Excel format"""
+    
+    # Build base query with all relationships
+    query = db.query(Transaction).options(
+        joinedload(Transaction.account),
+        joinedload(Transaction.to_account),
+        joinedload(Transaction.payee),
+        joinedload(Transaction.category)
+    )
+    
+    # Apply same filters as get_transactions endpoint
+    if account_ids:
+        account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
+        query = query.filter(
+            (Transaction.account_id.in_(account_id_list)) | 
+            (Transaction.to_account_id.in_(account_id_list))
+        )
+    
+    if category_ids:
+        category_id_parts = [id.strip() for id in category_ids.split(',') if id.strip()]
+        if 'none' in category_id_parts:
+            other_ids = [uuid.UUID(id) for id in category_id_parts if id != 'none']
+            if other_ids:
+                query = query.filter(
+                    (Transaction.category_id.is_(None)) | (Transaction.category_id.in_(other_ids))
+                )
+            else:
+                query = query.filter(Transaction.category_id.is_(None))
+        else:
+            category_id_list = [uuid.UUID(id) for id in category_id_parts]
+            query = query.filter(Transaction.category_id.in_(category_id_list))
+    
+    if payee_ids:
+        payee_id_parts = [id.strip() for id in payee_ids.split(',') if id.strip()]
+        if 'none' in payee_id_parts:
+            other_ids = [uuid.UUID(id) for id in payee_id_parts if id != 'none']
+            if other_ids:
+                query = query.filter(
+                    (Transaction.payee_id.is_(None)) | (Transaction.payee_id.in_(other_ids))
+                )
+            else:
+                query = query.filter(Transaction.payee_id.is_(None))
+        else:
+            payee_id_list = [uuid.UUID(id) for id in payee_id_parts]
+            query = query.filter(Transaction.payee_id.in_(payee_id_list))
+    
+    if transaction_type:
+        transaction_type_parts = [type.strip() for type in transaction_type.split(',') if type.strip()]
+        if len(transaction_type_parts) == 1:
+            # Single transaction type
+            query = query.filter(Transaction.type == transaction_type_parts[0])
+        else:
+            # Multiple transaction types
+            query = query.filter(Transaction.type.in_(transaction_type_parts))
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
+    
+    # Filter by current user
+    query = query.filter(Transaction.user_id == current_user.id)
+    
+    # Get all transactions (no pagination for export)
+    transactions = query.order_by(Transaction.date.desc()).all()
+    
+    # Convert to DataFrame
+    data = []
+    for transaction in transactions:
+        data.append({
+            'Date': transaction.date.strftime('%Y-%m-%d'),
+            'Description': transaction.description,
+            'Amount': float(transaction.amount),
+            'Type': transaction.type.title(),
+            'Account': transaction.account.name if transaction.account else '',
+            'To Account': transaction.to_account.name if transaction.to_account else '',
+            'Category': transaction.category.name if transaction.category else '',
+            'Payee': transaction.payee.name if transaction.payee else '',
+            'Balance After': float(transaction.balance_after_transaction) if transaction.balance_after_transaction else '',
+            'Notes': transaction.notes or ''
+        })
+    
+    if not data:
+        raise HTTPException(status_code=404, detail="No transactions found for the given filters")
+    
+    df = pd.DataFrame(data)
+    
+    # Create Excel file in memory
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Transactions')
+        
+        # Auto-adjust column widths
+        worksheet = writer.sheets['Transactions']
+        for column in worksheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            worksheet.column_dimensions[column_letter].width = adjusted_width
+    
+    excel_buffer.seek(0)
+    
+    # Generate filename with current date
+    filename = f"transactions_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    
+    return StreamingResponse(
+        io.BytesIO(excel_buffer.read()),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )

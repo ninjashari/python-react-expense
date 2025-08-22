@@ -186,7 +186,10 @@ const Accounts: React.FC = () => {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // Refresh accounts data
+      // Recalculate balances for all accounts first
+      await accountsApi.recalculateBalances();
+      
+      // Then refresh accounts data
       await refetch();
       
       // Also invalidate related queries for a comprehensive refresh

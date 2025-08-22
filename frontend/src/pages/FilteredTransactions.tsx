@@ -23,7 +23,7 @@ import {
   InputLabel,
   Select,
 } from '@mui/material';
-import { Clear, FilterList, Analytics, TrendingUp } from '@mui/icons-material';
+import { Clear, FilterList, Analytics, TrendingUp, FileDownload } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
 import { Transaction, PaginatedResponse, Account, Category, Payee } from '../types';
@@ -40,13 +40,12 @@ interface FilteredTransactionFilters {
   accountIds: Option[];
   categoryIds: Option[];
   payeeIds: Option[];
-  transactionType?: string;
+  transactionTypeIds: Option[];
   page: number;
   size: number;
 }
 
 const transactionTypes = [
-  { value: '', label: 'All Types' },
   { value: 'income', label: 'Income' },
   { value: 'expense', label: 'Expense' },
   { value: 'transfer', label: 'Transfer' },
@@ -61,12 +60,13 @@ const pageSizeOptions = [
 ];
 
 const FilteredTransactions: React.FC = () => {
-  usePageTitle(getPageTitle('filtered-transactions', 'Transaction Analysis'));
+  usePageTitle(getPageTitle('reports', 'Reports'));
   
   const defaultFilters: FilteredTransactionFilters = {
     accountIds: [],
     categoryIds: [],
     payeeIds: [],
+    transactionTypeIds: [],
     page: 1,
     size: 50
   };
@@ -77,6 +77,7 @@ const FilteredTransactions: React.FC = () => {
   );
   
   const [savingTransactions, setSavingTransactions] = useState<Set<string>>(new Set());
+  const [isExporting, setIsExporting] = useState(false);
   const queryClient = useQueryClient();
 
   // Fetch reference data
@@ -104,7 +105,7 @@ const FilteredTransactions: React.FC = () => {
     account_ids: filters.accountIds.length > 0 ? filters.accountIds.map(opt => opt.value).join(',') : undefined,
     category_ids: filters.categoryIds.length > 0 ? filters.categoryIds.map(opt => opt.value).join(',') : undefined,
     payee_ids: filters.payeeIds.length > 0 ? filters.payeeIds.map(opt => opt.value).join(',') : undefined,
-    transaction_type: filters.transactionType || undefined,
+    transaction_type: filters.transactionTypeIds.length > 0 ? filters.transactionTypeIds.map(opt => opt.value).join(',') : undefined,
   });
 
   // Fetch transactions
@@ -120,7 +121,7 @@ const FilteredTransactions: React.FC = () => {
            filters.accountIds.length > 0 || 
            filters.categoryIds.length > 0 || 
            filters.payeeIds.length > 0 || 
-           (filters.transactionType && filters.transactionType !== '');
+           filters.transactionTypeIds.length > 0;
   };
 
   // Fetch summary
@@ -224,6 +225,45 @@ const FilteredTransactions: React.FC = () => {
       .sort((a, b) => a.name.localeCompare(b.name))
       .map(payee => ({ value: payee.id, label: payee.name }));
 
+  const handleExport = async () => {
+    if (!transactionData?.total) return;
+    
+    setIsExporting(true);
+    try {
+      const exportParams = getApiParams();
+      const response = await transactionsApi.exportToExcel(exportParams);
+      
+      // Create blob and download
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response headers or use default
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = 'transactions_export.xlsx';
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+      // TODO: Add toast notification for error
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   if (transactionsLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="400px">
@@ -236,18 +276,28 @@ const FilteredTransactions: React.FC = () => {
     <Box>
       {/* Enhanced Header */}
       <Box mb={4}>
-        <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
           <Box>
             <Box display="flex" alignItems="center" gap={2} mb={1}>
               <Analytics color="primary" sx={{ fontSize: 32 }} />
               <Typography variant="h4" component="h1">
-                Transaction Analysis
+                Reports
               </Typography>
             </Box>
             <Typography variant="body1" color="textSecondary">
               Filter and analyze your transactions to gain insights into your spending patterns
             </Typography>
           </Box>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={isExporting ? <CircularProgress size={16} /> : <FileDownload />}
+            onClick={handleExport}
+            disabled={isExporting || transactionsLoading || !transactionData?.total}
+            sx={{ alignSelf: 'flex-start' }}
+          >
+            {isExporting ? 'Exporting...' : 'Export Excel'}
+          </Button>
         </Box>
         {hasActiveFilters() && (
           <Alert severity="info" icon={<TrendingUp />} sx={{ mt: 2 }}>
@@ -273,10 +323,10 @@ const FilteredTransactions: React.FC = () => {
             </Typography>
           </Box>
           
-          <Grid container spacing={3} alignItems="flex-start">
+          <Grid container spacing={3} alignItems="stretch">
             {/* Date Filters Section */}
             <Grid item xs={12}>
-              <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+              <Typography variant="subtitle2" color="textSecondary" gutterBottom sx={{ mb: 2 }}>
                 Date Range
               </Typography>
             </Grid>
@@ -305,25 +355,18 @@ const FilteredTransactions: React.FC = () => {
 
             {/* Transaction Filters Section */}
             <Grid item xs={12}>
-              <Typography variant="subtitle2" color="textSecondary" gutterBottom sx={{ mt: 2 }}>
+              <Typography variant="subtitle2" color="textSecondary" gutterBottom sx={{ mt: 3, mb: 2 }}>
                 Transaction Filters
               </Typography>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <TextField
-                select
+              <MultiSelectDropdown
                 label="Transaction Type"
-                value={filters.transactionType || ''}
-                onChange={(e) => handleFilterChange('transactionType', e.target.value || undefined)}
-                fullWidth
-                size="small"
-              >
-                {transactionTypes.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </TextField>
+                options={transactionTypes}
+                value={filters.transactionTypeIds || []}
+                onChange={(values) => handleFilterChange('transactionTypeIds', values || [])}
+                placeholder="Select types..."
+              />
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <MultiSelectDropdown
@@ -354,17 +397,31 @@ const FilteredTransactions: React.FC = () => {
             </Grid>
 
             {/* Actions Section */}
-            <Grid item xs={12} sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
-              <Button
-                onClick={clearFilters}
-                disabled={!hasActiveFilters()}
-                startIcon={<Clear />}
-                size="small"
-                variant="outlined"
-                color="secondary"
+            <Grid item xs={12}>
+              <Box 
+                sx={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  mt: 3, 
+                  pt: 3, 
+                  borderTop: 1, 
+                  borderColor: 'divider',
+                  flexWrap: 'wrap',
+                  gap: 2
+                }}
               >
-                Clear All Filters
-              </Button>
+                <Button
+                  onClick={clearFilters}
+                  disabled={!hasActiveFilters()}
+                  startIcon={<Clear />}
+                  size="small"
+                  variant="outlined"
+                  color="secondary"
+                >
+                  Clear All Filters
+                </Button>
+              </Box>
             </Grid>
           </Grid>
         </CardContent>
@@ -571,15 +628,15 @@ const FilteredTransactions: React.FC = () => {
                   display="flex" 
                   justifyContent="space-between" 
                   alignItems="center" 
-                  p={3} 
+                  p={2} 
                   borderTop={1}
                   borderColor="divider"
                   flexWrap="wrap" 
                   gap={2}
-                  bgcolor="grey.25"
+                  bgcolor="grey.50"
                 >
-                  <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
-                    <Typography variant="body2" color="textSecondary" fontWeight={500}>
+                  <Box display="flex" alignItems="center" gap={2} flexWrap="wrap" sx={{ minWidth: 'fit-content' }}>
+                    <Typography variant="body2" color="text.secondary" fontWeight={500} sx={{ whiteSpace: 'nowrap' }}>
                       Showing {((transactionData.page - 1) * transactionData.size) + 1} to {Math.min(transactionData.page * transactionData.size, transactionData.total)} of {transactionData.total} transactions
                     </Typography>
                     <FormControl size="small" sx={{ minWidth: 120 }}>
@@ -598,15 +655,19 @@ const FilteredTransactions: React.FC = () => {
                     </FormControl>
                   </Box>
                   {transactionData.pages > 1 && (
-                    <Pagination
-                      count={transactionData.pages}
-                      page={transactionData.page}
-                      onChange={handlePageChange}
-                      color="primary"
-                      showFirstButton
-                      showLastButton
-                      size="large"
-                    />
+                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                      <Pagination
+                        count={transactionData.pages}
+                        page={transactionData.page}
+                        onChange={handlePageChange}
+                        color="primary"
+                        showFirstButton
+                        showLastButton
+                        size="medium"
+                        siblingCount={1}
+                        boundaryCount={1}
+                      />
+                    </Box>
                   )}
                 </Box>
               )}
