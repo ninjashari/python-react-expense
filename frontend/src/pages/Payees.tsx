@@ -367,9 +367,40 @@ const Payees: React.FC = () => {
                       </IconButton>
                     </Box>
                   ) : (
-                    <Box display="flex" alignItems="center" gap={1}>
-                      <Typography variant="body1">{payee.name}</Typography>
-                      <IconButton size="small" onClick={() => handleInlineEdit(payee)}>
+                    <Box 
+                      display="flex" 
+                      alignItems="center" 
+                      gap={1}
+                      sx={{
+                        '&:hover .edit-icon': {
+                          opacity: 1,
+                        }
+                      }}
+                    >
+                      <Typography 
+                        variant="body1" 
+                        onClick={() => handleInlineEdit(payee)}
+                        sx={{
+                          cursor: 'pointer',
+                          '&:hover': {
+                            backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                            borderRadius: '4px',
+                            padding: '2px 4px',
+                            margin: '-2px -4px',
+                          }
+                        }}
+                      >
+                        {payee.name}
+                      </Typography>
+                      <IconButton 
+                        size="small" 
+                        onClick={() => handleInlineEdit(payee)}
+                        className="edit-icon"
+                        sx={{
+                          opacity: 0,
+                          transition: 'opacity 0.2s ease-in-out',
+                        }}
+                      >
                         <Edit fontSize="small" />
                       </IconButton>
                     </Box>
