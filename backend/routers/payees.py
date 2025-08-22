@@ -9,7 +9,7 @@ from models.transactions import Transaction
 from schemas.payees import PayeeCreate, PayeeUpdate, PayeeResponse
 from utils.auth import get_current_active_user
 from utils.slug import create_slug
-from utils.color_generator import generate_unique_color
+from utils.color_generator import assign_unique_colors_bulk, generate_unique_color
 
 router = APIRouter()
 
@@ -270,25 +270,24 @@ def reassign_payee_colors(
                 "updated_payees": []
             }
         
-        # Clear all existing colors first to enable fresh distribution
+        # Store old colors for comparison
         old_colors = {}
         for payee in payees:
             old_colors[payee.id] = payee.color
-            payee.color = None
-        
-        db.commit()  # Commit the clearing to ensure clean slate
-        
-        # Generate new mathematically distributed colors
-        updated_payees = []
-        colors_assigned = 0
         
         # Sort payees by name for consistent ordering
         sorted_payees = sorted(payees, key=lambda p: p.name.lower())
         
-        for payee in sorted_payees:
-            try:
-                # Generate unique color using optimized distribution
-                new_color = generate_unique_color(db, payee.name, str(current_user.id), "payees")
+        # Use bulk assignment to ensure global uniqueness
+        assigned_colors = assign_unique_colors_bulk(db, sorted_payees, str(current_user.id), "payees")
+        
+        # Apply the assigned colors
+        updated_payees = []
+        colors_assigned = 0
+        
+        for i, payee in enumerate(sorted_payees):
+            if i < len(assigned_colors):
+                new_color = assigned_colors[i]
                 payee.color = new_color
                 
                 updated_payees.append({
@@ -296,15 +295,10 @@ def reassign_payee_colors(
                     "payee_name": payee.name,
                     "old_color": old_colors[payee.id],
                     "new_color": new_color,
-                    "distribution_index": colors_assigned
+                    "distribution_index": i
                 })
                 
                 colors_assigned += 1
-                
-            except Exception as e:
-                # Fallback to old color if generation fails
-                payee.color = old_colors[payee.id]
-                print(f"Failed to generate color for payee {payee.name}: {e}")
         
         db.commit()
         

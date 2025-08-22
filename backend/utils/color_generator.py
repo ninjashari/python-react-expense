@@ -369,7 +369,6 @@ def generate_ux_optimized_colors() -> List[str]:
         '#4A148C',  # Material Purple 900
         '#880E4F',  # Material Pink 900
         '#006064',  # Material Cyan 900
-        '#E65100',  # Material Orange 900
         '#37474F',  # Material Blue Grey 800
         
         # Additional accessible colors
@@ -381,6 +380,15 @@ def generate_ux_optimized_colors() -> List[str]:
         '#27AE60',  # Custom Green
         '#2980B9',  # Custom Blue
         '#8E44AD',  # Custom Purple
+        '#D35400',  # Custom Orange
+        '#16A085',  # Custom Teal
+        '#8E44AD',  # Custom Purple variant
+        '#E67E22',  # Custom Orange variant
+        '#9B59B6',  # Custom Purple light
+        '#34495E',  # Custom Blue Grey
+        '#2C3E50',  # Custom Dark Blue
+        '#E74C3C',  # Custom Red variant
+        '#3498DB',  # Custom Blue variant
     ]
 
 def calculate_wcag_contrast_ratio(color1: str, color2: str) -> float:
@@ -399,74 +407,175 @@ def is_color_accessible(color: str, background: str = '#FFFFFF') -> bool:
     contrast_ratio = calculate_wcag_contrast_ratio(color, background)
     return contrast_ratio >= 4.5  # WCAG AA standard for normal text
 
-def generate_unique_color(db: Session, entity_name: Optional[str] = None, user_id: Optional[str] = None, entity_type: str = "categories") -> str:
+def get_all_used_colors(db: Session, user_id: str) -> set:
     """
-    Generate unique, accessible colors for visual distinction.
-    
-    Uses a combination of predefined accessible colors and generated variations
-    to ensure good contrast and visual separation.
-    
-    Args:
-        db: Database session
-        entity_name: Entity name (used for deterministic colors if needed)
-        user_id: User ID to scope uniqueness
-        entity_type: Type of entity ("categories" or "payees")
-        
-    Returns:
-        A unique, accessible hex color string
+    Get all colors currently used by both categories and payees for a user.
+    This ensures global uniqueness across all entities.
     """
-    # Import models dynamically based on entity type
-    if entity_type == "categories":
-        from models.categories import Category as Model
-    elif entity_type == "payees":
-        from models.payees import Payee as Model
-    else:
-        raise ValueError(f"Unsupported entity_type: {entity_type}")
+    from models.categories import Category
+    from models.payees import Payee
     
-    # Get existing colors to determine what's already used
-    query = db.query(Model.color)
-    if user_id:
-        query = query.filter(Model.user_id == user_id)
+    # Get all category colors
+    category_colors = db.query(Category.color).filter(
+        Category.user_id == user_id,
+        Category.color.isnot(None)
+    ).all()
     
-    existing_colors = [color[0] for color in query.all() if color[0]]
-    existing_colors_set = set(existing_colors)
+    # Get all payee colors
+    payee_colors = db.query(Payee.color).filter(
+        Payee.user_id == user_id,
+        Payee.color.isnot(None)
+    ).all()
     
-    # Try semantic color first if entity has a name
-    if entity_name:
-        semantic_color = get_semantic_color_for_category(entity_name)
-        if semantic_color and semantic_color not in existing_colors_set:
-            return semantic_color
+    # Combine and deduplicate
+    all_colors = set()
+    for color_tuple in category_colors + payee_colors:
+        if color_tuple[0]:  # Check if color is not None
+            all_colors.add(color_tuple[0])
     
-    # Use predefined accessible colors first
-    predefined_colors = generate_ux_optimized_colors()
-    for color in predefined_colors:
-        if (color not in existing_colors_set and 
-            is_color_accessible(color) and
-            all(color_distance(color, existing) > 45 for existing in existing_colors)):
-            return color
+    return all_colors
+
+def generate_color_palette(count: int) -> List[str]:
+    """
+    Generate a palette of visually distinct, accessible colors.
+    Uses a systematic approach to ensure maximum visual separation.
+    """
+    colors = []
     
-    # Generate additional colors using simple hue rotation
-    base_hue = len(existing_colors) * 137  # Use simple angle distribution
+    # Base parameters for high-quality UI colors
+    saturation_values = [75, 85, 65]  # High saturation for vibrancy
+    lightness_values = [45, 35, 55]   # Medium lightness for accessibility
     
-    for i in range(100):  # Try up to 100 variations
-        hue = (base_hue + i * 37) % 360  # Simple angle stepping
-        saturation = 70 + (i % 3) * 10  # Vary saturation slightly
-        lightness = 45 + (i % 2) * 10   # Vary lightness slightly
+    # Generate colors using optimal hue distribution
+    hue_step = 360 / count if count > 0 else 360 / 24  # Distribute evenly around color wheel
+    
+    for i in range(count):
+        # Calculate hue with optimal spacing
+        hue = (i * hue_step) % 360
         
+        # Vary saturation and lightness for visual rhythm
+        saturation = saturation_values[i % len(saturation_values)]
+        lightness = lightness_values[i % len(lightness_values)]
+        
+        # Convert to RGB and hex
         r, g, b = hsl_to_rgb(hue, saturation, lightness)
         color = rgb_to_hex(r, g, b)
         
-        if (color not in existing_colors_set and 
-            is_color_accessible(color) and
-            all(color_distance(color, existing) > 45 for existing in existing_colors)):
-            return color
+        # Ensure accessibility
+        if is_color_accessible(color):
+            colors.append(color)
     
-    # Final fallback: hash-based color
-    if entity_name:
-        return generate_category_color_from_name(entity_name)
+    return colors
+
+def assign_unique_colors_bulk(db: Session, entities: List, user_id: str, entity_type: str) -> List[str]:
+    """
+    Assign unique colors to a list of entities in bulk.
+    Ensures no color conflicts across the entire system.
     
-    # Ultimate fallback
-    import time
-    seed = int(time.time() * 1000000) % 360
-    r, g, b = hsl_to_rgb(seed, 75, 45)
-    return rgb_to_hex(r, g, b)
+    Args:
+        db: Database session
+        entities: List of entities to assign colors to
+        user_id: User ID for scoping
+        entity_type: 'categories' or 'payees'
+        
+    Returns:
+        List of assigned colors in the same order as entities
+    """
+    if not entities:
+        return []
+    
+    # Get all colors currently used across the system
+    existing_colors = get_all_used_colors(db, user_id)
+    
+    # Start with predefined accessible colors
+    available_colors = []
+    
+    # Add predefined UX-optimized colors
+    predefined = generate_ux_optimized_colors()
+    for color in predefined:
+        if color not in existing_colors:
+            available_colors.append(color)
+    
+    # Generate additional colors if needed
+    total_needed = len(entities)
+    if len(available_colors) < total_needed:
+        additional_needed = total_needed - len(available_colors)
+        generated_colors = generate_color_palette(additional_needed * 2)  # Generate extra for selection
+        
+        for color in generated_colors:
+            if (color not in existing_colors and 
+                color not in available_colors and
+                is_color_accessible(color)):
+                available_colors.append(color)
+                if len(available_colors) >= total_needed:
+                    break
+    
+    # Assign colors to entities with semantic preferences
+    assigned_colors = []
+    used_in_this_batch = set()
+    
+    for i, entity in enumerate(entities):
+        assigned_color = None
+        
+        # Try semantic color first if it's a category
+        if entity_type == "categories" and hasattr(entity, 'name'):
+            semantic_color = get_semantic_color_for_category(entity.name)
+            if (semantic_color and 
+                semantic_color not in existing_colors and 
+                semantic_color not in used_in_this_batch):
+                assigned_color = semantic_color
+        
+        # If no semantic color, use next available color
+        if not assigned_color:
+            for color in available_colors:
+                if (color not in existing_colors and 
+                    color not in used_in_this_batch):
+                    assigned_color = color
+                    break
+        
+        # Ultimate fallback: generate a unique color
+        if not assigned_color:
+            for attempt in range(100):
+                hue = (i * 73 + attempt * 47) % 360  # Use prime numbers for distribution
+                saturation = 70 + (attempt % 3) * 10
+                lightness = 40 + (attempt % 3) * 10
+                
+                r, g, b = hsl_to_rgb(hue, saturation, lightness)
+                color = rgb_to_hex(r, g, b)
+                
+                if (color not in existing_colors and 
+                    color not in used_in_this_batch and
+                    is_color_accessible(color)):
+                    assigned_color = color
+                    break
+        
+        # Final safety fallback
+        if not assigned_color:
+            import time
+            seed = int(time.time() * 1000000 + i) % 360
+            r, g, b = hsl_to_rgb(seed, 75, 45)
+            assigned_color = rgb_to_hex(r, g, b)
+        
+        assigned_colors.append(assigned_color)
+        used_in_this_batch.add(assigned_color)
+        existing_colors.add(assigned_color)  # Update for next iteration
+    
+    return assigned_colors
+
+def generate_unique_color(db: Session, entity_name: Optional[str] = None, user_id: Optional[str] = None, entity_type: str = "categories") -> str:
+    """
+    Generate a single unique color for an entity.
+    This function maintains backward compatibility but uses the new bulk assignment logic.
+    """
+    from models.categories import Category
+    from models.payees import Payee
+    
+    # Create a mock entity for the bulk assignment function
+    class MockEntity:
+        def __init__(self, name):
+            self.name = name
+    
+    mock_entity = MockEntity(entity_name or "default")
+    colors = assign_unique_colors_bulk(db, [mock_entity], user_id, entity_type)
+    
+    return colors[0] if colors else "#2196F3"  # Fallback blue

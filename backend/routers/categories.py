@@ -8,7 +8,7 @@ from models.users import User
 from models.transactions import Transaction
 from schemas.categories import CategoryCreate, CategoryUpdate, CategoryResponse
 from utils.auth import get_current_active_user
-from utils.color_generator import generate_unique_color
+from utils.color_generator import assign_unique_colors_bulk, generate_unique_color
 from utils.slug import create_slug
 
 router = APIRouter()
@@ -225,25 +225,24 @@ def reassign_category_colors(
                 "updated_categories": []
             }
         
-        # Clear all existing colors first to enable fresh distribution
+        # Store old colors for comparison
         old_colors = {}
         for category in categories:
             old_colors[category.id] = category.color
-            category.color = None
-        
-        db.commit()  # Commit the clearing to ensure clean slate
-        
-        # Generate new mathematically distributed colors
-        updated_categories = []
-        colors_assigned = 0
         
         # Sort categories by name for consistent ordering
         sorted_categories = sorted(categories, key=lambda c: c.name.lower())
         
-        for category in sorted_categories:
-            try:
-                # Generate unique color using optimized distribution
-                new_color = generate_unique_color(db, category.name, str(current_user.id), "categories")
+        # Use bulk assignment to ensure global uniqueness
+        assigned_colors = assign_unique_colors_bulk(db, sorted_categories, str(current_user.id), "categories")
+        
+        # Apply the assigned colors
+        updated_categories = []
+        colors_assigned = 0
+        
+        for i, category in enumerate(sorted_categories):
+            if i < len(assigned_colors):
+                new_color = assigned_colors[i]
                 category.color = new_color
                 
                 updated_categories.append({
@@ -251,15 +250,10 @@ def reassign_category_colors(
                     "category_name": category.name,
                     "old_color": old_colors[category.id],
                     "new_color": new_color,
-                    "distribution_index": colors_assigned
+                    "distribution_index": i
                 })
                 
                 colors_assigned += 1
-                
-            except Exception as e:
-                # Fallback to old color if generation fails
-                category.color = old_colors[category.id]
-                print(f"Failed to generate color for category {category.name}: {e}")
         
         db.commit()
         
