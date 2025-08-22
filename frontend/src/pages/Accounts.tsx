@@ -38,6 +38,9 @@ const Accounts: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
+  const [accountToRecalculate, setAccountToRecalculate] = useState<Account | null>(null);
+  const [recalculateResult, setRecalculateResult] = useState<any>(null);
   const queryClient = useQueryClient();
 
   // Helper function to calculate credit utilization percentage
@@ -174,26 +177,41 @@ const Accounts: React.FC = () => {
     }
   };
 
-  const handleRecalculateBalances = async (account: Account) => {
-    if (window.confirm(`Recalculate transaction balances for "${account.name}"?\n\nThis will recalculate the balance_after_transaction field for all transactions in this account. This is useful for maintaining data integrity.`)) {
-      setIsRecalculating(true);
-      try {
-        const result = await transactionsApi.recalculateAccountBalances(account.id);
-        
-        // Show success message
-        alert(`Success: ${result.message}\nTransactions updated: ${result.transactions_updated}`);
-        
-        // Refresh accounts and transactions data
-        queryClient.invalidateQueries({ queryKey: ['accounts'] });
-        queryClient.invalidateQueries({ queryKey: ['transactions'] });
-        
-      } catch (error: any) {
-        console.error('Failed to recalculate balances:', error);
-        const errorMessage = error.response?.data?.detail || error.message || 'Failed to recalculate balances';
-        alert(`Error: ${errorMessage}`);
-      } finally {
-        setIsRecalculating(false);
-      }
+  const handleRecalculateBalances = (account: Account) => {
+    setAccountToRecalculate(account);
+    setRecalculateDialogOpen(true);
+  };
+
+  const handleConfirmRecalculate = async () => {
+    if (!accountToRecalculate) return;
+    
+    setRecalculateDialogOpen(false);
+    setIsRecalculating(true);
+    setRecalculateResult(null);
+    
+    try {
+      const result = await transactionsApi.recalculateAccountBalances(accountToRecalculate.id);
+      
+      setRecalculateResult({
+        success: true,
+        message: result.message,
+        transactions_updated: result.transactions_updated,
+        account_name: result.account_name
+      });
+      
+      // Refresh accounts and transactions data
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      
+    } catch (error: any) {
+      console.error('Failed to recalculate balances:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Failed to recalculate balances';
+      setRecalculateResult({
+        error: true,
+        message: errorMessage
+      });
+    } finally {
+      setIsRecalculating(false);
     }
   };
 
@@ -605,6 +623,65 @@ const Accounts: React.FC = () => {
           </DialogActions>
         </form>
       </Dialog>
+
+      {/* Recalculate Balances Confirmation Dialog */}
+      <Dialog open={recalculateDialogOpen} onClose={() => setRecalculateDialogOpen(false)}>
+        <DialogTitle>Recalculate Transaction Balances</DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>
+            Recalculate transaction balances for "{accountToRecalculate?.name}"?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            This will recalculate the balance_after_transaction field for all transactions in this account. 
+            This is useful for maintaining data integrity.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Continue?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRecalculateDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleConfirmRecalculate} 
+            color="primary" 
+            variant="contained"
+            disabled={isRecalculating}
+          >
+            {isRecalculating ? 'Recalculating...' : 'Recalculate Balances'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Recalculate Results */}
+      {recalculateResult && (
+        <Backdrop open={true} sx={{ zIndex: (theme) => theme.zIndex.modal + 1 }}>
+          <Dialog 
+            open={true} 
+            onClose={() => setRecalculateResult(null)}
+            maxWidth="sm"
+            fullWidth
+          >
+            <DialogTitle>
+              {recalculateResult.error ? 'Recalculation Failed' : 'Recalculation Complete'}
+            </DialogTitle>
+            <DialogContent>
+              <Alert severity={recalculateResult.error ? 'error' : 'success'} sx={{ mb: 2 }}>
+                {recalculateResult.message}
+              </Alert>
+              {!recalculateResult.error && (
+                <Typography variant="body2">
+                  Transactions updated: {recalculateResult.transactions_updated}
+                </Typography>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setRecalculateResult(null)} variant="contained">
+                OK
+              </Button>
+            </DialogActions>
+          </Dialog>
+        </Backdrop>
+      )}
     </Box>
   );
 };

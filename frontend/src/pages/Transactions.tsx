@@ -131,8 +131,10 @@ const Transactions: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<string>('');
   const [isCleaningUp, setIsCleaningUp] = useState(false);
   const [cleanupResult, setCleanupResult] = useState<any>(null);
+  const [cleanupDialogOpen, setCleanupDialogOpen] = useState(false);
   const [isRecalculatingBalances, setIsRecalculatingBalances] = useState(false);
   const [recalculateResult, setRecalculateResult] = useState<any>(null);
+  const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -424,15 +426,12 @@ const Transactions: React.FC = () => {
   };
 
   // Description cleanup handler
-  const handleCleanupDescriptions = async () => {
-    const confirmed = window.confirm(
-      'This will clean up transaction descriptions:\n\n' +
-      '1. Remove "| " from descriptions of currently filtered transactions\n' +
-      '2. Remove trailing whitespaces from all your transactions\n\n' +
-      'Continue?'
-    );
+  const handleCleanupDescriptions = () => {
+    setCleanupDialogOpen(true);
+  };
 
-    if (!confirmed) return;
+  const handleConfirmCleanup = async () => {
+    setCleanupDialogOpen(false);
 
     setIsCleaningUp(true);
     setCleanupResult(null);
@@ -465,23 +464,24 @@ const Transactions: React.FC = () => {
 
 
   // Recalculate balances handler
-  const handleRecalculateBalances = async () => {
+  const handleRecalculateBalances = () => {
     if (!filters.accountId) {
-      window.alert('Please select an account to recalculate balances for.');
+      showError('Please select an account to recalculate balances for.');
       return;
     }
+    setRecalculateDialogOpen(true);
+  };
 
-    const selectedAccount = accounts?.find(acc => acc.id === filters.accountId);
-    const confirmed = window.confirm(
-      `This will recalculate per-transaction balances for account "${selectedAccount?.name}".\n\n` +
-      'This process will update all transaction balances for this account based on chronological order. Continue?'
-    );
-    if (!confirmed) return;
+  const handleConfirmRecalculate = async () => {
+    setRecalculateDialogOpen(false);
 
     setIsRecalculatingBalances(true);
     setRecalculateResult(null);
 
     try {
+      if (!filters.accountId) {
+        throw new Error('No account selected');
+      }
       const result = await transactionsApi.recalculateAccountBalances(filters.accountId);
       
       setRecalculateResult({
@@ -2119,6 +2119,66 @@ const Transactions: React.FC = () => {
             disabled={(!selectedCategoryForBulk && !selectedPayeeForBulk) || bulkUpdateMutation.isPending}
           >
             {bulkUpdateMutation.isPending ? 'Updating...' : `Update ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Clean Descriptions Confirmation Dialog */}
+      <Dialog open={cleanupDialogOpen} onClose={() => setCleanupDialogOpen(false)}>
+        <DialogTitle>Clean Transaction Descriptions</DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>
+            This will clean up transaction descriptions:
+          </Typography>
+          <Box component="ul" sx={{ mt: 1, mb: 2 }}>
+            <Typography component="li" variant="body2">
+              Remove "| " from descriptions of currently filtered transactions
+            </Typography>
+            <Typography component="li" variant="body2">
+              Remove trailing whitespaces from all your transactions
+            </Typography>
+          </Box>
+          <Typography variant="body2" color="text.secondary">
+            This action cannot be undone. Continue?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCleanupDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleConfirmCleanup} 
+            color="primary" 
+            variant="contained"
+            disabled={isCleaningUp}
+          >
+            {isCleaningUp ? 'Cleaning...' : 'Clean Descriptions'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Recalculate Balances Confirmation Dialog */}
+      <Dialog open={recalculateDialogOpen} onClose={() => setRecalculateDialogOpen(false)}>
+        <DialogTitle>Recalculate Transaction Balances</DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>
+            This will recalculate per-transaction balances for account "{accounts?.find(acc => acc.id === filters.accountId)?.name}".
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+            This process will update all transaction balances for this account based on chronological order. 
+            This is useful for maintaining data integrity.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Continue?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRecalculateDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleConfirmRecalculate} 
+            color="primary" 
+            variant="contained"
+            disabled={isRecalculatingBalances}
+          >
+            {isRecalculatingBalances ? 'Recalculating...' : 'Recalculate Balances'}
           </Button>
         </DialogActions>
       </Dialog>
