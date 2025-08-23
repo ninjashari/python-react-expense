@@ -22,6 +22,8 @@ import {
   FormControl,
   InputLabel,
   Select,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import { Clear, FilterList, Analytics, TrendingUp, FileDownload } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -78,6 +80,7 @@ const FilteredTransactions: React.FC = () => {
   
   const [savingTransactions, setSavingTransactions] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const queryClient = useQueryClient();
 
   // Fetch reference data
@@ -98,8 +101,8 @@ const FilteredTransactions: React.FC = () => {
 
   // Build API parameters
   const getApiParams = () => ({
-    page: filters.page,
-    size: filters.size,
+    page: showAll ? 1 : filters.page,
+    size: showAll ? 10000 : filters.size,
     start_date: filters.startDate,
     end_date: filters.endDate,
     account_ids: filters.accountIds.length > 0 ? filters.accountIds.map(opt => opt.value).join(',') : undefined,
@@ -110,7 +113,7 @@ const FilteredTransactions: React.FC = () => {
 
   // Fetch transactions
   const { data: transactionData, isLoading: transactionsLoading } = useQuery<PaginatedResponse<Transaction>>({
-    queryKey: ['filtered-transactions', filters],
+    queryKey: ['filtered-transactions', filters, showAll],
     queryFn: () => transactionsApi.getAll(getApiParams()),
   });
 
@@ -264,6 +267,82 @@ const FilteredTransactions: React.FC = () => {
     }
   };
 
+  // Date range helper functions
+  const getDateString = (date: Date) => {
+    return date.toISOString().split('T')[0];
+  };
+
+
+  const getSelectedMonth = () => {
+    if (filters.startDate && filters.endDate) {
+      const start = new Date(filters.startDate);
+      const end = new Date(filters.endDate);
+      if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth() && 
+          start.getDate() === 1 && end.getDate() === new Date(end.getFullYear(), end.getMonth() + 1, 0).getDate()) {
+        return (start.getMonth() + 1).toString().padStart(2, '0');
+      }
+    }
+    return '';
+  };
+
+  const getSelectedYear = () => {
+    if (filters.startDate && filters.endDate) {
+      const start = new Date(filters.startDate);
+      const end = new Date(filters.endDate);
+      if (start.getFullYear() === end.getFullYear() && 
+          start.getMonth() === 0 && start.getDate() === 1 &&
+          end.getMonth() === 11 && end.getDate() === 31) {
+        return start.getFullYear().toString();
+      }
+    }
+    return '';
+  };
+
+  const getYearOptions = () => {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let year = currentYear; year >= currentYear - 10; year--) {
+      years.push(year.toString());
+    }
+    return years;
+  };
+
+  const handleMonthChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const month = event.target.value;
+    if (month === '') {
+      setFilters(prev => ({ ...prev, startDate: undefined, endDate: undefined, page: 1 }));
+    } else {
+      const currentYear = getSelectedYear() || new Date().getFullYear().toString();
+      const year = parseInt(currentYear);
+      const monthNum = parseInt(month);
+      const startDate = new Date(year, monthNum - 1, 1);
+      const endDate = new Date(year, monthNum, 0);
+      setFilters(prev => ({
+        ...prev,
+        startDate: getDateString(startDate),
+        endDate: getDateString(endDate),
+        page: 1
+      }));
+    }
+  };
+
+  const handleYearChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const year = event.target.value;
+    if (year === '') {
+      setFilters(prev => ({ ...prev, startDate: undefined, endDate: undefined, page: 1 }));
+    } else {
+      const yearNum = parseInt(year);
+      const startDate = new Date(yearNum, 0, 1);
+      const endDate = new Date(yearNum, 11, 31);
+      setFilters(prev => ({
+        ...prev,
+        startDate: getDateString(startDate),
+        endDate: getDateString(endDate),
+        page: 1
+      }));
+    }
+  };
+
   if (transactionsLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="400px">
@@ -327,30 +406,78 @@ const FilteredTransactions: React.FC = () => {
             {/* Date Filters Section */}
             <Grid item xs={12}>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom sx={{ mb: 2 }}>
-                Date Range
+                Date Filters
               </Typography>
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={6} md={4}>
               <TextField
-                label="Start Date"
-                type="date"
-                value={filters.startDate || ''}
-                onChange={(e) => handleFilterChange('startDate', e.target.value || undefined)}
+                select
+                label="Month"
+                value={getSelectedMonth()}
+                onChange={handleMonthChange}
                 fullWidth
                 size="small"
-                InputLabelProps={{ shrink: true }}
-              />
+                helperText="Select specific month"
+              >
+                <MenuItem value="">All Months</MenuItem>
+                <MenuItem value="01">January</MenuItem>
+                <MenuItem value="02">February</MenuItem>
+                <MenuItem value="03">March</MenuItem>
+                <MenuItem value="04">April</MenuItem>
+                <MenuItem value="05">May</MenuItem>
+                <MenuItem value="06">June</MenuItem>
+                <MenuItem value="07">July</MenuItem>
+                <MenuItem value="08">August</MenuItem>
+                <MenuItem value="09">September</MenuItem>
+                <MenuItem value="10">October</MenuItem>
+                <MenuItem value="11">November</MenuItem>
+                <MenuItem value="12">December</MenuItem>
+              </TextField>
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={6} md={4}>
               <TextField
-                label="End Date"
-                type="date"
-                value={filters.endDate || ''}
-                onChange={(e) => handleFilterChange('endDate', e.target.value || undefined)}
+                select
+                label="Year"
+                value={getSelectedYear()}
+                onChange={handleYearChange}
                 fullWidth
                 size="small"
-                InputLabelProps={{ shrink: true }}
-              />
+                helperText="Select specific year"
+              >
+                <MenuItem value="">All Years</MenuItem>
+                {getYearOptions().map((year) => (
+                  <MenuItem key={year} value={year}>
+                    {year}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6} md={4}>
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>
+                  Custom Range
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <TextField
+                    label="Start"
+                    type="date"
+                    value={filters.startDate || ''}
+                    onChange={(e) => handleFilterChange('startDate', e.target.value || undefined)}
+                    fullWidth
+                    size="small"
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <TextField
+                    label="End"
+                    type="date"
+                    value={filters.endDate || ''}
+                    onChange={(e) => handleFilterChange('endDate', e.target.value || undefined)}
+                    fullWidth
+                    size="small"
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Box>
+              </Box>
             </Grid>
 
             {/* Transaction Filters Section */}
@@ -637,24 +764,40 @@ const FilteredTransactions: React.FC = () => {
                 >
                   <Box display="flex" alignItems="center" gap={2} flexWrap="wrap" sx={{ minWidth: 'fit-content' }}>
                     <Typography variant="body2" color="text.secondary" fontWeight={500} sx={{ whiteSpace: 'nowrap' }}>
-                      Showing {((transactionData.page - 1) * transactionData.size) + 1} to {Math.min(transactionData.page * transactionData.size, transactionData.total)} of {transactionData.total} transactions
+                      {showAll 
+                        ? `Showing all ${transactionData.total} transactions`
+                        : `Showing ${((transactionData.page - 1) * transactionData.size) + 1} to ${Math.min(transactionData.page * transactionData.size, transactionData.total)} of ${transactionData.total} transactions`
+                      }
                     </Typography>
-                    <FormControl size="small" sx={{ minWidth: 120 }}>
-                      <InputLabel>Per page</InputLabel>
-                      <Select
-                        value={filters.size}
-                        label="Per page"
-                        onChange={handlePageSizeChange}
-                      >
-                        {pageSizeOptions.map((option) => (
-                          <MenuItem key={option.value} value={option.value}>
-                            {option.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={showAll}
+                          onChange={(e) => setShowAll(e.target.checked)}
+                          size="small"
+                        />
+                      }
+                      label="Show All"
+                      sx={{ ml: 1 }}
+                    />
+                    {!showAll && (
+                      <FormControl size="small" sx={{ minWidth: 120 }}>
+                        <InputLabel>Per page</InputLabel>
+                        <Select
+                          value={filters.size}
+                          label="Per page"
+                          onChange={handlePageSizeChange}
+                        >
+                          {pageSizeOptions.map((option) => (
+                            <MenuItem key={option.value} value={option.value}>
+                              {option.label}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    )}
                   </Box>
-                  {transactionData.pages > 1 && (
+                  {!showAll && transactionData.pages > 1 && (
                     <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                       <Pagination
                         count={transactionData.pages}
