@@ -32,6 +32,7 @@ class AccountUpdate(BaseModel):
     name: Optional[str] = None
     type: Optional[str] = None
     balance: Optional[Decimal] = None
+    opening_date: Optional[date] = None
     
     # Account details
     account_number: Optional[str] = None

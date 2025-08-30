@@ -4,70 +4,97 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://reactjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791.svg)](https://www.postgresql.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
+[![Material-UI](https://img.shields.io/badge/Material--UI-5.18-007FFF.svg)](https://mui.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A modern, full-stack expense management application designed for personal financial tracking and analysis. Built with React 19 and FastAPI, featuring comprehensive transaction management, intelligent file imports, and advanced reporting capabilities.
+A modern, full-stack expense management application designed for personal financial tracking and analysis. Built with React 19 and FastAPI, featuring comprehensive transaction management, intelligent AI-powered imports, and advanced reporting capabilities.
 
-![Dashboard Preview](https://via.placeholder.com/800x400/f0f0f0/333333?text=Expense+Manager+Dashboard)
+## 📋 Table of Contents
+
+- [Features](#-features)
+- [Technology Stack](#-technology-stack)
+- [Quick Start](#-quick-start)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [Usage](#-usage)
+- [API Documentation](#-api-documentation)
+- [Development](#-development)
+- [Contributing](#-contributing)
+- [License](#-license)
 
 ## ✨ Features
 
-### 🎯 Core Functionality
-- **Dashboard**: Overview of accounts, recent transactions, and financial summaries
-- **Account Management**: Support for multiple account types (checking, savings, credit card, cash, investment, loan)
-- **Transaction Management**: Handle deposits, withdrawals, and transfers with automatic balance updates
-- **Payee Management**: Organize and track transaction counterparties
-- **Category Management**: Categorize transactions with unique color coding
-- **Advanced Reports**: Comprehensive filtering and analytics with multiple report types
+### 💼 Core Financial Management
+- **Multi-Account Support**: Checking, savings, credit cards, cash, and investment accounts
+- **Transaction Tracking**: Income, expenses, and transfers with automatic balance calculations  
+- **Credit Card Management**: Track balances, credit limits, utilization, and payment due dates
+- **Category & Payee Organization**: Smart categorization with auto-generated unique colors
+- **Real-time Balance Updates**: Automatic account balance synchronization across all transactions
 
-### 🚀 Advanced Features
-- **Credit Card Support**: Specific fields for credit limit, bill generation date, and payment tracking
-- **Transfer Handling**: Seamless money transfers between accounts with proper balance tracking
-- **Multi-Select Dropdowns**: Advanced UI components with search and reset functionality
-- **File Import System**: Import transactions from CSV, Excel, and PDF files with OCR support
-- **AI-Powered Transaction Categorization**: Intelligent payee and category suggestions based on historical data
-- **Machine Learning Training**: System learns from user behavior to improve future suggestions
-- **Unique Color Generation**: Automatic generation of distinct colors for categories
-- **Comprehensive Filtering**: Multi-dimensional filtering across all data entities
+### 🤖 AI-Powered Features
+- **Smart Import Processing**: AI categorization for CSV, Excel, and PDF files
+- **Local LLM Integration**: Offline PDF processing with Ollama (llama3.1, mistral, gemma)
+- **Machine Learning Engine**: Continuous learning from user patterns and corrections
+- **Intelligent Suggestions**: Context-aware payee and category recommendations
+- **Pattern Recognition**: Advanced transaction analysis with confidence scoring
+
+### 📊 Analytics & Reporting
+- **Comprehensive Reports**: Summary, category breakdown, payee analysis, monthly trends
+- **Advanced Filtering**: Multi-dimensional search across accounts, dates, amounts, and tags
+- **Credit Utilization Tracking**: Visual progress bars with health indicators
+- **Export Capabilities**: Multiple format support for data portability
+- **Financial Insights**: Spending patterns and account performance metrics
+
+### 🔧 Advanced Import System
+- **Multi-Format Support**: CSV, Excel (.xlsx/.xls), and PDF with OCR
+- **Column Mapping**: Intelligent field detection and manual mapping options
+- **Preview & Validation**: Review transactions before committing to database
+- **Error Handling**: Comprehensive validation with detailed error reporting
+- **Batch Processing**: Efficient handling of large transaction sets
 
 ## 🛠 Technology Stack
 
 ### Backend
-- **Python 3.8+** with FastAPI framework
-- **PostgreSQL** database
-- **SQLAlchemy** ORM with Alembic migrations
-- **Pydantic** for data validation
-- **AI Training System** with pattern matching and confidence scoring
-- **Machine Learning** for transaction categorization and payee prediction
-- **OCR Support** with Tesseract and PIL
-- **PDF Processing** with PyPDF2
-- **Excel/CSV Processing** with pandas and openpyxl
+- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern, high-performance web framework
+- **[PostgreSQL](https://www.postgresql.org/)** - Robust relational database
+- **[SQLAlchemy](https://www.sqlalchemy.org/)** - Python SQL toolkit and ORM
+- **[Alembic](https://alembic.sqlalchemy.org/)** - Database migration tool
+- **[Pydantic](https://pydantic.dev/)** - Data validation using Python type hints
+- **[JWT Authentication](https://python-jose.readthedocs.io/)** - Secure token-based auth
+- **[Ollama](https://ollama.ai/)** - Local LLM integration for PDF processing
+- **[Tesseract OCR](https://tesseract-ocr.github.io/)** - Optical character recognition
+- **[pandas](https://pandas.pydata.org/)** - Data manipulation and analysis
 
 ### Frontend
-- **React 19** with TypeScript
-- **Material-UI (MUI)** for component library
-- **React Router** for navigation
-- **TanStack Query** (React Query) for data fetching
-- **React Hook Form** for form management
-- **React Select** for advanced dropdowns
+- **[React 19](https://reactjs.org/)** - Modern UI library with latest features
+- **[TypeScript](https://www.typescriptlang.org/)** - Type-safe JavaScript development
+- **[Material-UI v5](https://mui.com/)** - Comprehensive component library
+- **[TanStack Query](https://tanstack.com/query)** - Powerful data synchronization
+- **[React Router v7](https://reactrouter.com/)** - Declarative routing
+- **[React Hook Form](https://react-hook-form.com/)** - Performant forms with easy validation
+- **[React Select](https://react-select.com/)** - Flexible select input control
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-Make sure you have the following installed:
-- [Node.js](https://nodejs.org/) (v16 or higher)
-- [Python](https://www.python.org/) (v3.8 or higher) 
-- [PostgreSQL](https://www.postgresql.org/) (v12 or higher)
-- [Tesseract OCR](https://tesseract-ocr.github.io/) (optional, for PDF processing)
+- **[Node.js](https://nodejs.org/)** v16+ 
+- **[Python](https://www.python.org/)** v3.8+
+- **[PostgreSQL](https://www.postgresql.org/)** v12+
+- **[Git](https://git-scm.com/)** for version control
+
+### Optional Components
+- **[Tesseract OCR](https://tesseract-ocr.github.io/)** - For PDF text extraction
+- **[Ollama](https://ollama.ai/)** - For local LLM-powered PDF processing
 
 ## 📦 Installation
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/expense-manager.git
-cd expense-manager
+git clone https://github.com/yourusername/python-react-expense.git
+cd python-react-expense
 ```
 
 ### 2. Database Setup
@@ -100,11 +127,11 @@ cp .env.example .env
 alembic upgrade head
 
 # Start the development server
-python -m uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8001
 ```
 
-🎉 **Backend is now running at:** `http://localhost:8000`  
-📚 **API Documentation:** `http://localhost:8000/docs`
+🎉 **Backend is now running at:** `http://localhost:8001`  
+📚 **API Documentation:** `http://localhost:8001/docs`
 
 ### 4. Frontend Setup
 
@@ -122,7 +149,7 @@ cp .env.example .env
 npm start
 ```
 
-🎉 **Frontend is now running at:** `http://localhost:3000`
+🎉 **Frontend is now running at:** `http://localhost:3001`
 
 ### 5. Optional: PDF Processing Setup
 
@@ -143,146 +170,117 @@ brew install tesseract
 
 ### 6. LLM Setup (Optional)
 
-For advanced PDF processing with local LLMs:
+For AI-powered PDF processing with local LLMs:
 
 ```bash
-# Install and setup Ollama
+# Install and setup Ollama (new installation)
 ./setup_ollama.sh
 
 # Or if Ollama is already installed
 ./setup_ollama_existing.sh
 ```
 
-## 🔗 API Reference
+See [PDF_LLM_SETUP.md](PDF_LLM_SETUP.md) for detailed LLM configuration instructions.
 
-The backend provides a comprehensive REST API with the following endpoints:
+## 📚 API Documentation
+
+### REST API Endpoints
+
+The application provides a comprehensive REST API. Full interactive documentation is available at `http://localhost:8001/docs` when running the backend.
+
+#### Core Resources
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/auth/*` | `POST` | User registration, login, and authentication |
+| `/accounts/*` | `GET, POST, PUT, DELETE` | Account management with balance tracking |
+| `/transactions/*` | `GET, POST, PUT, DELETE` | Transaction CRUD with filtering |
+| `/categories/*` | `GET, POST, PUT, DELETE` | Category management with color generation |
+| `/payees/*` | `GET, POST, PUT, DELETE` | Payee organization and search |
+
+#### Advanced Features
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/reports/*` | `GET` | Financial analytics and reporting |
+| `/import/*` | `POST, GET` | File import with AI processing |
+| `/learning/*` | `GET, POST` | AI learning system management |
 
 ### Authentication
-- `POST /auth/register` - Register new user
-- `POST /auth/login` - User login  
-- `GET /auth/me` - Get current user info
 
-### Accounts
-- `GET /accounts/` - List all accounts
-- `POST /accounts/` - Create new account
-- `GET /accounts/{id}` - Get account by ID
-- `PUT /accounts/{id}` - Update account
-- `DELETE /accounts/{id}` - Delete account
+All endpoints (except registration/login) require JWT authentication:
 
-### Transactions
-- `GET /transactions/` - List transactions with filtering
-- `POST /transactions/` - Create new transaction
-- `GET /transactions/{id}` - Get transaction by ID
-- `PUT /transactions/{id}` - Update transaction
-- `DELETE /transactions/{id}` - Delete transaction
-
-### Payees
-- `GET /payees/` - List payees with search
-- `POST /payees/` - Create new payee
-- `GET /payees/{id}` - Get payee by ID
-- `PUT /payees/{id}` - Update payee
-- `DELETE /payees/{id}` - Delete payee
-
-### Categories
-- `GET /categories/` - List categories with search
-- `POST /categories/` - Create new category (auto-generates unique color)
-- `GET /categories/{id}` - Get category by ID
-- `PUT /categories/{id}` - Update category
-- `DELETE /categories/{id}` - Delete category
-
-### Reports
-- `GET /reports/summary` - Get financial summary with filtering
-- `GET /reports/by-category` - Get transactions grouped by category
-- `GET /reports/by-payee` - Get transactions grouped by payee
-- `GET /reports/by-account` - Get transactions grouped by account
-- `GET /reports/monthly-trend` - Get monthly transaction trends
-
-### Import
-- `POST /import/csv` - Import transactions from CSV file with AI categorization
-- `POST /import/excel` - Import transactions from Excel file with AI categorization
-- `POST /import/pdf-ocr` - Extract text from PDF using OCR
-- `POST /import/pdf-llm` - Import transactions from PDF using LLM processing with AI categorization
-- `POST /import/transactions/batch` - Batch import with AI-powered categorization
-- `GET /import/pdf-llm/status` - Check PDF-LLM system status
-
-### AI Learning System
-- `GET /learning/suggestions` - Get AI-powered suggestions for payees and categories
-- `POST /learning/feedback` - Provide feedback to improve AI accuracy
-- `GET /learning/stats` - View learning system performance metrics
+```bash
+Authorization: Bearer <your-jwt-token>
+```
 
 ## 📖 Usage Guide
 
-### Adding Accounts
-1. Navigate to the Accounts page
-2. Click "Add Account"
-3. Fill in account details:
-   - Name and type are required
-   - For credit cards, add credit limit and bill dates
-   - Set initial balance and opening date
+### Getting Started
+1. **Create Account**: Register and login to access the application
+2. **Set Up Accounts**: Add your bank accounts, credit cards, and other financial accounts
+3. **Add Categories**: Create spending categories (groceries, utilities, entertainment, etc.)
+4. **Import Data**: Bulk import your transaction history or add transactions manually
+5. **Generate Reports**: Analyze your spending patterns and financial trends
 
-### Managing Transactions
-1. Go to the Transactions page
-2. Click "Add Transaction" to create new transactions
-3. For transfers, select both source and destination accounts
-4. Payees and categories are optional but help with organization
-5. Use the Import button to bulk import from files
+### Core Workflows
 
-### Creating Categories
-1. Visit the Categories page
-2. Add new categories - colors are auto-generated for uniqueness
-3. Manually specify colors if desired using the color picker
+<details>
+<summary><strong>Account Management</strong></summary>
 
-### Generating Reports
-1. Open the Reports page
-2. Set date range and select filters:
-   - Multiple accounts, categories, and payees supported
-   - Use the multi-select dropdowns with search functionality
-3. Click "Generate Reports" to view analytics
-4. Reports include summary, category breakdown, payee analysis, and trends
+1. Navigate to **Accounts** page
+2. Click **"Add Account"** 
+3. Select account type and fill details:
+   - **Checking/Savings**: Name, initial balance, account number
+   - **Credit Cards**: Credit limit, bill generation date, payment due date
+   - **Investment/Cash**: Customize based on account type
+4. **View Account Details**: Click any account to see transaction history and balance trends
 
-### Importing Data
-1. Go to Transactions page and click "Import"
-2. Upload CSV, Excel, or PDF files
-3. Map columns to transaction fields
-4. Review and confirm import
-5. For PDFs, OCR will extract text for manual processing
-6. **AI Enhancement**: System automatically trains on your historical data before import
-7. **Smart Categorization**: AI suggests payees and categories during import process
+</details>
 
-### Using AI-Powered Features
-1. **Automatic Training**: System learns from your transaction history before each import
-2. **Smart Suggestions**: AI provides payee and category suggestions with confidence scores
-3. **Continuous Learning**: System improves as you manually categorize more transactions
-4. **Confidence Thresholds**: Only suggestions above 60% confidence are automatically applied
-5. **Manual Override**: You can always manually assign categories and payees
-6. **Learning Dashboard**: View AI performance metrics and training statistics
+<details>
+<summary><strong>Transaction Management</strong></summary>
 
-## 📄 Import Features
+1. Go to **Transactions** page
+2. **Add Single Transaction**: 
+   - Select account, type (income/expense/transfer)
+   - Add amount, description, payee, and category
+   - For transfers: select destination account
+3. **Bulk Import**: Use Import feature for CSV/Excel/PDF files
+4. **Edit Transactions**: Inline editing with automatic balance updates
+5. **Filter & Search**: Use advanced filters for date ranges, amounts, accounts
 
-### Supported Formats
-- **CSV**: Standard comma-separated values
-- **Excel**: .xlsx and .xls files with sheet selection
-- **PDF**: Text extraction with OCR fallback
+</details>
 
-### Column Mapping
-The system provides intelligent column mapping suggestions:
-- Date fields: looks for "date", "time", "when"
-- Amount fields: "amount", "value", "sum", "total"
-- Description: "desc", "description", "memo", "note"
-- Payee: "payee", "merchant", "vendor", "to", "from"
-- Category: "category", "type", "class"
+<details>
+<summary><strong>AI-Powered Import</strong></summary>
 
-### AI-Powered Categorization
-- **Historical Data Training**: System analyzes your past transactions before each import
-- **Pattern Recognition**: Identifies keywords, transaction types, and amount patterns
-- **Confidence Scoring**: Only applies suggestions with 60%+ confidence
-- **Existing Entities Only**: AI never creates new categories or payees - only suggests from existing ones
-- **User Learning**: System learns from manual corrections to improve future accuracy
-- **Feature Engineering**: Uses description keywords, transaction types, and amount ranges for predictions
+1. **Upload File**: Drag & drop or select CSV, Excel, or PDF files
+2. **Column Mapping**: 
+   - System auto-detects common patterns
+   - Manually map columns if needed
+   - Preview data before import
+3. **AI Processing**: 
+   - System trains on your historical data
+   - Suggests categories and payees with confidence scores
+   - Auto-applies high-confidence suggestions (>60%)
+4. **Review & Import**: Confirm suggestions or make manual adjustments
+5. **Continuous Learning**: AI improves from your corrections
 
-### Auto-Creation (Manual Mode)
-- Payees and categories can be created manually during import if needed
-- Each new category gets a unique color assigned automatically
+</details>
+
+<details>
+<summary><strong>Advanced PDF Processing</strong></summary>
+
+**Prerequisites**: Install Ollama and download models (see [LLM Setup](#6-llm-setup-optional))
+
+1. **Upload PDF**: Bank statements, credit card bills, receipts
+2. **Processing Options**:
+   - **OCR Mode**: Extract text using Tesseract
+   - **LLM Mode**: AI-powered transaction extraction
+3. **Model Selection**: Choose llama3.1 (accuracy), mistral (balanced), or gemma (speed)
+4. **Review Results**: AI extracts structured transaction data
+5. **Import**: Confirm and import parsed transactions
+
+</details>
 
 ## 🧪 Development
 
@@ -316,75 +314,78 @@ gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
 
 ### Project Structure
 ```
-├── backend/
-│   ├── models/          # SQLAlchemy models
-│   ├── routers/         # API route handlers
-│   ├── schemas/         # Pydantic schemas
-│   ├── utils/           # Utility functions
-│   └── main.py          # FastAPI application
-├── frontend/
+python-react-expense/
+├── backend/                 # FastAPI Backend
+│   ├── models/             # SQLAlchemy database models
+│   ├── schemas/            # Pydantic request/response schemas
+│   ├── routers/            # API route handlers
+│   ├── services/           # Business logic and AI services
+│   ├── utils/              # Helper utilities (auth, colors, slugs)
+│   ├── alembic/            # Database migrations
+│   ├── main.py             # FastAPI application entry point
+│   └── requirements.txt    # Python dependencies
+├── frontend/               # React Frontend
 │   ├── src/
-│   │   ├── components/  # React components
-│   │   ├── pages/       # Page components
-│   │   ├── services/    # API services
-│   │   ├── types/       # TypeScript types
-│   │   └── utils/       # Utility functions
-│   └── public/
-└── README.md
+│   │   ├── components/     # Reusable UI components
+│   │   ├── pages/          # Main application pages
+│   │   ├── contexts/       # React context providers
+│   │   ├── hooks/          # Custom React hooks
+│   │   ├── services/       # API communication layer
+│   │   ├── types/          # TypeScript type definitions
+│   │   └── utils/          # Frontend utilities
+│   ├── public/             # Static assets
+│   └── package.json        # Node.js dependencies
+├── CLAUDE.md               # Developer documentation
+├── PDF_LLM_SETUP.md       # LLM setup instructions
+└── README.md               # This file
+```
+
+### Architecture Overview
+
+```mermaid
+graph TD
+    A[React Frontend] -->|HTTP/REST| B[FastAPI Backend]
+    B -->|SQLAlchemy ORM| C[PostgreSQL Database]
+    B -->|File Processing| D[Import Services]
+    D -->|OCR| E[Tesseract]
+    D -->|AI Processing| F[Ollama LLM]
+    B -->|ML Training| G[Learning Engine]
+    G -->|Pattern Analysis| H[User Behavior Data]
 ```
 
 ### Database Schema
-- **accounts**: Store account information with type-specific fields  
-- **transactions**: Transaction records with relationships to accounts, payees, categories
-- **payees**: Transaction counterparties with slug support
-- **categories**: Expense/income categories with unique colors and slug support
-- **user_transaction_patterns**: AI learning patterns from user behavior
-- **user_selection_history**: Track user selections for continuous learning
-- **user_correction_patterns**: Learn from user corrections and rejections
-- **learning_statistics**: Overall learning system performance metrics
-
-### Key Features Implementation
-- **Balance Tracking**: Automatic updates on transaction create/update/delete
-- **Transfer Logic**: Proper debit/credit handling between accounts
-- **AI Training System**: Pattern-based machine learning for transaction categorization
-- **Learning Engine**: Continuous improvement through user feedback and corrections
-- **Color Generation**: Algorithm ensures unique colors for categories
-- **Multi-Select UI**: Custom component with search and reset functionality
-- **File Processing**: Robust parsing with error handling and validation
+| Table | Purpose | Key Features |
+|-------|---------|--------------|
+| `users` | User authentication | JWT-based auth system |
+| `accounts` | Financial accounts | Multi-type support, credit card fields |
+| `transactions` | Financial transactions | Auto-balance updates, transfer handling |
+| `categories` | Expense categories | Auto-color generation, slug support |
+| `payees` | Transaction counterparties | Smart search, slug support |
+| `user_*_patterns` | AI learning data | Pattern recognition, confidence scoring |
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+Contributions are welcome! Here's how to get started:
 
-1. 🍴 Fork the repository
-2. 🌟 Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. 💾 Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. 📤 Push to the branch (`git push origin feature/amazing-feature`)
-5. 🔄 Open a Pull Request
+### Contributing Process
+1. **Fork** the repository
+2. **Create** a feature branch: `git checkout -b feature/amazing-feature`
+3. **Commit** your changes: `git commit -m 'Add amazing feature'`
+4. **Push** to the branch: `git push origin feature/amazing-feature`
+5. **Open** a Pull Request with a clear description
 
-### Development Setup
+### Development Guidelines
+- Follow existing code style and patterns
+- Add tests for new functionality
+- Update documentation as needed
+- Ensure all tests pass before submitting PR
 
-For detailed development instructions, see:
-- [Backend README](backend/README.md)
-- [Frontend README](frontend/README.md)
+### Development Resources
+- **[CLAUDE.md](CLAUDE.md)** - Complete development guide and architecture patterns
+- **[Backend README](backend/README.md)** - Backend-specific setup and API details  
+- **[Frontend README](frontend/README.md)** - Frontend development and component guide
 
-## 📸 Screenshots
-
-<details>
-<summary>Click to view screenshots</summary>
-
-### Dashboard
-![Dashboard](https://via.placeholder.com/600x400/f8f9fa/343a40?text=Dashboard+View)
-
-### Transaction Management
-![Transactions](https://via.placeholder.com/600x400/f8f9fa/343a40?text=Transaction+Management)
-
-### Import Features
-![Import](https://via.placeholder.com/600x400/f8f9fa/343a40?text=File+Import+System)
-
-</details>
-
-## 🔒 Environment Variables
+## ⚙️ Configuration
 
 ### Backend (.env)
 ```bash
@@ -392,7 +393,7 @@ DATABASE_URL=postgresql://username:password@localhost/expense_manager
 SECRET_KEY=your-secret-key-here
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
-CORS_ORIGINS=http://localhost:3000
+CORS_ORIGINS=http://localhost:3001
 
 # Optional: PDF LLM Import
 OLLAMA_HOST=http://localhost:11434
@@ -402,7 +403,7 @@ TESSERACT_CMD=/usr/bin/tesseract
 
 ### Frontend (.env)
 ```bash
-REACT_APP_API_BASE_URL=http://localhost:8000/api
+REACT_APP_API_BASE_URL=http://localhost:8001/api
 ```
 
 ## 🐛 Troubleshooting
@@ -429,26 +430,31 @@ REACT_APP_API_BASE_URL=http://localhost:8000/api
 
 </details>
 
-## 📊 Roadmap
+## 🗺️ Roadmap
 
-### Core Features
-- [ ] Mobile responsive design improvements
-- [ ] Advanced analytics and charts
-- [ ] Budget planning and alerts
-- [ ] Multi-currency support
-- [ ] Bank integration APIs
-- [ ] Export to various formats
-- [ ] Docker containerization
-- [ ] Cloud deployment guides
+### Platform & Infrastructure
+- [ ] **Mobile App**: React Native companion app
+- [ ] **Docker Support**: Containerized deployment
+- [ ] **Cloud Integration**: AWS/GCP deployment guides
+- [ ] **API Rate Limiting**: Enhanced security and performance
+- [ ] **Backup & Restore**: Automated data backup solutions
 
-### AI & Machine Learning
-- [ ] Advanced ML models (neural networks, ensemble methods)
-- [ ] Real-time learning without requiring import triggers
-- [ ] Anomaly detection for unusual transactions
-- [ ] Predictive budgeting based on spending patterns
-- [ ] Natural language processing for transaction descriptions
-- [ ] Smart recurring transaction detection
-- [ ] Personalized financial insights and recommendations
+### Financial Features  
+- [ ] **Budget Management**: Set and track spending budgets
+- [ ] **Multi-Currency**: Support for international transactions
+- [ ] **Bank Integration**: Direct API connections to financial institutions
+- [ ] **Investment Tracking**: Portfolio management and performance analytics
+- [ ] **Bill Reminders**: Automated payment due date notifications
+- [ ] **Goal Setting**: Savings targets and progress tracking
+
+### AI & Analytics
+- [ ] **Enhanced ML Models**: Neural networks and ensemble methods  
+- [ ] **Real-time Learning**: Continuous model updates without imports
+- [ ] **Anomaly Detection**: Identify unusual spending patterns
+- [ ] **Predictive Analytics**: Forecast spending and budget recommendations
+- [ ] **NLP Processing**: Advanced transaction description analysis
+- [ ] **Receipt OCR**: Computer vision for receipt scanning
+- [ ] **Voice Interface**: Voice-powered transaction entry
 
 ## 🙏 Acknowledgments
 
@@ -463,9 +469,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 💬 Support
 
-- 📫 Create an [issue](https://github.com/yourusername/expense-manager/issues) for bug reports
-- 💡 Start a [discussion](https://github.com/yourusername/expense-manager/discussions) for feature requests
+- 📫 Create an [issue](https://github.com/yourusername/python-react-expense/issues) for bug reports
+- 💡 Start a [discussion](https://github.com/yourusername/python-react-expense/discussions) for feature requests  
 - ⭐ Star this repo if you find it helpful!
+
+## 🔗 Related Documentation
+
+- **[CLAUDE.md](CLAUDE.md)** - Comprehensive developer documentation and architecture guide
+- **[PDF_LLM_SETUP.md](PDF_LLM_SETUP.md)** - Local LLM setup instructions for PDF processing
+- **[Backend README](backend/README.md)** - Backend-specific setup and API details
+- **[Frontend README](frontend/README.md)** - Frontend development and component guide
 
 ---
 
