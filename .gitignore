@@ -207,3 +207,6 @@ test_data/
 sample_*.csv
 *.xlsx
 *.xls
+
+
+*.jpg

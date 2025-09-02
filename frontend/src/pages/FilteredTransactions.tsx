@@ -409,7 +409,7 @@ const FilteredTransactions: React.FC = () => {
                 Date Filters
               </Typography>
             </Grid>
-            <Grid item xs={12} sm={6} md={4}>
+            <Grid item xs={12} sm={6} md={3}>
               <TextField
                 select
                 label="Month"
@@ -434,7 +434,7 @@ const FilteredTransactions: React.FC = () => {
                 <MenuItem value="12">December</MenuItem>
               </TextField>
             </Grid>
-            <Grid item xs={12} sm={6} md={4}>
+            <Grid item xs={12} sm={6} md={3}>
               <TextField
                 select
                 label="Year"
@@ -452,29 +452,31 @@ const FilteredTransactions: React.FC = () => {
                 ))}
               </TextField>
             </Grid>
-            <Grid item xs={12} sm={6} md={4}>
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>
+            <Grid item xs={12} sm={12} md={6}>
+              <Box>
+                <Typography variant="body2" sx={{ mb: 1, fontWeight: 500, color: 'text.secondary' }}>
                   Custom Range
                 </Typography>
-                <Box sx={{ display: 'flex', gap: 1 }}>
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
                   <TextField
-                    label="Start"
+                    label="Start Date"
                     type="date"
                     value={filters.startDate || ''}
                     onChange={(e) => handleFilterChange('startDate', e.target.value || undefined)}
-                    fullWidth
                     size="small"
                     InputLabelProps={{ shrink: true }}
+                    helperText="Select start date"
+                    sx={{ minWidth: 180 }}
                   />
                   <TextField
-                    label="End"
+                    label="End Date"
                     type="date"
                     value={filters.endDate || ''}
                     onChange={(e) => handleFilterChange('endDate', e.target.value || undefined)}
-                    fullWidth
                     size="small"
                     InputLabelProps={{ shrink: true }}
+                    helperText="Select end date"
+                    sx={{ minWidth: 180 }}
                   />
                 </Box>
               </Box>
