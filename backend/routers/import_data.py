@@ -64,42 +64,59 @@ def parse_excel_data(file_content: bytes) -> pd.DataFrame:
         # First, try standard reading
         df = pd.read_excel(io.BytesIO(file_content))
         
-        # Check if this looks like an ICICI bank statement by looking at column names
-        # ICICI format has specific column headers that we can detect
-        icici_header_found = False
+        # Check if this looks like a bank statement by looking at column names
+        # Support for ICICI and SBI bank formats
+        bank_header_found = False
+        bank_type = None
         header_row = 0
         
-        # Check if current column headers match ICICI format
-        column_names = [str(col).lower() for col in df.columns]
+        # Check if current column headers match known bank formats
+        column_names = [str(col).lower().strip() for col in df.columns]
         column_str = ' '.join(column_names)
         
+        # SBI specific patterns in column headers
+        if ('txn date' in column_str and 'debit' in column_str and 'credit' in column_str and 'balance' in column_str):
+            print(f"Found SBI bank format headers at row 0 (columns)")
+            bank_header_found = True
+            bank_type = 'SBI'
         # ICICI specific patterns in column headers
-        if ('transaction date' in column_str and 'withdrawal amount' in column_str and 'deposit amount' in column_str):
+        elif ('transaction date' in column_str and 'withdrawal amount' in column_str and 'deposit amount' in column_str):
             print(f"Found ICICI bank format headers at row 0 (columns)")
-            icici_header_found = True
+            bank_header_found = True
+            bank_type = 'ICICI'
         elif ('s no.' in column_str and 'transaction remarks' in column_str):
             print(f"Found ICICI bank format headers at row 0 (columns)")
-            icici_header_found = True
+            bank_header_found = True
+            bank_type = 'ICICI'
         else:
-            # Fallback: scan first 20 rows for ICICI-style headers
+            # Fallback: scan first 20 rows for bank-style headers
             for i in range(min(20, len(df))):
-                row_values = [str(val).lower() for val in df.iloc[i].values if pd.notna(val)]
+                row_values = [str(val).lower().strip() for val in df.iloc[i].values if pd.notna(val)]
                 row_str = ' '.join(row_values)
                 
+                # SBI specific patterns
+                if ('txn date' in row_str and 'debit' in row_str and 'credit' in row_str):
+                    print(f"Found SBI bank format headers at row {i}")
+                    header_row = i
+                    bank_header_found = True
+                    bank_type = 'SBI'
+                    break
                 # ICICI specific patterns
-                if ('transaction date' in row_str and 'withdrawal amount' in row_str and 'deposit amount' in row_str):
+                elif ('transaction date' in row_str and 'withdrawal amount' in row_str and 'deposit amount' in row_str):
                     print(f"Found ICICI bank format headers at row {i}")
                     header_row = i
-                    icici_header_found = True
+                    bank_header_found = True
+                    bank_type = 'ICICI'
                     break
                 elif ('s no.' in row_str and 'transaction remarks' in row_str):
                     print(f"Found ICICI bank format headers at row {i}")
                     header_row = i
-                    icici_header_found = True
+                    bank_header_found = True
+                    bank_type = 'ICICI'
                     break
         
-        # If ICICI format detected, handle accordingly
-        if icici_header_found:
+        # If bank format detected, handle accordingly
+        if bank_header_found:
             if header_row > 0:
                 # Re-read with proper header
                 df = pd.read_excel(io.BytesIO(file_content), skiprows=header_row, date_format=None)
@@ -114,10 +131,12 @@ def parse_excel_data(file_content: bytes) -> pd.DataFrame:
             # Remove completely empty rows
             df = df.dropna(how='all')
             
-            # For ICICI files, ensure date columns remain as strings to preserve DD/MM/YYYY format
+            # Handle date columns based on bank type
             for col in df.columns:
-                col_lower = str(col).lower()
-                if 'transaction date' in col_lower or 'value date' in col_lower or 'date' in col_lower:
+                col_lower = str(col).lower().strip()
+                if (bank_type == 'ICICI' and ('transaction date' in col_lower or 'value date' in col_lower)) or \
+                   (bank_type == 'SBI' and ('txn date' in col_lower or 'value date' in col_lower)) or \
+                   'date' in col_lower:
                     # Convert date column to string to preserve original format
                     df[col] = df[col].astype(str)
                     # Clean up any Excel date serial numbers that got converted
@@ -126,13 +145,15 @@ def parse_excel_data(file_content: bytes) -> pd.DataFrame:
             # Replace NaN values with empty strings to avoid JSON serialization issues
             df = df.fillna('')
             
-            print(f"ICICI format detected. Final columns: {list(df.columns)}")
+            print(f"{bank_type} format detected. Final columns: {list(df.columns)}")
             print(f"Data shape: {df.shape}")
             
             # Print sample date values for debugging
             date_col = None
             for col in df.columns:
-                if 'transaction date' in str(col).lower():
+                col_lower = str(col).lower().strip()
+                if (bank_type == 'ICICI' and 'transaction date' in col_lower) or \
+                   (bank_type == 'SBI' and 'txn date' in col_lower):
                     date_col = col
                     break
             if date_col and len(df) > 0:
@@ -495,31 +516,39 @@ async def get_suggested_column_mapping(
     # Clean up sample data - replace NaN with empty strings
     sample_data = df.head(3).fillna('').to_dict('records')
     
-    # Enhanced heuristics for column mapping suggestions including ICICI bank format
+    # Enhanced heuristics for column mapping suggestions including ICICI and SBI bank formats
     suggestions = {}
     
     for col in columns:
-        col_lower = col.lower()
-        col_str = str(col).lower()
+        col_lower = col.lower().strip()
+        col_str = str(col).lower().strip()
         
-        # Date column detection - prioritize Transaction Date over Value Date for ICICI
-        if 'transaction date' in col_lower:
+        # Date column detection - prioritize bank-specific date columns
+        if 'transaction date' in col_lower:  # ICICI format
+            suggestions['date'] = col
+        elif 'txn date' in col_lower:  # SBI format
             suggestions['date'] = col
         elif any(keyword in col_lower for keyword in ['value date', 'date', 'time', 'when']) and 'date' not in suggestions:
             suggestions['date'] = col
         # Amount column detection (single amount column)
-        elif any(keyword in col_lower for keyword in ['amount', 'value', 'sum', 'total']) and 'withdrawal' not in col_lower and 'deposit' not in col_lower:
+        elif any(keyword in col_lower for keyword in ['amount', 'value', 'sum', 'total']) and 'withdrawal' not in col_lower and 'deposit' not in col_lower and 'debit' not in col_lower and 'credit' not in col_lower:
             suggestions['amount'] = col
-        # ICICI specific: Withdrawal/Debit column (exact match for ICICI format)
-        elif 'withdrawal amount (inr' in col_lower or (any(keyword in col_lower for keyword in ['withdrawal', 'debit', 'out']) and 'amount' in col_lower):
+        # Bank specific: Withdrawal/Debit columns
+        elif 'withdrawal amount (inr' in col_lower or (any(keyword in col_lower for keyword in ['withdrawal']) and 'amount' in col_lower):
             suggestions['withdrawal'] = col
-        # ICICI specific: Deposit/Credit column (exact match for ICICI format)
-        elif 'deposit amount (inr' in col_lower or (any(keyword in col_lower for keyword in ['deposit', 'credit', 'in']) and 'amount' in col_lower):
+        elif 'debit' in col_lower and ('amount' in col_lower or col_lower.strip() == 'debit' or 'debit' in col_lower):  # SBI format
+            suggestions['withdrawal'] = col
+        # Bank specific: Deposit/Credit columns  
+        elif 'deposit amount (inr' in col_lower or (any(keyword in col_lower for keyword in ['deposit']) and 'amount' in col_lower):
             suggestions['deposit'] = col
-        # Description/Remarks column - prioritize Transaction Remarks for ICICI
-        elif 'transaction remarks' in col_lower:
+        elif 'credit' in col_lower and ('amount' in col_lower or col_lower.strip() == 'credit' or 'credit' in col_lower):  # SBI format
+            suggestions['deposit'] = col
+        # Description/Remarks column - bank specific priorities
+        elif 'transaction remarks' in col_lower:  # ICICI format
             suggestions['description'] = col
-        elif any(keyword in col_lower for keyword in ['desc', 'description', 'memo', 'note', 'remarks']) and 'description' not in suggestions:
+        elif 'description' in col_lower:  # SBI and general format
+            suggestions['description'] = col
+        elif any(keyword in col_lower for keyword in ['desc', 'memo', 'note', 'remarks', 'particulars', 'narration']) and 'description' not in suggestions:
             suggestions['description'] = col
         # Payee column
         elif any(keyword in col_lower for keyword in ['payee', 'merchant', 'vendor', 'to', 'from']):

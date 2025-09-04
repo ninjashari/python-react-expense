@@ -29,7 +29,7 @@ const FileUploadZone: React.FC<FileUploadZoneProps> = ({
         Select or drag a file to upload
       </Typography>
       <Typography variant="body2" color="text.secondary" gutterBottom>
-        Supported formats: CSV, Excel (.xlsx, .xls)
+        Supported formats: CSV, Excel (.xlsx, .xls), PDF (with AI extraction)
       </Typography>
 
       <Paper
@@ -106,6 +106,16 @@ const FileUploadZone: React.FC<FileUploadZoneProps> = ({
           <li>
             <Typography variant="body2">
               Include transaction type column if available (income/expense/transfer)
+            </Typography>
+          </li>
+          <li>
+            <Typography variant="body2">
+              📄 PDF files: AI will automatically extract transaction data from bank statements
+            </Typography>
+          </li>
+          <li>
+            <Typography variant="body2">
+              🏦 Bank formats: Automatically detects ICICI and SBI bank statement formats
             </Typography>
           </li>
         </ul>
