@@ -269,7 +269,11 @@ const FilteredTransactions: React.FC = () => {
 
   // Date range helper functions
   const getDateString = (date: Date) => {
-    return date.toISOString().split('T')[0];
+    // Use local timezone to avoid date shifting issues
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
 
@@ -312,11 +316,16 @@ const FilteredTransactions: React.FC = () => {
     if (month === '') {
       setFilters(prev => ({ ...prev, startDate: undefined, endDate: undefined, page: 1 }));
     } else {
+      // Get current year from year dropdown or use current year
       const currentYear = getSelectedYear() || new Date().getFullYear().toString();
       const year = parseInt(currentYear);
       const monthNum = parseInt(month);
+      
+      // Create start date (first day of month)
       const startDate = new Date(year, monthNum - 1, 1);
+      // Create end date (last day of month)
       const endDate = new Date(year, monthNum, 0);
+      
       setFilters(prev => ({
         ...prev,
         startDate: getDateString(startDate),
@@ -331,15 +340,32 @@ const FilteredTransactions: React.FC = () => {
     if (year === '') {
       setFilters(prev => ({ ...prev, startDate: undefined, endDate: undefined, page: 1 }));
     } else {
+      // Get current month selection if any
+      const currentMonth = getSelectedMonth();
       const yearNum = parseInt(year);
-      const startDate = new Date(yearNum, 0, 1);
-      const endDate = new Date(yearNum, 11, 31);
-      setFilters(prev => ({
-        ...prev,
-        startDate: getDateString(startDate),
-        endDate: getDateString(endDate),
-        page: 1
-      }));
+      
+      if (currentMonth) {
+        // If month is selected, update for that specific month in the new year
+        const monthNum = parseInt(currentMonth);
+        const startDate = new Date(yearNum, monthNum - 1, 1);
+        const endDate = new Date(yearNum, monthNum, 0);
+        setFilters(prev => ({
+          ...prev,
+          startDate: getDateString(startDate),
+          endDate: getDateString(endDate),
+          page: 1
+        }));
+      } else {
+        // If no month selected, show entire year
+        const startDate = new Date(yearNum, 0, 1);
+        const endDate = new Date(yearNum, 11, 31);
+        setFilters(prev => ({
+          ...prev,
+          startDate: getDateString(startDate),
+          endDate: getDateString(endDate),
+          page: 1
+        }));
+      }
     }
   };
 
@@ -452,34 +478,29 @@ const FilteredTransactions: React.FC = () => {
                 ))}
               </TextField>
             </Grid>
-            <Grid item xs={12} sm={12} md={6}>
-              <Box>
-                <Typography variant="body2" sx={{ mb: 1, fontWeight: 500, color: 'text.secondary' }}>
-                  Custom Range
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-                  <TextField
-                    label="Start Date"
-                    type="date"
-                    value={filters.startDate || ''}
-                    onChange={(e) => handleFilterChange('startDate', e.target.value || undefined)}
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                    helperText="Select start date"
-                    sx={{ minWidth: 180 }}
-                  />
-                  <TextField
-                    label="End Date"
-                    type="date"
-                    value={filters.endDate || ''}
-                    onChange={(e) => handleFilterChange('endDate', e.target.value || undefined)}
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                    helperText="Select end date"
-                    sx={{ minWidth: 180 }}
-                  />
-                </Box>
-              </Box>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                label="Start Date"
+                type="date"
+                value={filters.startDate || ''}
+                onChange={(e) => handleFilterChange('startDate', e.target.value || undefined)}
+                fullWidth
+                size="small"
+                InputLabelProps={{ shrink: true }}
+                helperText="Custom start date"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                label="End Date"
+                type="date"
+                value={filters.endDate || ''}
+                onChange={(e) => handleFilterChange('endDate', e.target.value || undefined)}
+                fullWidth
+                size="small"
+                InputLabelProps={{ shrink: true }}
+                helperText="Custom end date"
+              />
             </Grid>
 
             {/* Transaction Filters Section */}
@@ -687,7 +708,17 @@ const FilteredTransactions: React.FC = () => {
                   {transactionData?.items?.map((transaction) => (
                 <TableRow key={transaction.id}>
                   <TableCell>{formatDate(transaction.date)}</TableCell>
-                  <TableCell>{transaction.description || '-'}</TableCell>
+                  <TableCell 
+                    sx={{ 
+                      maxWidth: 200,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                    title={transaction.description || '-'}
+                  >
+                    {transaction.description || '-'}
+                  </TableCell>
                   <TableCell>{transaction.account?.name}</TableCell>
                   <TableCell sx={{ minWidth: 150 }}>
                     <SmartInlineEdit

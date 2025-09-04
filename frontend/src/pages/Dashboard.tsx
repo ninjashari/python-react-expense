@@ -160,7 +160,16 @@ const Dashboard: React.FC = () => {
                 <Box key={transaction.id} sx={{ mb: 2 }}>
                   <Box display="flex" justifyContent="space-between" alignItems="center">
                     <Box>
-                      <Typography variant="body2">
+                      <Typography 
+                        variant="body2"
+                        sx={{
+                          maxWidth: '300px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}
+                        title={transaction.description || 'No description'}
+                      >
                         {transaction.description || 'No description'}
                       </Typography>
                       <Typography variant="caption" color="textSecondary">

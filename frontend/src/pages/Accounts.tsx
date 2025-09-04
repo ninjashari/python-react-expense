@@ -32,6 +32,7 @@ const accountTypes = [
   { value: 'credit', label: 'Credit Card' },
   { value: 'cash', label: 'Cash' },
   { value: 'investment', label: 'Investment' },
+  { value: 'ppf', label: 'PPF (Public Provident Fund)' },
 ];
 
 const Accounts: React.FC = () => {
@@ -75,6 +76,7 @@ const Accounts: React.FC = () => {
       card_number: '',
       card_expiry_month: undefined,
       card_expiry_year: undefined,
+      interest_rate: undefined,
     },
   });
 
@@ -127,6 +129,7 @@ const Accounts: React.FC = () => {
         credit_limit: account.credit_limit,
         bill_generation_date: account.bill_generation_date,
         payment_due_date: account.payment_due_date,
+        interest_rate: account.interest_rate,
       });
     } else {
       setEditingAccount(null);
@@ -139,6 +142,7 @@ const Accounts: React.FC = () => {
         card_number: '',
         card_expiry_month: undefined,
         card_expiry_year: undefined,
+        interest_rate: undefined,
       });
     }
     setDialogOpen(true);
@@ -162,6 +166,7 @@ const Accounts: React.FC = () => {
       credit_limit: data.credit_limit ? Number(data.credit_limit) : undefined,
       bill_generation_date: data.bill_generation_date ? Number(data.bill_generation_date) : undefined,
       payment_due_date: data.payment_due_date ? Number(data.payment_due_date) : undefined,
+      interest_rate: data.interest_rate ? Number(data.interest_rate) : undefined,
     };
 
 
@@ -381,6 +386,13 @@ const Accounts: React.FC = () => {
                             Payment Due: {account.payment_due_date}th of month
                           </Typography>
                         )}
+                      </Box>
+                    )}
+                    {account.type === 'ppf' && account.interest_rate && (
+                      <Box mt={1}>
+                        <Typography variant="caption" display="block">
+                          Interest Rate: {account.interest_rate}% per annum
+                        </Typography>
                       </Box>
                     )}
                   </Box>
@@ -629,6 +641,34 @@ const Accounts: React.FC = () => {
                   )}
                 />
               </>
+            )}
+
+            {watchAccountType === 'ppf' && (
+              <Controller
+                name="interest_rate"
+                control={control}
+                rules={{ 
+                  required: 'Interest rate is required for PPF accounts',
+                  min: { value: 0.1, message: 'Interest rate must be greater than 0' },
+                  max: { value: 50, message: 'Interest rate cannot exceed 50%' }
+                }}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Annual Interest Rate (%)"
+                    type="number"
+                    fullWidth
+                    margin="normal"
+                    inputProps={{ 
+                      min: 0.1, 
+                      max: 50, 
+                      step: 0.1 
+                    }}
+                    helperText="Enter annual interest rate percentage (e.g., 7.1 for 7.1%)"
+                    error={!!errors.interest_rate}
+                  />
+                )}
+              />
             )}
           </DialogContent>
           <DialogActions>

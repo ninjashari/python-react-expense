@@ -30,5 +30,7 @@ export const capitalizeFirst = (str: string): string => {
 };
 
 export const formatAccountType = (type: string): string => {
+  // Handle special cases
+  if (type === 'ppf') return 'PPF';
   return type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
 };

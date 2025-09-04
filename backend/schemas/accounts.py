@@ -22,6 +22,10 @@ class AccountBase(BaseModel):
     credit_limit: Optional[Decimal] = None
     bill_generation_date: Optional[int] = None
     payment_due_date: Optional[int] = None
+    
+    # PPF specific fields
+    interest_rate: Optional[Decimal] = None  # Annual interest rate percentage
+    
     status: str = 'active'
     currency: str = 'INR'
 
@@ -46,6 +50,10 @@ class AccountUpdate(BaseModel):
     credit_limit: Optional[Decimal] = None
     bill_generation_date: Optional[int] = None
     payment_due_date: Optional[int] = None
+    
+    # PPF specific fields
+    interest_rate: Optional[Decimal] = None
+    
     status: Optional[str] = None
 
 class AccountResponse(AccountBase):

@@ -50,6 +50,53 @@ import InlineToggleEdit from '../components/InlineToggleEdit';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
 
+// Resizable TableCell component
+const ResizableTableCell = ({ 
+  children, 
+  column, 
+  width, 
+  onResizeStart, 
+  isResizing,
+  ...props 
+}: any) => (
+  <TableCell
+    {...props}
+    sx={{
+      ...props.sx,
+      width: width,
+      minWidth: width,
+      maxWidth: width,
+      position: 'relative',
+      userSelect: isResizing ? 'none' : 'auto',
+      '&:hover .resize-handle': {
+        opacity: 1,
+      }
+    }}
+  >
+    {children}
+    <Box
+      className="resize-handle"
+      sx={{
+        position: 'absolute',
+        top: 0,
+        right: -2,
+        width: 4,
+        height: '100%',
+        cursor: 'col-resize',
+        opacity: 0,
+        transition: 'opacity 0.2s',
+        backgroundColor: 'primary.main',
+        zIndex: 10,
+        '&:hover': {
+          opacity: 1,
+          backgroundColor: 'primary.dark',
+        }
+      }}
+      onMouseDown={(e) => onResizeStart(e, column)}
+    />
+  </TableCell>
+);
+
 const transactionTypes = [
   { value: 'income', label: 'Income' },
   { value: 'expense', label: 'Expense' },
@@ -120,6 +167,24 @@ const Transactions: React.FC = () => {
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
+  
+  // Column width management
+  const [columnWidths, setColumnWidths] = useState(() => {
+    const saved = localStorage.getItem('transactions-column-widths');
+    return saved ? JSON.parse(saved) : {
+      checkbox: 60,
+      date: 120,
+      description: 250,
+      account: 150,
+      payee: 150,
+      category: 150,
+      type: 100,
+      amount: 120,
+      balance: 120,
+      actions: 100
+    };
+  });
+  const [isResizing, setIsResizing] = useState(false);
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
   const [bulkCategoryDialogOpen, setBulkCategoryDialogOpen] = useState(false);
   const [selectedCategoryForBulk, setSelectedCategoryForBulk] = useState<string>('');
@@ -379,6 +444,36 @@ const Transactions: React.FC = () => {
   const handleCancelDelete = () => {
     setDeleteDialogOpen(false);
     setTransactionToDelete(null);
+  };
+
+  // Column resize handlers
+  const handleColumnResize = (column: string, width: number) => {
+    const newWidths = { ...columnWidths, [column]: Math.max(50, width) };
+    setColumnWidths(newWidths);
+    localStorage.setItem('transactions-column-widths', JSON.stringify(newWidths));
+  };
+
+  const handleResizeStart = (e: React.MouseEvent, column: string) => {
+    e.preventDefault();
+    setIsResizing(true);
+    
+    const startX = e.clientX;
+    const startWidth = columnWidths[column];
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      const diff = e.clientX - startX;
+      const newWidth = startWidth + diff;
+      handleColumnResize(column, newWidth);
+    };
+    
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
   };
 
   // Batch selection functions
@@ -1174,98 +1269,161 @@ const Transactions: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell padding="checkbox">
+              <ResizableTableCell 
+                padding="checkbox" 
+                column="checkbox" 
+                width={columnWidths.checkbox}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
+              >
                 <Checkbox
                   indeterminate={selectedTransactions.size > 0 && selectedTransactions.size < (transactionData?.items?.length || 0)}
                   checked={(transactionData?.items?.length || 0) > 0 && selectedTransactions.size === (transactionData?.items?.length || 0)}
                   onChange={(e) => e.target.checked ? handleSelectAll() : handleClearSelection()}
                 />
-              </TableCell>
-              <TableCell 
-                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+              </ResizableTableCell>
+              <ResizableTableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort('date')}
+                column="date"
+                width={columnWidths.date}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
               >
                 <Box display="flex" alignItems="center" gap={1}>
                   Date
                   {getSortIcon('date')}
                 </Box>
-              </TableCell>
-              <TableCell 
-                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+              </ResizableTableCell>
+              <ResizableTableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort('description')}
+                column="description"
+                width={columnWidths.description}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
               >
                 <Box display="flex" alignItems="center" gap={1}>
                   Description
                   {getSortIcon('description')}
                 </Box>
-              </TableCell>
-              <TableCell 
-                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+              </ResizableTableCell>
+              <ResizableTableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort('account')}
+                column="account"
+                width={columnWidths.account}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
               >
                 <Box display="flex" alignItems="center" gap={1}>
                   Account
                   {getSortIcon('account')}
                 </Box>
-              </TableCell>
-              <TableCell 
-                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+              </ResizableTableCell>
+              <ResizableTableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort('payee')}
+                column="payee"
+                width={columnWidths.payee}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
               >
                 <Box display="flex" alignItems="center" gap={1}>
                   Payee
                   {getSortIcon('payee')}
                 </Box>
-              </TableCell>
-              <TableCell 
-                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+              </ResizableTableCell>
+              <ResizableTableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort('category')}
+                column="category"
+                width={columnWidths.category}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
               >
                 <Box display="flex" alignItems="center" gap={1}>
                   Category
                   {getSortIcon('category')}
                 </Box>
-              </TableCell>
-              <TableCell 
-                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+              </ResizableTableCell>
+              <ResizableTableCell 
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort('type')}
+                column="type"
+                width={columnWidths.type}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
               >
                 <Box display="flex" alignItems="center" gap={1}>
                   Type
                   {getSortIcon('type')}
                 </Box>
-              </TableCell>
-              <TableCell 
-                align="right" 
-                sx={{ cursor: 'pointer', userSelect: 'none' }} 
+              </ResizableTableCell>
+              <ResizableTableCell 
+                align="right"
+                sx={{ cursor: 'pointer', userSelect: 'none' }}
                 onClick={() => handleSort('amount')}
+                column="amount"
+                width={columnWidths.amount}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
               >
                 <Box display="flex" alignItems="center" justifyContent="flex-end" gap={1}>
                   Amount
                   {getSortIcon('amount')}
                 </Box>
-              </TableCell>
-              <TableCell align="right">Balance</TableCell>
-              <TableCell align="center">Actions</TableCell>
+              </ResizableTableCell>
+              <ResizableTableCell 
+                align="right"
+                column="balance"
+                width={columnWidths.balance}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
+              >
+                Balance
+              </ResizableTableCell>
+              <ResizableTableCell 
+                align="center"
+                column="actions"
+                width={columnWidths.actions}
+                onResizeStart={handleResizeStart}
+                isResizing={isResizing}
+              >
+                Actions
+              </ResizableTableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {sortedTransactions?.map((transaction) => (
               <TableRow key={transaction.id}>
-                <TableCell padding="checkbox">
+                <TableCell padding="checkbox" sx={{ width: columnWidths.checkbox, minWidth: columnWidths.checkbox, maxWidth: columnWidths.checkbox }}>
                   <Checkbox
                     checked={selectedTransactions.has(transaction.id)}
                     onChange={() => handleSelectTransaction(transaction.id)}
                   />
                 </TableCell>
-                <TableCell sx={{ minWidth: 120 }}>
+                <TableCell sx={{ width: columnWidths.date, minWidth: columnWidths.date, maxWidth: columnWidths.date }}>
                   <InlineDateEdit
                     value={transaction.date}
                     onSave={(newValue) => handleInlineDateChange(transaction.id, newValue)}
                     isSaving={savingTransactions.has(transaction.id)}
                   />
                 </TableCell>
-                <TableCell sx={{ minWidth: 200 }}>
+                <TableCell sx={{ 
+                  width: columnWidths.description,
+                  minWidth: columnWidths.description,
+                  maxWidth: columnWidths.description,
+                  '& .MuiBox-root': {
+                    maxWidth: `${columnWidths.description - 20}px`
+                  },
+                  '& .MuiTypography-root': {
+                    maxWidth: `${columnWidths.description - 20}px`,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }
+                }}>
                   <InlineTextEdit
                     value={transaction.description || ''}
                     onSave={(newValue) => handleInlineDescriptionChange(transaction.id, newValue)}
@@ -1275,7 +1433,7 @@ const Transactions: React.FC = () => {
                     maxLength={255}
                   />
                 </TableCell>
-                <TableCell>
+                <TableCell sx={{ width: columnWidths.account, minWidth: columnWidths.account, maxWidth: columnWidths.account }}>
                   {transaction.type === 'transfer' ? (
                     <Box>
                       <Typography variant="body2">
@@ -1289,7 +1447,7 @@ const Transactions: React.FC = () => {
                     transaction.account?.name
                   )}
                 </TableCell>
-                <TableCell sx={{ minWidth: 150 }}>
+                <TableCell sx={{ width: columnWidths.payee, minWidth: columnWidths.payee, maxWidth: columnWidths.payee }}>
                   <SmartInlineEdit
                     transactionId={transaction.id}
                     transactionDescription={transaction.description || ''}
@@ -1307,7 +1465,7 @@ const Transactions: React.FC = () => {
                     emptyDisplay="-"
                   />
                 </TableCell>
-                <TableCell sx={{ minWidth: 150 }}>
+                <TableCell sx={{ width: columnWidths.category, minWidth: columnWidths.category, maxWidth: columnWidths.category }}>
                   <SmartInlineEdit
                     transactionId={transaction.id}
                     transactionDescription={transaction.description || ''}
@@ -1325,7 +1483,7 @@ const Transactions: React.FC = () => {
                     emptyDisplay="-"
                   />
                 </TableCell>
-                <TableCell sx={{ minWidth: 120 }}>
+                <TableCell sx={{ width: columnWidths.type, minWidth: columnWidths.type, maxWidth: columnWidths.type }}>
                   <InlineToggleEdit
                     value={transaction.type}
                     options={transactionTypeOptions}
@@ -1333,7 +1491,7 @@ const Transactions: React.FC = () => {
                     isSaving={savingTransactions.has(transaction.id)}
                   />
                 </TableCell>
-                <TableCell align="right">
+                <TableCell align="right" sx={{ width: columnWidths.amount, minWidth: columnWidths.amount, maxWidth: columnWidths.amount }}>
                   {transaction.type === 'transfer' ? (
                     <Box>
                       <Typography color="info.main" variant="body2">
@@ -1356,7 +1514,7 @@ const Transactions: React.FC = () => {
                     </Typography>
                   )}
                 </TableCell>
-                <TableCell align="right" sx={{ minWidth: 120 }}>
+                <TableCell align="right" sx={{ width: columnWidths.balance, minWidth: columnWidths.balance, maxWidth: columnWidths.balance }}>
                   {transaction.type === 'transfer' ? (
                     <Box>
                       <Typography 
@@ -1395,7 +1553,7 @@ const Transactions: React.FC = () => {
                     </Typography>
                   )}
                 </TableCell>
-                <TableCell align="center">
+                <TableCell align="center" sx={{ width: columnWidths.actions, minWidth: columnWidths.actions, maxWidth: columnWidths.actions }}>
                   <IconButton
                     size="small"
                     onClick={() => handleOpenDialog(transaction)}

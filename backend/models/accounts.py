@@ -28,6 +28,10 @@ class Account(Base):
     credit_limit = Column(Numeric(12, 2), nullable=True)
     bill_generation_date = Column(Integer, nullable=True)
     payment_due_date = Column(Integer, nullable=True)
+    
+    # PPF specific fields
+    interest_rate = Column(Numeric(5, 2), nullable=True)  # Annual interest rate percentage
+    
     status = Column(String(20), default='active')
     opening_date = Column(Date, server_default=func.current_date())
     currency = Column(String(3), default='INR')

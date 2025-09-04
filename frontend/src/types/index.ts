@@ -1,7 +1,7 @@
 export interface Account {
   id: string;
   name: string;
-  type: 'checking' | 'savings' | 'credit' | 'cash' | 'investment';
+  type: 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'ppf';
   balance: number;
   opening_date: string;
   
@@ -17,6 +17,10 @@ export interface Account {
   credit_limit?: number;
   bill_generation_date?: number;
   payment_due_date?: number;
+  
+  // PPF specific fields
+  interest_rate?: number;  // Annual interest rate percentage
+  
   created_at: string;
   updated_at?: string;
 }
@@ -75,6 +79,9 @@ export interface CreateAccountDto {
   credit_limit?: number;
   bill_generation_date?: number;
   payment_due_date?: number;
+  
+  // PPF specific fields
+  interest_rate?: number;
 }
 
 export interface CreatePayeeDto {
