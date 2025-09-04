@@ -1096,56 +1096,45 @@ async def cleanup_transaction_descriptions(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Clean up transaction descriptions:
-    1. Remove "| " from descriptions of filtered transactions
-    2. Remove trailing whitespaces from all transactions
+    Clean up transaction descriptions for ALL transactions:
+    1. Remove "| " (pipe symbol with space) from all transaction descriptions
+    2. Remove leading and trailing whitespaces from all transaction descriptions
+    Note: Filters are ignored - cleanup applies to ALL transactions for the user
     """
     
-    # First, get all transactions for this user
-    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
-    
-    # Apply filters if provided
-    if filters:
-        if filters.get('start_date'):
-            query = query.filter(Transaction.date >= filters['start_date'])
-        if filters.get('end_date'):
-            query = query.filter(Transaction.date <= filters['end_date'])
-        if filters.get('account_ids'):
-            query = query.filter(Transaction.account_id.in_(filters['account_ids']))
-        if filters.get('category_ids'):
-            query = query.filter(Transaction.category_id.in_(filters['category_ids']))
-        if filters.get('payee_ids'):
-            query = query.filter(Transaction.payee_id.in_(filters['payee_ids']))
-    
-    # Get filtered transactions for "| " removal
-    filtered_transactions = query.all()
-    
-    # Get all transactions for trailing whitespace removal
+    # Get all transactions for this user (ignore filters for cleanup operations)
     all_transactions = db.query(Transaction).filter(Transaction.user_id == current_user.id).all()
     
     pipe_removals = 0
     whitespace_removals = 0
     
-    # Remove "| " from filtered transactions
-    for transaction in filtered_transactions:
-        if transaction.description and "| " in transaction.description:
-            old_description = transaction.description
-            transaction.description = transaction.description.replace("| ", "")
-            if transaction.description != old_description:
-                pipe_removals += 1
-    
-    # Remove trailing whitespaces from all transactions
+    # Process all transactions for both pipe removal and whitespace cleanup
     for transaction in all_transactions:
-        if transaction.description and transaction.description != transaction.description.rstrip():
-            transaction.description = transaction.description.rstrip()
-            whitespace_removals += 1
+        if transaction.description:
+            original_description = transaction.description
+            modified_description = original_description
+            
+            # Remove "| " (pipe symbol with space) from description
+            if "| " in modified_description:
+                modified_description = modified_description.replace("| ", "")
+                pipe_removals += 1
+            
+            # Remove leading and trailing whitespaces
+            trimmed_description = modified_description.strip()
+            if trimmed_description != modified_description:
+                whitespace_removals += 1
+                modified_description = trimmed_description
+            
+            # Update the transaction if any changes were made
+            if modified_description != original_description:
+                transaction.description = modified_description
     
     db.commit()
     
     return {
-        "message": "Transaction descriptions cleaned up successfully",
+        "message": "Transaction descriptions cleaned up successfully for ALL transactions",
         "pipe_symbol_removals": pipe_removals,
-        "trailing_whitespace_removals": whitespace_removals,
+        "whitespace_removals": whitespace_removals,
         "total_transactions_processed": len(all_transactions)
     }
 

@@ -980,6 +980,7 @@ const Transactions: React.FC = () => {
             onClick={handleCleanupDescriptions}
             disabled={isCleaningUp}
             color="secondary"
+            title="Remove '| ' and trim whitespaces from ALL transaction descriptions"
           >
             {isCleaningUp ? 'Cleaning...' : 'Clean Descriptions'}
           </Button>
@@ -2286,17 +2287,20 @@ const Transactions: React.FC = () => {
         <DialogTitle>Clean Transaction Descriptions</DialogTitle>
         <DialogContent>
           <Typography gutterBottom>
-            This will clean up transaction descriptions:
+            This will clean up descriptions for ALL your transactions:
           </Typography>
           <Box component="ul" sx={{ mt: 1, mb: 2 }}>
             <Typography component="li" variant="body2">
-              Remove "| " from descriptions of currently filtered transactions
+              Remove "| " (pipe symbols with spaces) from all transaction descriptions
             </Typography>
             <Typography component="li" variant="body2">
-              Remove trailing whitespaces from all your transactions
+              Remove leading and trailing whitespaces from all transaction descriptions
             </Typography>
           </Box>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="warning.main" sx={{ fontWeight: 'bold' }}>
+            ⚠️ This applies to ALL transactions, not just the filtered ones.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             This action cannot be undone. Continue?
           </Typography>
         </DialogContent>
