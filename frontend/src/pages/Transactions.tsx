@@ -125,15 +125,15 @@ interface TransactionFilters {
   payeeIds?: string[];
   page: number;
   size: number;
+  showAll: boolean;
+  sortField?: SortField;
+  sortDirection: SortDirection;
 }
 
 type SortField = 'date' | 'description' | 'account' | 'payee' | 'category' | 'type' | 'amount';
 type SortDirection = 'asc' | 'desc';
 
-interface SortState {
-  field: SortField | null;
-  direction: SortDirection;
-}
+// SortState is now part of TransactionFilters interface
 
 const Transactions: React.FC = () => {
   usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
@@ -142,7 +142,9 @@ const Transactions: React.FC = () => {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const defaultFilters: TransactionFilters = {
     page: 1,
-    size: 50
+    size: 50,
+    showAll: false,
+    sortDirection: 'asc' as SortDirection
   };
   
   const { filters, setFilters, clearSavedFilters } = usePersistentFilters<TransactionFilters>(
@@ -150,7 +152,7 @@ const Transactions: React.FC = () => {
     defaultFilters
   );
   
-  const [showAll, setShowAll] = useState(false);
+  // showAll is now managed in persistent filters
 
   // Initialize month/year dropdowns based on existing filter dates
   React.useEffect(() => {
@@ -191,7 +193,7 @@ const Transactions: React.FC = () => {
   const [bulkPayeeDialogOpen, setBulkPayeeDialogOpen] = useState(false);
   const [selectedPayeeForBulk, setSelectedPayeeForBulk] = useState<string>('');
   const [bulkUpdateDialogOpen, setBulkUpdateDialogOpen] = useState(false);
-  const [sortState, setSortState] = useState<SortState>({ field: null, direction: 'asc' });
+  // sortState is now managed in persistent filters
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<string>('');
   const [isCleaningUp, setIsCleaningUp] = useState(false);
@@ -215,10 +217,10 @@ const Transactions: React.FC = () => {
   const watchTransactionType = watch('type');
 
   const { data: transactionData, isLoading: transactionsLoading } = useQuery<PaginatedResponse<Transaction>>({
-    queryKey: ['transactions', filters, showAll],
+    queryKey: ['transactions', filters],
     queryFn: () => transactionsApi.getAll({ 
-      page: showAll ? 1 : filters.page,
-      size: showAll ? 10000 : filters.size, // Use large number for show all
+      page: filters.showAll ? 1 : filters.page,
+      size: filters.showAll ? 10000 : filters.size, // Use large number for show all
       start_date: filters.startDate,
       end_date: filters.endDate,
       account_ids: filters.accountId,
@@ -867,19 +869,20 @@ const Transactions: React.FC = () => {
   };
 
   const handleSort = (field: SortField) => {
-    setSortState(prev => ({
-      field,
-      direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
+    setFilters(prev => ({
+      ...prev,
+      sortField: field,
+      sortDirection: prev.sortField === field && prev.sortDirection === 'asc' ? 'desc' : 'asc'
     }));
   };
 
   const getSortIcon = (field: SortField) => {
-    if (sortState.field !== field) return null;
-    return sortState.direction === 'asc' ? <ArrowUpward fontSize="small" /> : <ArrowDownward fontSize="small" />;
+    if (filters.sortField !== field) return null;
+    return filters.sortDirection === 'asc' ? <ArrowUpward fontSize="small" /> : <ArrowDownward fontSize="small" />;
   };
 
   const sortedTransactions = React.useMemo(() => {
-    if (!transactionData?.items || !sortState.field) {
+    if (!transactionData?.items || !filters.sortField) {
       return transactionData?.items || [];
     }
 
@@ -887,7 +890,7 @@ const Transactions: React.FC = () => {
       let aValue: any;
       let bValue: any;
 
-      switch (sortState.field) {
+      switch (filters.sortField) {
         case 'date':
           aValue = a.date ? new Date(a.date).getTime() : 0;
           bValue = b.date ? new Date(b.date).getTime() : 0;
@@ -932,16 +935,16 @@ const Transactions: React.FC = () => {
       }
 
       if (aValue < bValue) {
-        return sortState.direction === 'asc' ? -1 : 1;
+        return filters.sortDirection === 'asc' ? -1 : 1;
       }
       if (aValue > bValue) {
-        return sortState.direction === 'asc' ? 1 : -1;
+        return filters.sortDirection === 'asc' ? 1 : -1;
       }
       return 0;
     });
 
     return sorted;
-  }, [transactionData?.items, sortState, payees, categories]);
+  }, [transactionData?.items, filters.sortField, filters.sortDirection, payees, categories]);
 
   const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId || (filters.categoryIds && filters.categoryIds.length > 0) || (filters.payeeIds && filters.payeeIds.length > 0) || selectedMonth || selectedYear;
   
@@ -1575,7 +1578,7 @@ const Transactions: React.FC = () => {
         </Table>
         
         {/* Performance Warning for Large Datasets */}
-        {showAll && transactionData && transactionData.total > 500 && (
+        {filters.showAll && transactionData && transactionData.total > 500 && (
           <Alert severity="info" sx={{ m: 2 }}>
             <Typography variant="body2">
               Showing all {transactionData.total} transactions may affect performance. 
@@ -1589,7 +1592,7 @@ const Transactions: React.FC = () => {
           <Box display="flex" justifyContent="space-between" alignItems="center" p={2} flexWrap="wrap" gap={2}>
             <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
               <Typography variant="body2" color="textSecondary">
-                {showAll 
+                {filters.showAll 
                   ? `Showing all ${transactionData.total} transactions`
                   : `Showing ${((transactionData.page - 1) * transactionData.size) + 1} to ${Math.min(transactionData.page * transactionData.size, transactionData.total)} of ${transactionData.total} transactions`
                 }
@@ -1598,8 +1601,8 @@ const Transactions: React.FC = () => {
               <FormControlLabel
                 control={
                   <Switch
-                    checked={showAll}
-                    onChange={(e) => setShowAll(e.target.checked)}
+                    checked={filters.showAll}
+                    onChange={(e) => setFilters(prev => ({ ...prev, showAll: e.target.checked }))}
                     size="small"
                   />
                 }
@@ -1607,7 +1610,7 @@ const Transactions: React.FC = () => {
                 sx={{ ml: 1 }}
               />
               
-              {!showAll && (
+              {!filters.showAll && (
                 <FormControl size="small" sx={{ minWidth: 120 }}>
                   <InputLabel>Per page</InputLabel>
                   <Select
@@ -1624,7 +1627,7 @@ const Transactions: React.FC = () => {
                 </FormControl>
               )}
             </Box>
-            {!showAll && transactionData.pages > 1 && (
+            {!filters.showAll && transactionData.pages > 1 && (
               <Pagination
                 count={transactionData.pages}
                 page={transactionData.page}
