@@ -26,7 +26,7 @@ A modern, full-stack expense management application designed for personal financ
 ## ✨ Features
 
 ### 💼 Core Financial Management
-- **Multi-Account Support**: Checking, savings, credit cards, cash, and investment accounts
+- **Multi-Account Support**: Checking, savings, credit cards, cash, investment, and PPF accounts
 - **Transaction Tracking**: Income, expenses, and transfers with automatic balance calculations  
 - **Credit Card Management**: Track balances, credit limits, utilization, and payment due dates
 - **Category & Payee Organization**: Smart categorization with auto-generated unique colors
@@ -74,6 +74,7 @@ A modern, full-stack expense management application designed for personal financ
 - **[React Router v7](https://reactrouter.com/)** - Declarative routing
 - **[React Hook Form](https://react-hook-form.com/)** - Performant forms with easy validation
 - **[React Select](https://react-select.com/)** - Flexible select input control
+- **[React Dropzone](https://react-dropzone.js.org/)** - File upload with drag & drop
 
 ## 🚀 Quick Start
 
@@ -357,7 +358,7 @@ graph TD
 | Table | Purpose | Key Features |
 |-------|---------|--------------|
 | `users` | User authentication | JWT-based auth system |
-| `accounts` | Financial accounts | Multi-type support, credit card fields |
+| `accounts` | Financial accounts | Multi-type support, credit card fields, PPF interest rates |
 | `transactions` | Financial transactions | Auto-balance updates, transfer handling |
 | `categories` | Expense categories | Auto-color generation, slug support |
 | `payees` | Transaction counterparties | Smart search, slug support |
