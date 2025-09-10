@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { User, LoginCredentials, RegisterData, AuthToken } from '../types/auth';
+import { User, LoginCredentials, RegisterData, AuthToken, ChangePasswordData } from '../types/auth';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api';
 
@@ -58,6 +58,21 @@ export const authService = {
     } catch (error) {
       // Logout can fail silently as we'll clear local storage anyway
       console.warn('Logout request failed:', error);
+    }
+  },
+
+  changePassword: async (data: ChangePasswordData, token: string): Promise<void> => {
+    try {
+      await authApi.post('/change-password', data, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    } catch (error: any) {
+      if (error.response?.data?.detail) {
+        throw new Error(error.response.data.detail);
+      }
+      throw new Error('Failed to change password. Please try again.');
     }
   },
 };

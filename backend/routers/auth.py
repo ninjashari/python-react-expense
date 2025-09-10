@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 from models.users import User
-from schemas.users import UserCreate, UserLogin, UserResponse, Token
+from schemas.users import UserCreate, UserLogin, UserResponse, Token, ChangePassword
 from utils.auth import (
     verify_password, 
     get_password_hash, 
@@ -81,3 +81,41 @@ def read_users_me(current_user: User = Depends(get_current_active_user)):
 def logout():
     """Logout user (client should remove token)"""
     return {"message": "Successfully logged out"}
+
+@router.post("/change-password")
+def change_password(
+    password_data: ChangePassword,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Change user password"""
+    try:
+        # Verify current password
+        if not verify_password(password_data.current_password, current_user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current password is incorrect"
+            )
+        
+        # Validate new password (basic validation)
+        if len(password_data.new_password) < 6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password must be at least 6 characters long"
+            )
+        
+        # Hash and update new password
+        new_password_hash = get_password_hash(password_data.new_password)
+        current_user.password_hash = new_password_hash
+        db.commit()
+        
+        return {"message": "Password changed successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to change password. Please try again."
+        )

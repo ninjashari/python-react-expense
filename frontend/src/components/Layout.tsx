@@ -26,9 +26,11 @@ import {
   Analytics,
   Psychology,
   Insights,
+  Lock,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { ChangePassword } from './ChangePassword';
 
 const drawerWidth = 240;
 
@@ -53,6 +55,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [changePasswordOpen, setChangePasswordOpen] = React.useState(false);
 
   const handleUserMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -64,6 +67,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const handleLogout = () => {
     logout();
+    handleUserMenuClose();
+  };
+
+  const handleChangePassword = () => {
+    setChangePasswordOpen(true);
     handleUserMenuClose();
   };
 
@@ -111,6 +119,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               open={Boolean(anchorEl)}
               onClose={handleUserMenuClose}
             >
+              <MenuItem onClick={handleChangePassword}>
+                <ListItemIcon>
+                  <Lock fontSize="small" />
+                </ListItemIcon>
+                Change Password
+              </MenuItem>
               <MenuItem onClick={handleLogout}>
                 <ListItemIcon>
                   <Logout fontSize="small" />
@@ -163,6 +177,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         <Toolbar />
         {children}
       </Box>
+      
+      <ChangePassword
+        open={changePasswordOpen}
+        onClose={() => setChangePasswordOpen(false)}
+      />
     </Box>
   );
 };

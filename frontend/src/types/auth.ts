@@ -22,6 +22,11 @@ export interface AuthToken {
   token_type: string;
 }
 
+export interface ChangePasswordData {
+  current_password: string;
+  new_password: string;
+}
+
 export interface AuthContextType {
   user: User | null;
   token: string | null;
