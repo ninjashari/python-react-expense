@@ -172,6 +172,8 @@ export const transactionsApi = {
     params, 
     responseType: 'blob' 
   }).then(res => res),
+  bulkReassign: (transaction_ids: string[]): Promise<any> => 
+    api.post('/transactions/bulk-reassign', transaction_ids).then(res => res.data),
 };
 
 

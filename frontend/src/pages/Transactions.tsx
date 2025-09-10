@@ -32,7 +32,7 @@ import {
   FormControlLabel,
   Alert,
 } from '@mui/material';
-import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate } from '@mui/icons-material';
+import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate, AutoFixHigh } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
@@ -137,7 +137,7 @@ type SortDirection = 'asc' | 'desc';
 
 const Transactions: React.FC = () => {
   usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
-  const { showError } = useToast();
+  const { showError, showSuccess } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const defaultFilters: TransactionFilters = {
@@ -193,6 +193,8 @@ const Transactions: React.FC = () => {
   const [bulkPayeeDialogOpen, setBulkPayeeDialogOpen] = useState(false);
   const [selectedPayeeForBulk, setSelectedPayeeForBulk] = useState<string>('');
   const [bulkUpdateDialogOpen, setBulkUpdateDialogOpen] = useState(false);
+  const [bulkReassignDialogOpen, setBulkReassignDialogOpen] = useState(false);
+  const [reassignLoading, setReassignLoading] = useState(false);
   // sortState is now managed in persistent filters
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<string>('');
@@ -706,6 +708,41 @@ const Transactions: React.FC = () => {
     setSelectedPayeeForBulk('');
   };
 
+  const handleBulkReassign = async () => {
+    if (selectedTransactions.size === 0) {
+      showError('No transactions selected');
+      return;
+    }
+
+    setReassignLoading(true);
+    try {
+      const selectedIds = Array.from(selectedTransactions);
+      const response = await transactionsApi.bulkReassign(selectedIds);
+      
+      // Show success message with details
+      showSuccess(
+        `Successfully reassigned ${response.payee_updates + response.category_updates} fields across ${response.total_transactions} transactions. ` +
+        `Success rate: ${response.success_rate}`
+      );
+
+      // Refresh the data
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      
+      // Clear selection and close dialog
+      setSelectedTransactions(new Set());
+      setBulkReassignDialogOpen(false);
+      
+    } catch (error) {
+      showError('Failed to reassign transactions. Please try again.');
+    } finally {
+      setReassignLoading(false);
+    }
+  };
+
+  const handleCancelBulkReassign = () => {
+    setBulkReassignDialogOpen(false);
+  };
+
   // Helper function to get the last day of a month
   const getLastDayOfMonth = (year: number, month: number): number => {
     return new Date(year, month, 0).getDate();
@@ -1032,6 +1069,15 @@ const Transactions: React.FC = () => {
                 sx={{ ml: 2 }}
               >
                 Delete Selected ({selectedTransactions.size})
+              </Button>
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={<AutoFixHigh />}
+                onClick={() => setBulkReassignDialogOpen(true)}
+                sx={{ ml: 2 }}
+              >
+                AI Reassign ({selectedTransactions.size})
               </Button>
             </>
           )}
@@ -2281,6 +2327,85 @@ const Transactions: React.FC = () => {
             disabled={(!selectedCategoryForBulk && !selectedPayeeForBulk) || bulkUpdateMutation.isPending}
           >
             {bulkUpdateMutation.isPending ? 'Updating...' : `Update ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk AI Reassign Confirmation Dialog */}
+      <Dialog
+        open={bulkReassignDialogOpen}
+        onClose={handleCancelBulkReassign}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>AI Reassign Selected Transactions</DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>
+            This will use the current AI learning model to reassign payees and categories for the selected {selectedTransactions.size} transaction{selectedTransactions.size > 1 ? 's' : ''}:
+          </Typography>
+          
+          {/* Show preview of selected transactions */}
+          {transactionData?.items && (
+            <Box sx={{ mt: 2, mb: 3, maxHeight: 200, overflow: 'auto' }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Selected Transactions:
+              </Typography>
+              {transactionData.items
+                .filter(t => selectedTransactions.has(t.id))
+                .slice(0, 5) // Show only first 5 for preview
+                .map((transaction) => (
+                  <Box 
+                    key={transaction.id} 
+                    sx={{ 
+                      p: 1, 
+                      mb: 1, 
+                      backgroundColor: 'grey.50', 
+                      borderRadius: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2">
+                        {transaction.description || 'No description'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Current: {categories?.find(c => c.id === transaction.category_id)?.name || 'No category'} | {payees?.find(p => p.id === transaction.payee_id)?.name || 'No payee'}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color={transaction.type === 'income' ? 'success.main' : 'error.main'}>
+                      {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                    </Typography>
+                  </Box>
+                ))}
+              {selectedTransactions.size > 5 && (
+                <Typography variant="caption" color="text.secondary">
+                  ... and {selectedTransactions.size - 5} more transactions
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          <Alert severity="info" sx={{ mt: 2 }}>
+            The AI will analyze each transaction's description and suggest the most likely payee and category based on your historical data. Only suggestions with confidence ≥ 30% will be applied.
+          </Alert>
+          
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            <strong>This will overwrite existing assignments.</strong> The system will use the latest AI learning model to suggest new payees and categories, potentially replacing what's currently assigned.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelBulkReassign} disabled={reassignLoading}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleBulkReassign} 
+            color="primary" 
+            variant="contained"
+            disabled={reassignLoading}
+            startIcon={reassignLoading ? <CircularProgress size={18} /> : <AutoFixHigh />}
+          >
+            {reassignLoading ? 'Reassigning...' : `AI Reassign ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
           </Button>
         </DialogActions>
       </Dialog>

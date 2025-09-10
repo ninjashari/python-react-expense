@@ -26,7 +26,9 @@ class TransactionLearningService:
         account_type: Optional[str] = None,
         was_suggested: bool = False,
         suggestion_confidence: Optional[float] = None,
-        selection_method: str = 'manual'
+        selection_method: str = 'manual',
+        original_suggestion_id: Optional[str] = None,
+        original_suggestion_name: Optional[str] = None
     ) -> UserSelectionHistory:
         """Record every user selection for learning purposes"""
         
@@ -47,7 +49,23 @@ class TransactionLearningService:
         db.add(selection_record)
         db.commit()
         
-        # Clean up old selection history - keep only 10 most recent entries per user
+        # If this was a suggestion that was corrected, record the correction pattern
+        if (was_suggested and original_suggestion_name and 
+            selected_value_name != original_suggestion_name):
+            TransactionLearningService._record_correction_pattern(
+                db=db,
+                user_id=user_id,
+                field_type=field_type,
+                original_suggestion_id=original_suggestion_id,
+                original_suggestion_name=original_suggestion_name,
+                user_correction_id=selected_value_id,
+                user_correction_name=selected_value_name,
+                transaction_description=transaction_description,
+                transaction_amount=transaction_amount,
+                suggestion_confidence=suggestion_confidence
+            )
+        
+        # Clean up old selection history - keep only 200 most recent entries per user
         TransactionLearningService._cleanup_selection_history(db, user_id)
         
         # Update or create learning patterns based on this selection
@@ -59,22 +77,81 @@ class TransactionLearningService:
     
     @staticmethod
     def _cleanup_selection_history(db: Session, user_id: str):
-        """Keep only the 10 most recent selection history entries per user"""
+        """Keep only the 200 most recent selection history entries per user"""
         try:
             # Get all selection history for this user, ordered by creation date desc
             all_selections = db.query(UserSelectionHistory).filter(
                 UserSelectionHistory.user_id == user_id
             ).order_by(UserSelectionHistory.created_at.desc()).all()
             
-            # If we have more than 10 entries, delete the oldest ones
-            if len(all_selections) > 10:
-                selections_to_delete = all_selections[10:]  # Keep first 10 (newest), delete rest
+            # If we have more than 200 entries, delete the oldest ones
+            if len(all_selections) > 200:
+                selections_to_delete = all_selections[200:]  # Keep first 200 (newest), delete rest
                 
                 for selection in selections_to_delete:
                     db.delete(selection)
                 
                 db.commit()
                 
+        except Exception as e:
+            db.rollback()
+    
+    @staticmethod
+    def _record_correction_pattern(
+        db: Session,
+        user_id: str,
+        field_type: str,
+        original_suggestion_id: Optional[str],
+        original_suggestion_name: str,
+        user_correction_id: Optional[str],
+        user_correction_name: str,
+        transaction_description: Optional[str] = None,
+        transaction_amount: Optional[float] = None,
+        suggestion_confidence: Optional[float] = None
+    ):
+        """Record when a user corrects an AI suggestion for learning"""
+        try:
+            from datetime import datetime
+            
+            # Check if this correction pattern already exists
+            existing_pattern = db.query(UserCorrectionPattern).filter(
+                UserCorrectionPattern.user_id == user_id,
+                UserCorrectionPattern.original_suggestion_type == field_type,
+                UserCorrectionPattern.original_suggestion_name == original_suggestion_name,
+                UserCorrectionPattern.user_correction_name == user_correction_name,
+                UserCorrectionPattern.transaction_description == transaction_description
+            ).first()
+            
+            if existing_pattern:
+                # Update existing pattern
+                existing_pattern.correction_frequency += 1
+                existing_pattern.last_seen = datetime.utcnow()
+                
+                # Update context data if provided
+                if suggestion_confidence is not None:
+                    existing_pattern.suggestion_confidence = suggestion_confidence
+                if transaction_amount is not None:
+                    existing_pattern.transaction_amount = transaction_amount
+            else:
+                # Create new correction pattern
+                correction_pattern = UserCorrectionPattern(
+                    user_id=user_id,
+                    original_suggestion_type=field_type,
+                    original_suggestion_id=original_suggestion_id,
+                    original_suggestion_name=original_suggestion_name,
+                    user_correction_id=user_correction_id,
+                    user_correction_name=user_correction_name,
+                    transaction_description=transaction_description,
+                    transaction_amount=transaction_amount,
+                    suggestion_confidence=suggestion_confidence,
+                    correction_frequency=1,
+                    context_data={}
+                )
+                
+                db.add(correction_pattern)
+            
+            db.commit()
+            
         except Exception as e:
             db.rollback()
     
@@ -350,7 +427,7 @@ class TransactionLearningService:
     
     @staticmethod
     def cleanup_all_users_selection_history(db: Session):
-        """One-time cleanup for all users - keep only 10 most recent entries per user"""
+        """One-time cleanup for all users - keep only 200 most recent entries per user"""
         try:
             # Get all users who have selection history
             from sqlalchemy import func
@@ -364,9 +441,9 @@ class TransactionLearningService:
                     UserSelectionHistory.user_id == user_id
                 ).order_by(UserSelectionHistory.created_at.desc()).all()
                 
-                # If more than 10, delete the oldest ones
-                if len(all_selections) > 10:
-                    selections_to_delete = all_selections[10:]
+                # If more than 200, delete the oldest ones
+                if len(all_selections) > 200:
+                    selections_to_delete = all_selections[200:]
                     
                     for selection in selections_to_delete:
                         db.delete(selection)
@@ -384,3 +461,101 @@ class TransactionLearningService:
         except Exception as e:
             db.rollback()
             raise
+    
+    @staticmethod
+    def get_correction_insights(db: Session, user_id: str):
+        """Analyze user correction patterns to provide insights for improving suggestions"""
+        try:
+            # Get all correction patterns for this user
+            corrections = db.query(UserCorrectionPattern).filter(
+                UserCorrectionPattern.user_id == user_id
+            ).all()
+            
+            if not corrections:
+                return {"message": "No correction patterns found", "insights": []}
+            
+            insights = []
+            
+            # Group by original suggestion to find frequently corrected suggestions
+            from collections import defaultdict
+            suggestion_corrections = defaultdict(list)
+            
+            for correction in corrections:
+                key = f"{correction.original_suggestion_type}:{correction.original_suggestion_name}"
+                suggestion_corrections[key].append(correction)
+            
+            # Find suggestions that are frequently corrected (more than 2 times)
+            problematic_suggestions = []
+            for suggestion, correction_list in suggestion_corrections.items():
+                total_corrections = sum(c.correction_frequency for c in correction_list)
+                if total_corrections >= 2:
+                    suggestion_type, suggestion_name = suggestion.split(":", 1)
+                    
+                    # Find the most common correction for this suggestion
+                    correction_counts = defaultdict(int)
+                    for correction in correction_list:
+                        correction_counts[correction.user_correction_name] += correction.correction_frequency
+                    
+                    most_common_correction = max(correction_counts.items(), key=lambda x: x[1])
+                    
+                    problematic_suggestions.append({
+                        "suggestion_type": suggestion_type,
+                        "suggestion_name": suggestion_name,
+                        "total_corrections": total_corrections,
+                        "most_common_correction": most_common_correction[0],
+                        "correction_frequency": most_common_correction[1]
+                    })
+            
+            # Sort by correction frequency
+            problematic_suggestions.sort(key=lambda x: x["total_corrections"], reverse=True)
+            
+            if problematic_suggestions:
+                insights.append({
+                    "type": "frequently_corrected_suggestions",
+                    "title": "Frequently Corrected Suggestions",
+                    "description": "These suggestions are often corrected by the user",
+                    "data": problematic_suggestions[:10],  # Top 10
+                    "suggestion": "Consider updating the learning patterns for these suggestions"
+                })
+            
+            # Analyze correction patterns by transaction description
+            description_patterns = defaultdict(list)
+            for correction in corrections:
+                if correction.transaction_description:
+                    # Extract keywords from description
+                    import re
+                    words = re.findall(r'\b\w+\b', correction.transaction_description.lower())
+                    for word in words:
+                        if len(word) > 3:  # Only meaningful words
+                            description_patterns[word].append(correction)
+            
+            # Find keywords that frequently lead to corrections
+            problematic_keywords = []
+            for keyword, correction_list in description_patterns.items():
+                if len(correction_list) >= 2:
+                    total_corrections = sum(c.correction_frequency for c in correction_list)
+                    problematic_keywords.append({
+                        "keyword": keyword,
+                        "correction_count": len(correction_list),
+                        "total_corrections": total_corrections
+                    })
+            
+            problematic_keywords.sort(key=lambda x: x["total_corrections"], reverse=True)
+            
+            if problematic_keywords:
+                insights.append({
+                    "type": "problematic_keywords",
+                    "title": "Keywords Often Associated with Corrections",
+                    "description": "Transaction descriptions containing these keywords often lead to corrections",
+                    "data": problematic_keywords[:10],  # Top 10
+                    "suggestion": "Improve pattern recognition for transactions containing these keywords"
+                })
+            
+            return {
+                "total_corrections": len(corrections),
+                "unique_patterns": len(suggestion_corrections),
+                "insights": insights
+            }
+            
+        except Exception as e:
+            return {"error": f"Failed to analyze correction patterns: {str(e)}"}

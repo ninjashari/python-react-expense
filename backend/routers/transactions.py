@@ -1189,3 +1189,135 @@ async def clear_transaction_fields(
         "total_transactions_processed": len(filtered_transactions)
     }
 
+
+@router.post("/bulk-reassign")
+async def bulk_reassign_transactions(
+    transaction_ids: List[str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Bulk reassign payee and category for selected transactions using current AI learning model.
+    This will overwrite existing assignments with the latest AI suggestions.
+    """
+    from services.learning_service import TransactionLearningService
+    from models.payees import Payee
+    from models.categories import Category
+    
+    if not transaction_ids:
+        raise HTTPException(status_code=400, detail="No transaction IDs provided")
+    
+    # Get the transactions to reassign
+    transactions = db.query(Transaction).filter(
+        Transaction.id.in_(transaction_ids),
+        Transaction.user_id == current_user.id
+    ).all()
+    
+    if not transactions:
+        raise HTTPException(status_code=404, detail="No valid transactions found")
+    
+    reassignments = []
+    payee_updates = 0
+    category_updates = 0
+    errors = []
+    
+    for transaction in transactions:
+        try:
+            # Get AI suggestions for this transaction
+            suggestions = TransactionLearningService.suggest_transaction_fields(
+                db=db,
+                user_id=current_user.id,
+                transaction_description=transaction.description,
+                transaction_amount=float(transaction.amount) if transaction.amount else 0.0,
+                account_type=transaction.account.type if transaction.account else None
+            )
+            
+            original_payee = transaction.payee.name if transaction.payee else None
+            original_category = transaction.category.name if transaction.category else None
+            
+            changes = {
+                "transaction_id": str(transaction.id),
+                "description": transaction.description,
+                "original_payee": original_payee,
+                "original_category": original_category,
+                "new_payee": None,
+                "new_category": None,
+                "payee_confidence": None,
+                "category_confidence": None
+            }
+            
+            # Apply payee suggestion with highest confidence
+            if suggestions.get("payee_suggestions"):
+                best_payee = max(suggestions["payee_suggestions"], key=lambda x: x.get("confidence", 0))
+                if best_payee.get("confidence", 0) >= 0.3:  # Minimum confidence threshold
+                    payee = db.query(Payee).filter(Payee.id == best_payee["id"]).first()
+                    if payee:
+                        transaction.payee_id = payee.id
+                        changes["new_payee"] = payee.name
+                        changes["payee_confidence"] = best_payee.get("confidence")
+                        payee_updates += 1
+                        
+                        # Record this as a learning selection
+                        TransactionLearningService.record_user_selection(
+                            db=db,
+                            user_id=current_user.id,
+                            transaction_id=str(transaction.id),
+                            field_type="payee",
+                            selected_value_id=str(payee.id),
+                            selected_value_name=payee.name,
+                            transaction_description=transaction.description,
+                            transaction_amount=float(transaction.amount) if transaction.amount else 0.0,
+                            account_type=transaction.account.type if transaction.account else None,
+                            was_suggested=True,
+                            suggestion_confidence=best_payee.get("confidence"),
+                            selection_method="bulk_reassign"
+                        )
+            
+            # Apply category suggestion with highest confidence
+            if suggestions.get("category_suggestions"):
+                best_category = max(suggestions["category_suggestions"], key=lambda x: x.get("confidence", 0))
+                if best_category.get("confidence", 0) >= 0.3:  # Minimum confidence threshold
+                    category = db.query(Category).filter(Category.id == best_category["id"]).first()
+                    if category:
+                        transaction.category_id = category.id
+                        changes["new_category"] = category.name
+                        changes["category_confidence"] = best_category.get("confidence")
+                        category_updates += 1
+                        
+                        # Record this as a learning selection
+                        TransactionLearningService.record_user_selection(
+                            db=db,
+                            user_id=current_user.id,
+                            transaction_id=str(transaction.id),
+                            field_type="category",
+                            selected_value_id=str(category.id),
+                            selected_value_name=category.name,
+                            transaction_description=transaction.description,
+                            transaction_amount=float(transaction.amount) if transaction.amount else 0.0,
+                            account_type=transaction.account.type if transaction.account else None,
+                            was_suggested=True,
+                            suggestion_confidence=best_category.get("confidence"),
+                            selection_method="bulk_reassign"
+                        )
+            
+            reassignments.append(changes)
+            
+        except Exception as e:
+            errors.append({
+                "transaction_id": str(transaction.id),
+                "error": str(e)
+            })
+    
+    # Commit all changes
+    db.commit()
+    
+    return {
+        "message": f"Bulk reassignment completed successfully",
+        "total_transactions": len(transactions),
+        "payee_updates": payee_updates,
+        "category_updates": category_updates,
+        "reassignments": reassignments,
+        "errors": errors,
+        "success_rate": f"{((len(transactions) - len(errors)) / len(transactions) * 100):.1f}%" if transactions else "0%"
+    }
+

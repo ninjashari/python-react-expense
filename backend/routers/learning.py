@@ -1477,7 +1477,7 @@ async def cleanup_selection_history(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    One-time cleanup to reduce user_selection_history table to 10 most recent entries per user.
+    One-time cleanup to reduce user_selection_history table to 200 most recent entries per user.
     This endpoint is for maintenance and performance optimization.
     """
     try:
@@ -1491,3 +1491,61 @@ async def cleanup_selection_history(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to cleanup selection history: {str(e)}")
+
+
+@router.get("/correction-patterns")
+async def get_correction_patterns(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get user's correction patterns to understand how often they correct AI suggestions.
+    Useful for improving the learning system and debugging suggestion accuracy.
+    """
+    from models.learning import UserCorrectionPattern
+    
+    correction_patterns = db.query(UserCorrectionPattern).filter(
+        UserCorrectionPattern.user_id == current_user.id
+    ).order_by(UserCorrectionPattern.correction_frequency.desc()).all()
+    
+    patterns_data = []
+    for pattern in correction_patterns:
+        patterns_data.append({
+            "id": str(pattern.id),
+            "original_suggestion_type": pattern.original_suggestion_type,
+            "original_suggestion_name": pattern.original_suggestion_name,
+            "user_correction_name": pattern.user_correction_name,
+            "correction_frequency": pattern.correction_frequency,
+            "transaction_description": pattern.transaction_description,
+            "transaction_amount": pattern.transaction_amount,
+            "suggestion_confidence": pattern.suggestion_confidence,
+            "first_seen": pattern.first_seen.isoformat() if pattern.first_seen else None,
+            "last_seen": pattern.last_seen.isoformat() if pattern.last_seen else None,
+            "context_data": pattern.context_data
+        })
+    
+    return {
+        "correction_patterns": patterns_data,
+        "total_patterns": len(patterns_data),
+        "summary": {
+            "payee_corrections": len([p for p in patterns_data if p["original_suggestion_type"] == "payee"]),
+            "category_corrections": len([p for p in patterns_data if p["original_suggestion_type"] == "category"]),
+            "most_frequent_correction": patterns_data[0] if patterns_data else None
+        }
+    }
+
+
+@router.get("/correction-insights")
+async def get_correction_insights(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get insights from user correction patterns to understand and improve AI suggestion accuracy.
+    """
+    insights = TransactionLearningService.get_correction_insights(db, current_user.id)
+    
+    return {
+        "status": "success",
+        "correction_insights": insights
+    }
