@@ -34,99 +34,73 @@ class LLMService:
         
     def create_extraction_prompt(self, text: str) -> str:
         """Create a structured prompt for transaction extraction"""
+        # Count date patterns to set expectations
+        import re
+        date_patterns = re.findall(r'\b\d{2}-\d{2}-\d{4}\b', text)
+        unique_dates = set(date_patterns)
+        date_range = f"from {min(unique_dates)} to {max(unique_dates)}" if unique_dates else "full range"
+        
         return f"""
 You are a financial data extraction expert specializing in Indian bank statements. Extract ALL transaction information from the following text and return ONLY a valid JSON array.
 
 CRITICAL INSTRUCTIONS:
 1. Return ONLY a JSON array of transactions, no other text or explanations
-2. You MUST extract EVERY SINGLE transaction from the statement - do not miss any
-3. Look through the ENTIRE text systematically, line by line
-4. Each transaction must have: date, amount, description, transaction_type
-5. transaction_type must be exactly one of: "income", "expense", "transfer"
-6. amount must be a positive number (no negative values, no currency symbols)
-7. date must be in YYYY-MM-DD format (convert from DD-MM-YYYY format - Indian standard)
-8. ONLY count actual transaction lines - skip balance lines, headers, and non-transaction entries
+2. You MUST extract EVERY SINGLE transaction from the ENTIRE document - do not miss any
+3. This document contains transactions {date_range} - extract ALL dates in this range
+4. Look through the COMPLETE text systematically, scanning ALL pages and sections
+5. Each transaction must have: date, amount, description, transaction_type
+6. transaction_type must be exactly one of: "income", "expense", "transfer"
+7. amount must be a positive number as a STRING (no negative values, no currency symbols, quote amounts like "20000.00")
+8. date must be in YYYY-MM-DD format (convert from DD-MM-YYYY format - Indian standard)
+9. Process the ENTIRE document - do not stop early even if you find many transactions
+
+DOCUMENT ANALYSIS PRIORITY:
+I found {len(date_patterns)} date patterns in this document. You must scan through ALL of them.
+Expected transaction range: {date_range}
 
 TRANSACTION IDENTIFICATION PATTERNS:
-- Look for date patterns like: 07-10-2014, 09-10-2014, etc. (any month/year)
-- Followed by transaction descriptions like: ATM-CASH, BY CASH DEPOSIT, PUR/, Service Tax, Consolidated Charges
+- Look for date patterns like: 01-11-2022, 30-11-2022, etc. (scan through ALL dates)
+- UPI transactions: UPI/P2M/, UPI/P2A/ patterns
+- Card transactions: ECOM PUR/, POS/ patterns  
+- Bank transactions: NEFT/, transfers
 - With amounts like: 20,000.00, 400.00, 16.69, 135.00
 - And running balance updates
-- Structured format: DATE | DESCRIPTION | AMOUNT | BALANCE (if available)
 
 TRANSACTION TYPE RULES:
-- Deposits/Credits (money coming in): "income" - includes: "BY CASH DEPOSIT", "By Clg/" (cheque deposits), salary credits, interest payments
-- Withdrawals/Debits (money going out): "expense" - includes: "ATM-CASH", "PUR/" (purchases/payments), "Service Tax", "Consolidated Charges", mobile recharges, fees
-- Transfers between accounts: "transfer" - includes: account-to-account transfers, NEFT, IMPS (but analyze context carefully)
+- Credits (money coming in): "income" - UPI credits, deposits, salary, refunds
+- Debits (money going out): "expense" - UPI payments, purchases, ATM withdrawals, fees
+- Account transfers: "transfer" - NEFT, account-to-account transfers
 
-SYSTEMATIC APPROACH:
-1. Start from the beginning of the account statement section
-2. Look for the "Opening Balance" line
-3. Then extract EVERY transaction line that follows
-4. Continue until you reach "Closing Balance"
-5. Do NOT skip any transaction lines
-6. Pay special attention to consecutive dates like 23-09-2014 which might have multiple transactions
+COMPLETE DOCUMENT SCANNING APPROACH:
+1. Start from the beginning and scan the ENTIRE document
+2. Look for "Account Statement" section
+3. Extract EVERY transaction from opening balance to closing balance
+4. Don't stop after finding some transactions - continue until the very end
+5. Pay attention to multi-page statements - scan ALL pages
+6. Extract transactions from dates like 27-11-2022, 28-11-2022, 29-11-2022, 30-11-2022
 
-COMMON BANK STATEMENT STRUCTURE:
-Txn Date | Transaction Description | Withdrawals | Deposits | Balance
-
-SPECIFIC CHECKS FOR ANY STATEMENT:
-- Scan through ALL dates in the statement (could be any month/year)
-- Multiple transactions can occur on the same date - don't miss any
-- Look for transaction patterns: ATM-CASH, PUR/, BY CASH DEPOSIT, BRN-BY CASH, etc.
-- Check for mobile recharge transactions (Bharti Airtel, TATA DOCOMO, etc.)
-- Find all cash deposits and withdrawals
-- Include service charges, fees, and tax deductions as transactions
-- Look for transfer transactions (TRFR, NEFT, IMPS, etc.)
-
-TEXT TO ANALYZE:
+FULL DOCUMENT TEXT TO ANALYZE:
 {text}
 
-EXPECTED JSON FORMAT - EXTRACT ALL TRANSACTIONS:
+EXPECTED JSON FORMAT - EXTRACT ALL TRANSACTIONS FROM COMPLETE DOCUMENT:
 [
   {{
-    "date": "2014-10-07",
-    "amount": 20000.00,
-    "description": "By Clg/061193/PNB /CHANDIGARH",
-    "transaction_type": "income",
-    "payee": "PNB Bank",
-    "category": "Bank Transfer",
+    "date": "2022-11-01",
+    "amount": "666.00",
+    "description": "UPI/P2M/230563737484/Jio Mobil/Yes Bank/JIO20BR",
+    "transaction_type": "expense",
     "confidence": 0.9
   }},
   {{
-    "date": "2014-10-09",
-    "amount": 400.00,
-    "description": "ATM-CASH/JP UNIVERSITY,WAKH/SOLAN/091014",
-    "transaction_type": "expense",
-    "payee": "JP University ATM",
-    "category": "Cash Withdrawal",
+    "date": "2022-11-30",
+    "amount": "193.54",
+    "description": "UPI/P2M/233490214642/TECHMASH /Paytm Pay/Playo O",
+    "transaction_type": "expense", 
     "confidence": 0.9
   }}
 ]
 
-IMPORTANT: Count the transactions as you extract them. Look for ALL lines with dates and amounts. Each line with a date pattern (DD-MM-YYYY) followed by transaction description and amount should be a separate transaction.
-
-CRITICAL VALIDATION: After extraction, verify your count:
-- Count ONLY actual transaction lines (date + description + amount)
-- Do NOT count balance lines, header lines, or summary lines
-- Do NOT count the same transaction twice
-- If extracting from a March 2014 statement with 17 actual transactions, return exactly 17 transactions
-- Quality over quantity - accurate extraction is more important than hitting a target number
-
-Make sure you capture all legitimate transactions:
-- ALL ATM withdrawals 
-- ALL cash deposits
-- ALL purchases and payments (PUR/ entries)
-- ALL service charges and fees
-- ALL mobile recharges and bill payments
-- ALL transfer transactions
-
-But EXCLUDE:
-- Opening balance lines
-- Closing balance lines
-- Running balance amounts
-- Header/footer information
-- Page numbers or branch details
+CRITICAL: Scan through the ENTIRE document text. Do not stop processing early. Extract transactions from ALL dates found, including the very last transactions in the document (like 27th, 28th, 29th, 30th of the month). The document may span multiple pages - process ALL of them.
 
 JSON RESPONSE:"""
 
@@ -165,9 +139,12 @@ JSON RESPONSE:"""
                 
                 # Validate amount
                 try:
-                    amount = float(str(item['amount']).replace('$', '').replace(',', ''))
+                    # Handle both numeric and string amounts, remove currency symbols and commas
+                    amount_str = str(item['amount']).replace('$', '').replace('₹', '').replace(',', '').strip()
+                    amount = float(amount_str)
                     item['amount'] = abs(amount)  # Ensure positive
                 except (ValueError, TypeError):
+                    print(f"DEBUG: Failed to parse amount: {item.get('amount')}")
                     continue
                 
                 # Create validated transaction
@@ -181,11 +158,17 @@ JSON RESPONSE:"""
         return validated_transactions
     
     def extract_transactions(self, text: str) -> List[TransactionData]:
-        """Extract transactions from text using LLM"""
+        """Extract transactions from text using LLM with chunking for large documents"""
         if not text.strip():
             return []
         
         print(f"DEBUG: Starting extraction with text length: {len(text)}")
+        
+        # Check if document is too large for single processing
+        max_text_length = 25000  # Reasonable limit for context window
+        if len(text) > max_text_length:
+            print(f"DEBUG: Large document detected ({len(text)} chars), using chunked processing")
+            return self._extract_from_large_document(text)
         
         # Estimate expected transaction count from text patterns
         date_patterns = len(re.findall(r'\b\d{2}-\d{2}-\d{4}\b', text))
@@ -251,6 +234,74 @@ JSON RESPONSE:"""
             status_code=500, 
             detail="Failed to extract transactions with any available LLM model"
         )
+    
+    def _extract_from_large_document(self, text: str) -> List[TransactionData]:
+        """Handle large documents by processing in chunks while ensuring no transactions are missed"""
+        # Find the account statement section
+        statement_match = re.search(r'Account Statement.*?(?=Closing Balance|Call Customer Care|\Z)', text, re.DOTALL | re.IGNORECASE)
+        if statement_match:
+            statement_text = statement_match.group(0)
+        else:
+            statement_text = text
+        
+        print(f"DEBUG: Processing statement section length: {len(statement_text)}")
+        
+        # Split by months or logical sections while preserving transaction integrity
+        chunks = self._split_text_intelligently(statement_text)
+        
+        all_transactions = []
+        for i, chunk in enumerate(chunks):
+            print(f"DEBUG: Processing chunk {i+1}/{len(chunks)} (length: {len(chunk)})")
+            
+            try:
+                chunk_transactions = self._try_extraction_with_model(chunk, self.model_name)
+                if chunk_transactions:
+                    all_transactions.extend(chunk_transactions)
+                    print(f"DEBUG: Chunk {i+1} extracted {len(chunk_transactions)} transactions")
+                else:
+                    print(f"DEBUG: Chunk {i+1} extracted 0 transactions")
+            except Exception as e:
+                print(f"DEBUG: Chunk {i+1} processing failed: {e}")
+                continue
+        
+        print(f"DEBUG: Total transactions from all chunks: {len(all_transactions)}")
+        return all_transactions
+    
+    def _split_text_intelligently(self, text: str, max_chunk_size: int = 20000) -> List[str]:
+        """Split text into chunks while preserving transaction integrity"""
+        if len(text) <= max_chunk_size:
+            return [text]
+        
+        # Try to split by date patterns to maintain transaction context
+        lines = text.split('\n')
+        chunks = []
+        current_chunk = []
+        current_size = 0
+        
+        for line in lines:
+            line_size = len(line)
+            
+            # If adding this line would exceed chunk size and we have a reasonable chunk
+            if current_size + line_size > max_chunk_size and current_size > max_chunk_size // 2:
+                # If this line starts with a date, it's a good place to split
+                if re.match(r'\d{2}-\d{2}-\d{4}', line.strip()):
+                    chunks.append('\n'.join(current_chunk))
+                    current_chunk = [line]
+                    current_size = line_size
+                else:
+                    # Add to current chunk and continue
+                    current_chunk.append(line)
+                    current_size += line_size
+            else:
+                current_chunk.append(line)
+                current_size += line_size
+        
+        # Add remaining chunk
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+        
+        print(f"DEBUG: Split document into {len(chunks)} chunks")
+        return chunks
     
     def _try_extraction_with_model(self, text: str, model: str) -> Optional[List[TransactionData]]:
         """Try extraction with a specific model"""
@@ -486,7 +537,7 @@ TEXT:
 
 JSON format:
 [
-  {{"date": "2014-03-02", "amount": 2000.00, "description": "BRN-BY CASH CASH", "transaction_type": "income"}},
+  {{"date": "2014-03-02", "amount": "2000.00", "description": "BRN-BY CASH CASH", "transaction_type": "income"}},
   ...
 ]
 
@@ -494,6 +545,28 @@ EXTRACT ALL TRANSACTIONS:"""
 
         return self._extract_with_prompt(transaction_text, model, focused_prompt)
     
+    def _fix_json_formatting(self, json_str: str) -> str:
+        """Fix common JSON formatting issues from LLM responses"""
+        # Fix unquoted numeric amounts with commas (e.g., 20,291.00 -> "20291.00")
+        # This regex finds patterns like: "amount": 20,291.00 and converts to "amount": "20291.00"
+        json_str = re.sub(r'"amount":\s*(\d{1,3}(?:,\d{3})*\.\d{2})', 
+                         lambda m: f'"amount": "{m.group(1).replace(",", "")}"', 
+                         json_str)
+        
+        # Fix other numeric fields that might have commas
+        for field in ['credit_limit', 'balance', 'opening_balance', 'closing_balance']:
+            json_str = re.sub(rf'"{field}":\s*(\d{{1,3}}(?:,\d{{3}})*\.\d{{2}})', 
+                             lambda m: f'"{field}": "{m.group(1).replace(",", "")}"', 
+                             json_str)
+        
+        # Fix standalone numeric values with commas in arrays (fallback)
+        json_str = re.sub(r':\s*(\d{1,3}(?:,\d{3})*\.\d{2})(?=\s*[,\}\]])', 
+                         lambda m: f': "{m.group(1).replace(",", "")}"', 
+                         json_str)
+        
+        print(f"DEBUG: Fixed JSON formatting, length: {len(json_str)}")
+        return json_str
+
     def _extract_with_prompt(self, text: str, model: str, prompt: str) -> Optional[List[TransactionData]]:
         """Extract transactions with a given prompt"""
         try:
@@ -509,10 +582,11 @@ EXTRACT ALL TRANSACTIONS:"""
                     'content': prompt
                 }],
                 options={
-                    'temperature': 0.2,  # Slightly higher for better extraction
-                    'top_p': 0.9,
-                    'num_predict': 8000,  # Increased for more complete extraction
-                    'num_ctx': 8192,     # Increased context window for longer PDFs
+                    'temperature': 0.1,  # Lower for more consistent JSON output
+                    'top_p': 0.8,
+                    'num_predict': 16000,  # Significantly increased for complete extraction
+                    'num_ctx': 32768,     # Much larger context window for full PDFs
+                    'stop': [],  # Don't stop generation early
                 }
             )
             
@@ -530,6 +604,9 @@ EXTRACT ALL TRANSACTIONS:"""
                 print("DEBUG: Using full response as JSON")
             
             print(f"DEBUG: JSON to parse: {json_str[:500]}...")
+            
+            # Fix common JSON formatting issues before parsing
+            json_str = self._fix_json_formatting(json_str)
             
             # Parse JSON
             try:
