@@ -21,6 +21,7 @@ import {
   Person,
   Category,
   Upload,
+  Backup,
   AccountCircle,
   Logout,
   Analytics,
@@ -46,6 +47,7 @@ const menuItems = [
   { text: 'Learning', icon: <Psychology />, path: '/learning' },
   { text: 'Advanced Insights', icon: <Insights />, path: '/insights' },
   { text: 'Import', icon: <Upload />, path: '/import' },
+  { text: 'Backup', icon: <Backup />, path: '/backup' },
   { text: 'Payees', icon: <Person />, path: '/payees' },
   { text: 'Categories', icon: <Category />, path: '/categories' },
 ];

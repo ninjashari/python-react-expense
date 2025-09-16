@@ -41,6 +41,14 @@ export interface Category {
   updated_at?: string;
 }
 
+export interface TransactionSplit {
+  id?: string;
+  category_id: string;
+  amount: number;
+  description?: string;
+  category?: Category;
+}
+
 export interface Transaction {
   id: string;
   date: string;
@@ -59,6 +67,8 @@ export interface Transaction {
   to_account?: Account;
   payee?: Payee;
   category?: Category;
+  splits?: TransactionSplit[];
+  is_split?: boolean;
 }
 
 export interface CreateAccountDto {

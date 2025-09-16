@@ -36,3 +36,4 @@ class Transaction(Base):
     to_account = relationship("Account", foreign_keys=[to_account_id])
     payee = relationship("Payee")
     category = relationship("Category")
+    splits = relationship("TransactionSplit", back_populates="transaction", cascade="all, delete-orphan")

@@ -21,7 +21,7 @@ import {
   Alert,
   Tooltip,
 } from '@mui/material';
-import { Add, Edit, Delete, Palette, CleaningServices, Check, Close } from '@mui/icons-material';
+import { Add, Edit, Delete, Palette, CleaningServices, Check, Close, FileDownload, FileUpload } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { categoriesApi } from '../services/api';
@@ -41,6 +41,8 @@ const Categories: React.FC = () => {
   const [reassignResult, setReassignResult] = useState<any>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteResult, setDeleteResult] = useState<any>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, formState: { errors } } = useForm<CreateCategoryDto>({
@@ -216,6 +218,68 @@ const Categories: React.FC = () => {
     setConfirmDialogOpen(true);
   };
 
+  const handleExport = async () => {
+    if (!categories || categories.length === 0) {
+      return;
+    }
+
+    try {
+      const response = await categoriesApi.exportToExcel();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'categories_export.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+    } catch (error: any) {
+      console.error('Export failed:', error);
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    if (!file) return;
+
+    setIsImporting(true);
+    setImportResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const result = await categoriesApi.import(formData);
+      setImportResult(result);
+      
+      // Refresh categories to show new data
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      
+    } catch (error: any) {
+      setImportResult({
+        error: true,
+        message: error.response?.data?.detail || 'Failed to import categories'
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleImport = () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.xlsx,.xls,.csv';
+    fileInput.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        handleImportFile(file);
+      }
+    };
+    fileInput.click();
+  };
+
   if (isLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" height="400px">
@@ -229,6 +293,28 @@ const Categories: React.FC = () => {
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">Categories</Typography>
         <Box display="flex" gap={1}>
+          <Tooltip title="Import categories from Excel or CSV file">
+            <Button
+              variant="outlined"
+              startIcon={<FileUpload />}
+              onClick={handleImport}
+              disabled={isImporting}
+              color="primary"
+            >
+              {isImporting ? 'Importing...' : 'Import'}
+            </Button>
+          </Tooltip>
+          <Tooltip title="Export all categories to Excel file">
+            <Button
+              variant="outlined"
+              startIcon={<FileDownload />}
+              onClick={handleExport}
+              disabled={!categories || categories.length === 0}
+              color="primary"
+            >
+              Export
+            </Button>
+          </Tooltip>
           <Tooltip title="Delete all categories that are not referenced by any transactions">
             <Button
               variant="outlined"
@@ -319,6 +405,53 @@ const Categories: React.FC = () => {
               <Typography variant="body2" sx={{ mt: 1 }}>
                 Each color is positioned for optimal visual distinction and accessibility.
               </Typography>
+            </Box>
+          )}
+        </Alert>
+      )}
+
+      {/* Import Results */}
+      {importResult && (
+        <Alert 
+          severity={importResult.error ? 'error' : 'success'}
+          onClose={() => setImportResult(null)}
+          sx={{ mb: 2 }}
+        >
+          {importResult.error ? (
+            importResult.message
+          ) : (
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                {importResult.message}
+              </Typography>
+              <Typography variant="body2">
+                • Total rows processed: {importResult.total_rows}
+              </Typography>
+              <Typography variant="body2">
+                • New categories created: {importResult.created_count}
+              </Typography>
+              <Typography variant="body2">
+                • Existing categories updated: {importResult.updated_count}
+              </Typography>
+              <Typography variant="body2">
+                • Categories skipped (no changes): {importResult.skipped_count}
+              </Typography>
+              {importResult.error_count > 0 && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="body2" color="error">
+                    • Errors encountered: {importResult.error_count}
+                  </Typography>
+                  {importResult.errors && importResult.errors.length > 0 && (
+                    <Box sx={{ ml: 2 }}>
+                      {importResult.errors.map((error: string, index: number) => (
+                        <Typography key={index} variant="body2" color="error">
+                          {error}
+                        </Typography>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              )}
             </Box>
           )}
         </Alert>

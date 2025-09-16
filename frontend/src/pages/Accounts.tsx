@@ -18,7 +18,7 @@ import {
   Backdrop,
   Alert,
 } from '@mui/material';
-import { Add, Edit, Delete, Refresh, Calculate } from '@mui/icons-material';
+import { Add, Edit, Delete, Refresh, Calculate, FileDownload, FileUpload } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { accountsApi, transactionsApi } from '../services/api';
@@ -43,6 +43,8 @@ const Accounts: React.FC = () => {
   const [accountToRecalculate, setAccountToRecalculate] = useState<Account | null>(null);
   const [recalculateResult, setRecalculateResult] = useState<any>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
   const queryClient = useQueryClient();
 
   // Helper function to calculate credit utilization percentage
@@ -240,6 +242,68 @@ const Accounts: React.FC = () => {
     }
   };
 
+  const handleExport = async () => {
+    if (!accounts || accounts.length === 0) {
+      return;
+    }
+
+    try {
+      const response = await accountsApi.exportToExcel();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'accounts_export.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+    } catch (error: any) {
+      console.error('Export failed:', error);
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    if (!file) return;
+
+    setIsImporting(true);
+    setImportResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const result = await accountsApi.import(formData);
+      setImportResult(result);
+      
+      // Refresh accounts to show new data
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      
+    } catch (error: any) {
+      setImportResult({
+        error: true,
+        message: error.response?.data?.detail || 'Failed to import accounts'
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleImport = () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.xlsx,.xls,.csv';
+    fileInput.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        handleImportFile(file);
+      }
+    };
+    fileInput.click();
+  };
+
   if (isLoading) {
     return (
       <Box>
@@ -302,6 +366,24 @@ const Accounts: React.FC = () => {
         <Box display="flex" gap={1}>
           <Button
             variant="outlined"
+            startIcon={<FileUpload />}
+            onClick={handleImport}
+            disabled={isImporting || isRecalculating}
+            color="primary"
+          >
+            {isImporting ? 'Importing...' : 'Import'}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileDownload />}
+            onClick={handleExport}
+            disabled={!accounts || accounts.length === 0 || isRecalculating}
+            color="primary"
+          >
+            Export
+          </Button>
+          <Button
+            variant="outlined"
             startIcon={<Refresh />}
             onClick={handleRefresh}
             disabled={isRecalculating || isRefreshing}
@@ -318,6 +400,53 @@ const Accounts: React.FC = () => {
           </Button>
         </Box>
       </Box>
+
+      {/* Import Results */}
+      {importResult && (
+        <Alert 
+          severity={importResult.error ? 'error' : 'success'}
+          onClose={() => setImportResult(null)}
+          sx={{ mb: 2 }}
+        >
+          {importResult.error ? (
+            importResult.message
+          ) : (
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                {importResult.message}
+              </Typography>
+              <Typography variant="body2">
+                • Total rows processed: {importResult.total_rows}
+              </Typography>
+              <Typography variant="body2">
+                • New accounts created: {importResult.created_count}
+              </Typography>
+              <Typography variant="body2">
+                • Existing accounts updated: {importResult.updated_count}
+              </Typography>
+              <Typography variant="body2">
+                • Accounts skipped (no changes): {importResult.skipped_count}
+              </Typography>
+              {importResult.error_count > 0 && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="body2" color="error">
+                    • Errors encountered: {importResult.error_count}
+                  </Typography>
+                  {importResult.errors && importResult.errors.length > 0 && (
+                    <Box sx={{ ml: 2 }}>
+                      {importResult.errors.map((error: string, index: number) => (
+                        <Typography key={index} variant="body2" color="error">
+                          {error}
+                        </Typography>
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              )}
+            </Box>
+          )}
+        </Alert>
+      )}
 
       <Grid container spacing={3}>
         {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (

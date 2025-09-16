@@ -32,7 +32,7 @@ import {
   FormControlLabel,
   Alert,
 } from '@mui/material';
-import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate } from '@mui/icons-material';
+import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate, AutoFixHigh, CallSplit } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
@@ -46,6 +46,7 @@ import SmartAutocomplete from '../components/SmartAutocomplete';
 import InlineTextEdit from '../components/InlineTextEdit';
 import InlineDateEdit from '../components/InlineDateEdit';
 import InlineToggleEdit from '../components/InlineToggleEdit';
+import SplitTransactionDialog from '../components/SplitTransactionDialog';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
 
@@ -136,9 +137,11 @@ type SortDirection = 'asc' | 'desc';
 
 const Transactions: React.FC = () => {
   usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
-  const { showError } = useToast();
+  const { showError, showSuccess } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  const [splitTransaction, setSplitTransaction] = useState<Transaction | null>(null);
   const defaultFilters: TransactionFilters = {
     page: 1,
     size: 50,
@@ -182,7 +185,7 @@ const Transactions: React.FC = () => {
       type: 100,
       amount: 120,
       balance: 120,
-      actions: 100
+      actions: 130
     };
   });
   const [isResizing, setIsResizing] = useState(false);
@@ -192,6 +195,8 @@ const Transactions: React.FC = () => {
   const [bulkPayeeDialogOpen, setBulkPayeeDialogOpen] = useState(false);
   const [selectedPayeeForBulk, setSelectedPayeeForBulk] = useState<string>('');
   const [bulkUpdateDialogOpen, setBulkUpdateDialogOpen] = useState(false);
+  const [bulkReassignDialogOpen, setBulkReassignDialogOpen] = useState(false);
+  const [reassignLoading, setReassignLoading] = useState(false);
   // sortState is now managed in persistent filters
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<string>('');
@@ -412,6 +417,22 @@ const Transactions: React.FC = () => {
     setFormDescription('');
     setFormAmount(undefined);
     reset();
+  };
+
+  const handleOpenSplitDialog = (transaction: Transaction) => {
+    setSplitTransaction(transaction);
+    setSplitDialogOpen(true);
+  };
+
+  const handleCloseSplitDialog = () => {
+    setSplitDialogOpen(false);
+    setSplitTransaction(null);
+  };
+
+  const handleSplitSuccess = () => {
+    // Refresh transactions to show updated data
+    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    showSuccess('Transaction split updated successfully');
   };
 
   const onSubmit = (data: CreateTransactionDto) => {
@@ -705,6 +726,40 @@ const Transactions: React.FC = () => {
     setSelectedPayeeForBulk('');
   };
 
+  const handleBulkReassign = async () => {
+    if (selectedTransactions.size === 0) {
+      showError('No transactions selected');
+      return;
+    }
+
+    setReassignLoading(true);
+    try {
+      const selectedIds = Array.from(selectedTransactions);
+      const response = await transactionsApi.bulkReassign(selectedIds);
+      
+      // Show success message with details
+      showSuccess(
+        `Successfully reassigned ${response.payee_updates + response.category_updates} fields across ${response.total_transactions} transactions. ` +
+        `Success rate: ${response.success_rate}`
+      );
+
+      // Refresh the data
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      
+      // Clear selection and close dialog
+      setSelectedTransactions(new Set());
+      setBulkReassignDialogOpen(false);
+      
+    } catch (error) {
+      showError('Failed to reassign transactions. Please try again.');
+    } finally {
+      setReassignLoading(false);
+    }
+  };
+
+  const handleCancelBulkReassign = () => {
+    setBulkReassignDialogOpen(false);
+  };
 
   // Helper function to get the last day of a month
   const getLastDayOfMonth = (year: number, month: number): number => {
@@ -1019,6 +1074,15 @@ const Transactions: React.FC = () => {
                 sx={{ ml: 2 }}
               >
                 Delete Selected ({selectedTransactions.size})
+              </Button>
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={<AutoFixHigh />}
+                onClick={() => setBulkReassignDialogOpen(true)}
+                sx={{ ml: 2 }}
+              >
+                AI Reassign ({selectedTransactions.size})
               </Button>
             </>
           )}
@@ -1457,22 +1521,39 @@ const Transactions: React.FC = () => {
                   />
                 </TableCell>
                 <TableCell sx={{ width: columnWidths.category, minWidth: columnWidths.category, maxWidth: columnWidths.category }}>
-                  <SmartInlineEdit
-                    transactionId={transaction.id}
-                    transactionDescription={transaction.description || ''}
-                    transactionAmount={Number(transaction.amount)}
-                    accountType={transaction.account?.type}
-                    fieldType="category"
-                    currentValue={categories?.find(c => c.id === transaction.category_id) || null}
-                    allOptions={categories || []}
-                    onSelectionChange={async (newValue) => {
-                      await handleInlineCategoryChange(transaction.id, newValue?.id || null);
-                    }}
-                    onCreateNew={handleCreateCategory}
-                    isSaving={savingTransactions.has(transaction.id)}
-                    placeholder="Select category..."
-                    emptyDisplay="-"
-                  />
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box flex={1}>
+                      <SmartInlineEdit
+                        transactionId={transaction.id}
+                        transactionDescription={transaction.description || ''}
+                        transactionAmount={Number(transaction.amount)}
+                        accountType={transaction.account?.type}
+                        fieldType="category"
+                        currentValue={categories?.find(c => c.id === transaction.category_id) || null}
+                        allOptions={categories || []}
+                        onSelectionChange={async (newValue) => {
+                          await handleInlineCategoryChange(transaction.id, newValue?.id || null);
+                        }}
+                        onCreateNew={handleCreateCategory}
+                        isSaving={savingTransactions.has(transaction.id)}
+                        placeholder="Select category..."
+                        emptyDisplay="-"
+                      />
+                    </Box>
+                    {transaction.is_split && (
+                      <Chip
+                        label="Split"
+                        size="small"
+                        variant="outlined"
+                        color="info"
+                        sx={{ 
+                          fontSize: '0.6rem', 
+                          height: '18px',
+                          '& .MuiChip-label': { px: 0.5 }
+                        }}
+                      />
+                    )}
+                  </Box>
                 </TableCell>
                 <TableCell sx={{ width: columnWidths.type, minWidth: columnWidths.type, maxWidth: columnWidths.type }}>
                   <InlineToggleEdit
@@ -1545,6 +1626,18 @@ const Transactions: React.FC = () => {
                   )}
                 </TableCell>
                 <TableCell align="center" sx={{ width: columnWidths.actions, minWidth: columnWidths.actions, maxWidth: columnWidths.actions }}>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleOpenSplitDialog(transaction)}
+                    color={transaction.is_split ? "secondary" : "primary"}
+                    title={transaction.is_split ? "Edit Split Transaction" : "Split Transaction"}
+                    sx={transaction.is_split ? { 
+                      backgroundColor: 'action.selected',
+                      '&:hover': { backgroundColor: 'action.hover' }
+                    } : {}}
+                  >
+                    <CallSplit />
+                  </IconButton>
                   <IconButton
                     size="small"
                     onClick={() => handleOpenDialog(transaction)}
@@ -2272,6 +2365,84 @@ const Transactions: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Bulk AI Reassign Confirmation Dialog */}
+      <Dialog
+        open={bulkReassignDialogOpen}
+        onClose={handleCancelBulkReassign}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>AI Reassign Selected Transactions</DialogTitle>
+        <DialogContent>
+          <Typography gutterBottom>
+            This will use the current AI learning model to reassign payees and categories for the selected {selectedTransactions.size} transaction{selectedTransactions.size > 1 ? 's' : ''}:
+          </Typography>
+          
+          {/* Show preview of selected transactions */}
+          {transactionData?.items && (
+            <Box sx={{ mt: 2, mb: 3, maxHeight: 200, overflow: 'auto' }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Selected Transactions:
+              </Typography>
+              {transactionData.items
+                .filter(t => selectedTransactions.has(t.id))
+                .slice(0, 5) // Show only first 5 for preview
+                .map((transaction) => (
+                  <Box 
+                    key={transaction.id} 
+                    sx={{ 
+                      p: 1, 
+                      mb: 1, 
+                      backgroundColor: 'grey.50', 
+                      borderRadius: 1,
+                      display: 'flex',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="body2">
+                        {transaction.description || 'No description'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Current: {categories?.find(c => c.id === transaction.category_id)?.name || 'No category'} | {payees?.find(p => p.id === transaction.payee_id)?.name || 'No payee'}
+                      </Typography>
+                    </Box>
+                    <Typography variant="body2" color={transaction.type === 'income' ? 'success.main' : 'error.main'}>
+                      {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                    </Typography>
+                  </Box>
+                ))}
+              {selectedTransactions.size > 5 && (
+                <Typography variant="caption" color="text.secondary">
+                  ... and {selectedTransactions.size - 5} more transactions
+                </Typography>
+              )}
+            </Box>
+          )}
+
+          <Alert severity="info" sx={{ mt: 2 }}>
+            The AI will analyze each transaction's description and suggest the most likely payee and category based on your historical data. Only suggestions with confidence ≥ 30% will be applied.
+          </Alert>
+          
+          <Alert severity="warning" sx={{ mt: 1 }}>
+            <strong>This will overwrite existing assignments.</strong> The system will use the latest AI learning model to suggest new payees and categories, potentially replacing what's currently assigned.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelBulkReassign} disabled={reassignLoading}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleBulkReassign} 
+            color="primary" 
+            variant="contained"
+            disabled={reassignLoading}
+            startIcon={reassignLoading ? <CircularProgress size={18} /> : <AutoFixHigh />}
+          >
+            {reassignLoading ? 'Reassigning...' : `AI Reassign ${selectedTransactions.size} Transaction${selectedTransactions.size > 1 ? 's' : ''}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Clean Descriptions Confirmation Dialog */}
       <Dialog open={cleanupDialogOpen} onClose={() => setCleanupDialogOpen(false)}>
@@ -2335,6 +2506,16 @@ const Transactions: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Split Transaction Dialog */}
+      {splitTransaction && (
+        <SplitTransactionDialog
+          open={splitDialogOpen}
+          onClose={handleCloseSplitDialog}
+          transaction={splitTransaction}
+          onSuccess={handleSplitSuccess}
+        />
+      )}
     </Box>
   );
 };

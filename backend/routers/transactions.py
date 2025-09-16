@@ -11,6 +11,7 @@ import pandas as pd
 import io
 from database import get_db
 from models.transactions import Transaction
+from models.transaction_splits import TransactionSplit
 from models.accounts import Account
 from models.users import User
 from models.learning import UserSelectionHistory
@@ -21,6 +22,11 @@ from schemas.transactions import (
     PaginatedTransactionsResponse,
     TransactionSummary,
     TransactionBulkUpdate
+)
+from schemas.transaction_splits import (
+    SplitTransactionCreate,
+    SplitTransactionUpdate,
+    TransactionSplitResponse
 )
 from utils.auth import get_current_active_user
 from services.learning_service import TransactionLearningService
@@ -1224,13 +1230,16 @@ async def bulk_reassign_transactions(
     for transaction in transactions:
         try:
             # Get AI suggestions for this transaction
-            suggestions = TransactionLearningService.suggest_transaction_fields(
-                db=db,
-                user_id=current_user.id,
-                transaction_description=transaction.description,
-                transaction_amount=float(transaction.amount) if transaction.amount else 0.0,
-                account_type=transaction.account.type if transaction.account else None
-            )
+            try:
+                suggestions = TransactionLearningService.get_suggestions_for_description(
+                    db=db,
+                    user_id=current_user.id,
+                    description=transaction.description,
+                    amount=float(transaction.amount) if transaction.amount else 0.0,
+                    account_type=transaction.account.type if transaction.account else None
+                )
+            except Exception as suggestion_error:
+                suggestions = {}
             
             original_payee = transaction.payee.name if transaction.payee else None
             original_category = transaction.category.name if transaction.category else None
@@ -1249,7 +1258,7 @@ async def bulk_reassign_transactions(
             # Apply payee suggestion with highest confidence
             if suggestions.get("payee_suggestions"):
                 best_payee = max(suggestions["payee_suggestions"], key=lambda x: x.get("confidence", 0))
-                if best_payee.get("confidence", 0) >= 0.3:  # Minimum confidence threshold
+                if best_payee.get("confidence", 0) >= 0.5:
                     payee = db.query(Payee).filter(Payee.id == best_payee["id"]).first()
                     if payee:
                         transaction.payee_id = payee.id
@@ -1276,7 +1285,7 @@ async def bulk_reassign_transactions(
             # Apply category suggestion with highest confidence
             if suggestions.get("category_suggestions"):
                 best_category = max(suggestions["category_suggestions"], key=lambda x: x.get("confidence", 0))
-                if best_category.get("confidence", 0) >= 0.3:  # Minimum confidence threshold
+                if best_category.get("confidence", 0) >= 0.5:
                     category = db.query(Category).filter(Category.id == best_category["id"]).first()
                     if category:
                         transaction.category_id = category.id
@@ -1320,4 +1329,258 @@ async def bulk_reassign_transactions(
         "errors": errors,
         "success_rate": f"{((len(transactions) - len(errors)) / len(transactions) * 100):.1f}%" if transactions else "0%"
     }
+
+@router.post("/{transaction_id}/split")
+def split_transaction(
+    transaction_id: uuid.UUID,
+    split_data: SplitTransactionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Split a transaction into multiple categories with different amounts"""
+    try:
+        # Get the transaction
+        transaction = db.query(Transaction).filter(
+            Transaction.id == transaction_id,
+            Transaction.user_id == current_user.id
+        ).first()
+        
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        
+        # Check if transaction is already split
+        existing_splits = db.query(TransactionSplit).filter(
+            TransactionSplit.transaction_id == transaction_id
+        ).all()
+        
+        if existing_splits:
+            raise HTTPException(status_code=400, detail="Transaction is already split. Use update endpoint to modify splits.")
+        
+        # Validate that split amounts add up to transaction amount
+        total_split_amount = sum(split.amount for split in split_data.splits)
+        if abs(total_split_amount - transaction.amount) > Decimal('0.01'):  # Allow for small rounding differences
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Split amounts (${total_split_amount}) must equal transaction amount (${transaction.amount})"
+            )
+        
+        # Create the splits
+        splits = []
+        for split_item in split_data.splits:
+            split = TransactionSplit(
+                transaction_id=transaction_id,
+                category_id=split_item.category_id,
+                amount=split_item.amount,
+                description=split_item.description
+            )
+            db.add(split)
+            splits.append(split)
+        
+        # Clear the original transaction's category (since it's now split)
+        transaction.category_id = None
+        
+        db.commit()
+        
+        # Refresh splits to get relationships
+        for split in splits:
+            db.refresh(split)
+        
+        return {
+            "message": f"Transaction split into {len(splits)} categories successfully",
+            "transaction_id": str(transaction_id),
+            "splits": [
+                {
+                    "id": str(split.id),
+                    "category_id": str(split.category_id),
+                    "amount": float(split.amount),
+                    "description": split.description,
+                    "category": {
+                        "id": str(split.category.id),
+                        "name": split.category.name,
+                        "color": split.category.color
+                    } if split.category else None
+                } for split in splits
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to split transaction: {str(e)}")
+
+@router.put("/{transaction_id}/split")
+def update_transaction_splits(
+    transaction_id: uuid.UUID,
+    split_data: SplitTransactionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update the splits of an already split transaction"""
+    try:
+        # Get the transaction
+        transaction = db.query(Transaction).filter(
+            Transaction.id == transaction_id,
+            Transaction.user_id == current_user.id
+        ).first()
+        
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        
+        # Check if transaction has splits
+        existing_splits = db.query(TransactionSplit).filter(
+            TransactionSplit.transaction_id == transaction_id
+        ).all()
+        
+        if not existing_splits:
+            raise HTTPException(status_code=400, detail="Transaction is not split. Use split endpoint to create splits.")
+        
+        # Validate that split amounts add up to transaction amount
+        total_split_amount = sum(split.amount for split in split_data.splits)
+        if abs(total_split_amount - transaction.amount) > Decimal('0.01'):  # Allow for small rounding differences
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Split amounts (${total_split_amount}) must equal transaction amount (${transaction.amount})"
+            )
+        
+        # Delete existing splits
+        for split in existing_splits:
+            db.delete(split)
+        
+        # Create new splits
+        splits = []
+        for split_item in split_data.splits:
+            split = TransactionSplit(
+                transaction_id=transaction_id,
+                category_id=split_item.category_id,
+                amount=split_item.amount,
+                description=split_item.description
+            )
+            db.add(split)
+            splits.append(split)
+        
+        db.commit()
+        
+        # Refresh splits to get relationships
+        for split in splits:
+            db.refresh(split)
+        
+        return {
+            "message": f"Transaction splits updated successfully",
+            "transaction_id": str(transaction_id),
+            "splits": [
+                {
+                    "id": str(split.id),
+                    "category_id": str(split.category_id),
+                    "amount": float(split.amount),
+                    "description": split.description,
+                    "category": {
+                        "id": str(split.category.id),
+                        "name": split.category.name,
+                        "color": split.category.color
+                    } if split.category else None
+                } for split in splits
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update transaction splits: {str(e)}")
+
+@router.delete("/{transaction_id}/split")
+def unsplit_transaction(
+    transaction_id: uuid.UUID,
+    category_id: Optional[uuid.UUID] = Query(None, description="Category to assign to the unsplit transaction"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Remove splits from a transaction and optionally assign a single category"""
+    try:
+        # Get the transaction
+        transaction = db.query(Transaction).filter(
+            Transaction.id == transaction_id,
+            Transaction.user_id == current_user.id
+        ).first()
+        
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        
+        # Get existing splits
+        existing_splits = db.query(TransactionSplit).filter(
+            TransactionSplit.transaction_id == transaction_id
+        ).all()
+        
+        if not existing_splits:
+            raise HTTPException(status_code=400, detail="Transaction is not split")
+        
+        # Delete all splits
+        for split in existing_splits:
+            db.delete(split)
+        
+        # Set the transaction category if provided
+        if category_id:
+            transaction.category_id = category_id
+        
+        db.commit()
+        
+        return {
+            "message": "Transaction splits removed successfully",
+            "transaction_id": str(transaction_id),
+            "category_id": str(category_id) if category_id else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to unsplit transaction: {str(e)}")
+
+@router.get("/{transaction_id}/splits")
+def get_transaction_splits(
+    transaction_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get the splits for a transaction"""
+    try:
+        # Verify transaction ownership
+        transaction = db.query(Transaction).filter(
+            Transaction.id == transaction_id,
+            Transaction.user_id == current_user.id
+        ).first()
+        
+        if not transaction:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+        
+        # Get splits with categories
+        splits = db.query(TransactionSplit).options(
+            joinedload(TransactionSplit.category)
+        ).filter(
+            TransactionSplit.transaction_id == transaction_id
+        ).all()
+        
+        return {
+            "transaction_id": str(transaction_id),
+            "is_split": len(splits) > 0,
+            "splits": [
+                {
+                    "id": str(split.id),
+                    "category_id": str(split.category_id),
+                    "amount": float(split.amount),
+                    "description": split.description,
+                    "category": {
+                        "id": str(split.category.id),
+                        "name": split.category.name,
+                        "color": split.category.color
+                    } if split.category else None
+                } for split in splits
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get transaction splits: {str(e)}")
 

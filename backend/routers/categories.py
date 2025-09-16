@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
+import pandas as pd
+import io
+import json
 from database import get_db
 from models.categories import Category
 from models.users import User
@@ -268,3 +272,173 @@ def reassign_category_colors(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to reassign category colors: {str(e)}")
+
+@router.get("/export")
+def export_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Export all categories to Excel/CSV format"""
+    try:
+        # Get all categories for the current user
+        categories = db.query(Category).filter(
+            Category.user_id == current_user.id
+        ).order_by(Category.name).all()
+        
+        if not categories:
+            raise HTTPException(status_code=404, detail="No categories found to export")
+        
+        # Convert to DataFrame
+        data = []
+        for category in categories:
+            data.append({
+                'Name': category.name,
+                'Color': category.color,
+                'Created At': category.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'Slug': category.slug
+            })
+        
+        df = pd.DataFrame(data)
+        
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Categories')
+        
+        output.seek(0)
+        
+        # Return as streaming response
+        return StreamingResponse(
+            io.BytesIO(output.getvalue()),
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={"Content-Disposition": "attachment; filename=categories_export.xlsx"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export categories: {str(e)}")
+
+@router.post("/import")
+def import_categories(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Import categories from Excel/CSV file"""
+    try:
+        # Validate file type
+        if not file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid file format. Only Excel (.xlsx, .xls) and CSV files are supported."
+            )
+        
+        # Read file content
+        content = file.file.read()
+        
+        try:
+            # Try to read as Excel first, then CSV
+            if file.filename.lower().endswith('.csv'):
+                df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+            else:
+                df = pd.read_excel(io.BytesIO(content))
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to read file: {str(e)}. Please ensure the file is not corrupted."
+            )
+        
+        # Validate required columns
+        required_columns = ['Name']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing required columns: {', '.join(missing_columns)}. Required: {', '.join(required_columns)}"
+            )
+        
+        # Clean and validate data
+        df = df.dropna(subset=['Name'])  # Remove rows with empty names
+        df['Name'] = df['Name'].astype(str).str.strip()  # Clean names
+        df = df[df['Name'] != '']  # Remove empty names after cleaning
+        
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid category data found in the file"
+            )
+        
+        # Track results
+        created_count = 0
+        updated_count = 0
+        skipped_count = 0
+        errors = []
+        
+        for index, row in df.iterrows():
+            try:
+                name = row['Name']
+                color = row.get('Color', None)
+                
+                # Check if category already exists (case-insensitive)
+                existing_category = db.query(Category).filter(
+                    Category.name.ilike(name),
+                    Category.user_id == current_user.id
+                ).first()
+                
+                if existing_category:
+                    # Update existing category if color is provided and different
+                    if color and color != existing_category.color:
+                        existing_category.color = color
+                        updated_count += 1
+                    else:
+                        skipped_count += 1
+                else:
+                    # Create new category
+                    # Generate unique slug from name
+                    base_slug = create_slug(name)
+                    slug = base_slug
+                    counter = 1
+                    
+                    # Ensure slug is unique for this user
+                    while db.query(Category).filter(
+                        Category.slug == slug,
+                        Category.user_id == current_user.id
+                    ).first():
+                        slug = f"{base_slug}-{counter}"
+                        counter += 1
+                    
+                    # Generate color if not provided
+                    final_color = color or generate_unique_color(db, name, str(current_user.id), "categories")
+                    
+                    new_category = Category(
+                        name=name,
+                        slug=slug,
+                        color=final_color,
+                        user_id=current_user.id
+                    )
+                    db.add(new_category)
+                    created_count += 1
+                    
+            except Exception as row_error:
+                errors.append(f"Row {index + 2}: {str(row_error)}")
+                continue
+        
+        # Commit all changes
+        db.commit()
+        
+        return {
+            "message": f"Import completed successfully",
+            "total_rows": len(df),
+            "created_count": created_count,
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+            "error_count": len(errors),
+            "errors": errors[:10]  # Limit to first 10 errors
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to import categories: {str(e)}")
