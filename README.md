@@ -486,3 +486,121 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 <div align="center">
   Made with ❤️ by developers, for financial clarity
 </div>
+
+<!-- SCREENSHOTS START -->
+## 📸 Application Screenshots
+
+<div align="center">
+  <em>Experience the intuitive interface of our comprehensive expense management solution</em>
+</div>
+
+<br>
+
+### 🏠 Dashboard Overview
+The main dashboard provides a comprehensive view of your financial health with account summaries, recent transactions, and spending insights.
+
+<details>
+<summary>View Dashboard Screenshot</summary>
+
+![Dashboard](./screenshots/dashboard.png)
+
+</details>
+
+### 💳 Account Management
+Manage all your financial accounts including checking, savings, credit cards, and investment accounts with real-time balance tracking.
+
+<details>
+<summary>View Accounts Screenshot</summary>
+
+![Accounts](./screenshots/accounts.png)
+
+</details>
+
+### 📊 Transaction History
+Track and categorize all your financial transactions with advanced filtering, search, and bulk editing capabilities.
+
+<details>
+<summary>View Transactions Screenshot</summary>
+
+![Transactions](./screenshots/transactions.png)
+
+</details>
+
+### 📈 Reports & Analytics
+Generate detailed financial reports with customizable filters and date ranges to understand your spending patterns.
+
+<details>
+<summary>View Reports Screenshot</summary>
+
+![Reports](./screenshots/reports.png)
+
+</details>
+
+### 🏪 Payee Management
+Organize and manage all your payees with color coding and automatic transaction categorization.
+
+<details>
+<summary>View Payees Screenshot</summary>
+
+![Payees](./screenshots/payees.png)
+
+</details>
+
+### 🏷️ Category Organization
+Create and manage expense categories with visual color coding for better transaction organization.
+
+<details>
+<summary>View Categories Screenshot</summary>
+
+![Categories](./screenshots/categories.png)
+
+</details>
+
+### 📥 Data Import
+Import transactions from various sources including CSV, Excel, and PDF files with intelligent column mapping.
+
+<details>
+<summary>View Import Screenshot</summary>
+
+![Import Data](./screenshots/import.png)
+
+</details>
+
+### 💾 Backup & Export
+Export your financial data in multiple formats and manage backups to keep your information secure.
+
+<details>
+<summary>View Backup Screenshot</summary>
+
+![Backup & Export](./screenshots/backup.png)
+
+</details>
+
+### 🧠 Learning Dashboard
+AI-powered insights help you learn from your spending patterns and improve your financial decisions.
+
+<details>
+<summary>View Learning Screenshot</summary>
+
+![Learning Dashboard](./screenshots/learning.png)
+
+</details>
+
+### 🔍 Advanced Insights
+Deep analytics and trends provide detailed insights into your financial behavior and spending patterns.
+
+<details>
+<summary>View Insights Screenshot</summary>
+
+![Advanced Insights](./screenshots/insights.png)
+
+</details>
+
+---
+
+<div align="center">
+  <strong>💡 Tip:</strong> All screenshots are automatically generated using our Puppeteer automation script.<br>
+  Run <code>npm run screenshot</code> to capture fresh screenshots with real data.
+</div>
+
+<!-- SCREENSHOTS END -->

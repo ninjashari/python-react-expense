@@ -32,7 +32,7 @@ import {
   FormControlLabel,
   Alert,
 } from '@mui/material';
-import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate, AutoFixHigh, CallSplit } from '@mui/icons-material';
+import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate, AutoFixHigh } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
@@ -46,7 +46,6 @@ import SmartAutocomplete from '../components/SmartAutocomplete';
 import InlineTextEdit from '../components/InlineTextEdit';
 import InlineDateEdit from '../components/InlineDateEdit';
 import InlineToggleEdit from '../components/InlineToggleEdit';
-import SplitTransactionDialog from '../components/SplitTransactionDialog';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
 
@@ -140,8 +139,6 @@ const Transactions: React.FC = () => {
   const { showError, showSuccess } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
-  const [splitTransaction, setSplitTransaction] = useState<Transaction | null>(null);
   const defaultFilters: TransactionFilters = {
     page: 1,
     size: 50,
@@ -419,21 +416,6 @@ const Transactions: React.FC = () => {
     reset();
   };
 
-  const handleOpenSplitDialog = (transaction: Transaction) => {
-    setSplitTransaction(transaction);
-    setSplitDialogOpen(true);
-  };
-
-  const handleCloseSplitDialog = () => {
-    setSplitDialogOpen(false);
-    setSplitTransaction(null);
-  };
-
-  const handleSplitSuccess = () => {
-    // Refresh transactions to show updated data
-    queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    showSuccess('Transaction split updated successfully');
-  };
 
   const onSubmit = (data: CreateTransactionDto) => {
     const submitData = {
@@ -1540,19 +1522,6 @@ const Transactions: React.FC = () => {
                         emptyDisplay="-"
                       />
                     </Box>
-                    {transaction.is_split && (
-                      <Chip
-                        label="Split"
-                        size="small"
-                        variant="outlined"
-                        color="info"
-                        sx={{ 
-                          fontSize: '0.6rem', 
-                          height: '18px',
-                          '& .MuiChip-label': { px: 0.5 }
-                        }}
-                      />
-                    )}
                   </Box>
                 </TableCell>
                 <TableCell sx={{ width: columnWidths.type, minWidth: columnWidths.type, maxWidth: columnWidths.type }}>
@@ -1626,18 +1595,6 @@ const Transactions: React.FC = () => {
                   )}
                 </TableCell>
                 <TableCell align="center" sx={{ width: columnWidths.actions, minWidth: columnWidths.actions, maxWidth: columnWidths.actions }}>
-                  <IconButton
-                    size="small"
-                    onClick={() => handleOpenSplitDialog(transaction)}
-                    color={transaction.is_split ? "secondary" : "primary"}
-                    title={transaction.is_split ? "Edit Split Transaction" : "Split Transaction"}
-                    sx={transaction.is_split ? { 
-                      backgroundColor: 'action.selected',
-                      '&:hover': { backgroundColor: 'action.hover' }
-                    } : {}}
-                  >
-                    <CallSplit />
-                  </IconButton>
                   <IconButton
                     size="small"
                     onClick={() => handleOpenDialog(transaction)}
@@ -2507,15 +2464,6 @@ const Transactions: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Split Transaction Dialog */}
-      {splitTransaction && (
-        <SplitTransactionDialog
-          open={splitDialogOpen}
-          onClose={handleCloseSplitDialog}
-          transaction={splitTransaction}
-          onSuccess={handleSplitSuccess}
-        />
-      )}
     </Box>
   );
 };

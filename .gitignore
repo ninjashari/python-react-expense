@@ -210,3 +210,4 @@ sample_*.csv
 
 
 *.jpg
+node_modules/

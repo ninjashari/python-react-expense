@@ -4,7 +4,6 @@ import {
   Payee,
   Category,
   Transaction,
-  TransactionSplit,
   CreateAccountDto,
   CreatePayeeDto,
   CreateCategoryDto,
@@ -194,20 +193,8 @@ export const transactionsApi = {
     params, 
     responseType: 'blob' 
   }).then(res => res),
-  bulkReassign: (transaction_ids: string[]): Promise<any> => 
+  bulkReassign: (transaction_ids: string[]): Promise<any> =>
     api.post('/transactions/bulk-reassign', transaction_ids).then(res => res.data),
-  
-  // Transaction splitting APIs
-  splitTransaction: (transactionId: string, splits: TransactionSplit[]): Promise<any> =>
-    api.post(`/transactions/${transactionId}/split`, { splits }).then(res => res.data),
-  updateTransactionSplits: (transactionId: string, splits: TransactionSplit[]): Promise<any> =>
-    api.put(`/transactions/${transactionId}/split`, { splits }).then(res => res.data),
-  unsplitTransaction: (transactionId: string, categoryId?: string): Promise<any> =>
-    api.delete(`/transactions/${transactionId}/split`, { 
-      params: categoryId ? { category_id: categoryId } : {} 
-    }).then(res => res.data),
-  getTransactionSplits: (transactionId: string): Promise<any> =>
-    api.get(`/transactions/${transactionId}/splits`).then(res => res.data),
 };
 
 
