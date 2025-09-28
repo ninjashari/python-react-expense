@@ -1325,3 +1325,616 @@ async def bulk_reassign_transactions(
     }
 
 
+@router.get("/reports/by-category")
+def get_transactions_by_category(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    use_all_data: bool = Query(False, description="Use all historical data for comprehensive analysis"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get transaction summary grouped by category with optional comprehensive historical analysis"""
+    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+
+    # Apply filters only if not using all data for comprehensive analysis
+    if not use_all_data:
+        if start_date:
+            query = query.filter(Transaction.date >= start_date)
+        if end_date:
+            query = query.filter(Transaction.date <= end_date)
+
+    if account_ids:
+        account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.account_id.in_(account_id_list))
+
+    transactions = query.options(joinedload(Transaction.category)).all()
+
+    category_data = {}
+    monthly_trends = {}
+
+    for transaction in transactions:
+        category_name = transaction.category.name if transaction.category else "Uncategorized"
+        category_id = str(transaction.category.id) if transaction.category else "none"
+        category_color = transaction.category.color if transaction.category else "#cccccc"
+
+        # Monthly tracking for trends
+        month_key = transaction.date.strftime("%Y-%m")
+
+        if category_id not in category_data:
+            category_data[category_id] = {
+                "id": category_id,
+                "name": category_name,
+                "color": category_color,
+                "total_amount": 0,
+                "transaction_count": 0,
+                "income": 0,
+                "expense": 0,
+                "average_amount": 0,
+                "monthly_data": {},
+                "first_transaction": transaction.date,
+                "last_transaction": transaction.date,
+                "peak_month": {"month": "", "amount": 0},
+                "trend": "stable"
+            }
+
+        # Track monthly data for trend analysis
+        if month_key not in category_data[category_id]["monthly_data"]:
+            category_data[category_id]["monthly_data"][month_key] = {
+                "amount": 0,
+                "count": 0,
+                "month_name": transaction.date.strftime("%B %Y")
+            }
+
+        amount = float(transaction.amount)
+        category_data[category_id]["total_amount"] += amount
+        category_data[category_id]["transaction_count"] += 1
+        category_data[category_id]["monthly_data"][month_key]["amount"] += amount
+        category_data[category_id]["monthly_data"][month_key]["count"] += 1
+
+        # Update date range
+        if transaction.date < category_data[category_id]["first_transaction"]:
+            category_data[category_id]["first_transaction"] = transaction.date
+        if transaction.date > category_data[category_id]["last_transaction"]:
+            category_data[category_id]["last_transaction"] = transaction.date
+
+        # Track peak month
+        if category_data[category_id]["monthly_data"][month_key]["amount"] > category_data[category_id]["peak_month"]["amount"]:
+            category_data[category_id]["peak_month"] = {
+                "month": category_data[category_id]["monthly_data"][month_key]["month_name"],
+                "amount": category_data[category_id]["monthly_data"][month_key]["amount"]
+            }
+
+        if transaction.type == "income":
+            category_data[category_id]["income"] += amount
+        elif transaction.type == "expense":
+            category_data[category_id]["expense"] += amount
+
+    # Calculate averages and trends
+    for category in category_data.values():
+        if category["transaction_count"] > 0:
+            category["average_amount"] = category["total_amount"] / category["transaction_count"]
+
+            # Calculate spending trend over time
+            monthly_amounts = [data["amount"] for data in category["monthly_data"].values()]
+            if len(monthly_amounts) >= 3:
+                recent_avg = sum(monthly_amounts[-3:]) / 3
+                older_avg = sum(monthly_amounts[:-3]) / len(monthly_amounts[:-3]) if len(monthly_amounts) > 3 else recent_avg
+
+                if recent_avg > older_avg * 1.1:
+                    category["trend"] = "increasing"
+                elif recent_avg < older_avg * 0.9:
+                    category["trend"] = "decreasing"
+                else:
+                    category["trend"] = "stable"
+
+            # Convert monthly data to list for easier frontend consumption
+            category["monthly_trend"] = sorted(
+                [{"month": k, **v} for k, v in category["monthly_data"].items()],
+                key=lambda x: x["month"]
+            )
+            del category["monthly_data"]  # Remove dict version
+
+            # Format dates
+            category["first_transaction"] = category["first_transaction"].isoformat()
+            category["last_transaction"] = category["last_transaction"].isoformat()
+            category["active_months"] = len(category["monthly_trend"])
+
+    return sorted(category_data.values(), key=lambda x: x["total_amount"], reverse=True)
+
+
+@router.get("/reports/by-payee")
+def get_transactions_by_payee(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get transaction summary grouped by payee"""
+    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+
+    # Apply filters
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
+    if account_ids:
+        account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.account_id.in_(account_id_list))
+
+    transactions = query.options(joinedload(Transaction.payee)).all()
+
+    payee_data = {}
+    for transaction in transactions:
+        payee_name = transaction.payee.name if transaction.payee else "No Payee"
+        payee_id = str(transaction.payee.id) if transaction.payee else "none"
+        payee_color = transaction.payee.color if transaction.payee else "#cccccc"
+
+        if payee_id not in payee_data:
+            payee_data[payee_id] = {
+                "id": payee_id,
+                "name": payee_name,
+                "color": payee_color,
+                "total_amount": 0,
+                "transaction_count": 0,
+                "income": 0,
+                "expense": 0,
+                "average_amount": 0
+            }
+
+        amount = float(transaction.amount)
+        payee_data[payee_id]["total_amount"] += amount
+        payee_data[payee_id]["transaction_count"] += 1
+
+        if transaction.type == "income":
+            payee_data[payee_id]["income"] += amount
+        elif transaction.type == "expense":
+            payee_data[payee_id]["expense"] += amount
+
+    # Calculate averages
+    for payee in payee_data.values():
+        if payee["transaction_count"] > 0:
+            payee["average_amount"] = payee["total_amount"] / payee["transaction_count"]
+
+    return sorted(payee_data.values(), key=lambda x: x["total_amount"], reverse=True)
+
+
+@router.get("/reports/by-account")
+def get_transactions_by_account(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get transaction summary grouped by account"""
+    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+
+    # Apply filters
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
+
+    transactions = query.options(joinedload(Transaction.account)).all()
+
+    account_data = {}
+    for transaction in transactions:
+        account_name = transaction.account.name if transaction.account else "Unknown Account"
+        account_id = str(transaction.account.id) if transaction.account else "none"
+        account_type = transaction.account.type if transaction.account else "unknown"
+
+        if account_id not in account_data:
+            account_data[account_id] = {
+                "id": account_id,
+                "name": account_name,
+                "type": account_type,
+                "total_amount": 0,
+                "transaction_count": 0,
+                "income": 0,
+                "expense": 0,
+                "transfers_in": 0,
+                "transfers_out": 0,
+                "average_amount": 0
+            }
+
+        amount = float(transaction.amount)
+        account_data[account_id]["total_amount"] += amount
+        account_data[account_id]["transaction_count"] += 1
+
+        if transaction.type == "income":
+            account_data[account_id]["income"] += amount
+        elif transaction.type == "expense":
+            account_data[account_id]["expense"] += amount
+        elif transaction.type == "transfer":
+            # Check if this account is source or destination
+            if transaction.account_id == transaction.account.id:
+                account_data[account_id]["transfers_out"] += amount
+            # Also check for transfers coming in (to_account_id)
+
+    # Check for incoming transfers
+    incoming_transfers = db.query(Transaction).filter(
+        Transaction.user_id == current_user.id,
+        Transaction.type == "transfer",
+        Transaction.to_account_id.isnot(None)
+    ).options(joinedload(Transaction.to_account)).all()
+
+    for transfer in incoming_transfers:
+        if transfer.to_account:
+            to_account_id = str(transfer.to_account.id)
+            if to_account_id in account_data:
+                account_data[to_account_id]["transfers_in"] += float(transfer.amount)
+
+    # Calculate averages
+    for account in account_data.values():
+        if account["transaction_count"] > 0:
+            account["average_amount"] = account["total_amount"] / account["transaction_count"]
+
+    return sorted(account_data.values(), key=lambda x: x["total_amount"], reverse=True)
+
+
+@router.get("/reports/monthly-trend")
+def get_monthly_trend(
+    months: int = Query(12, description="Number of months to include"),
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get monthly income vs expense trends"""
+    from datetime import datetime, timedelta
+    from sqlalchemy import extract, func
+
+    # Calculate start date
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=months * 30)
+
+    query = db.query(Transaction).filter(
+        Transaction.user_id == current_user.id,
+        Transaction.date >= start_date,
+        Transaction.date <= end_date
+    )
+
+    if account_ids:
+        account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
+        query = query.filter(Transaction.account_id.in_(account_id_list))
+
+    transactions = query.all()
+
+    monthly_data = {}
+    for transaction in transactions:
+        month_key = transaction.date.strftime("%Y-%m")
+
+        if month_key not in monthly_data:
+            monthly_data[month_key] = {
+                "month": month_key,
+                "month_name": transaction.date.strftime("%B"),
+                "year": transaction.date.year,
+                "income": 0,
+                "expense": 0,
+                "transfers": 0,
+                "net_income": 0,
+                "transaction_count": 0
+            }
+
+        amount = float(transaction.amount)
+        monthly_data[month_key]["transaction_count"] += 1
+
+        if transaction.type == "income":
+            monthly_data[month_key]["income"] += amount
+        elif transaction.type == "expense":
+            monthly_data[month_key]["expense"] += amount
+        elif transaction.type == "transfer":
+            monthly_data[month_key]["transfers"] += amount
+
+    # Calculate net income
+    for month in monthly_data.values():
+        month["net_income"] = month["income"] - month["expense"]
+
+    return sorted(monthly_data.values(), key=lambda x: x["month"])
+
+
+@router.get("/reports/comprehensive-analysis")
+def get_comprehensive_financial_analysis(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get comprehensive financial analysis using all historical data with advanced insights"""
+    from datetime import datetime, timedelta
+    from sqlalchemy import extract, func, case
+    import statistics
+
+    # Get ALL transactions for comprehensive analysis
+    all_transactions = db.query(Transaction).filter(
+        Transaction.user_id == current_user.id
+    ).options(
+        joinedload(Transaction.category),
+        joinedload(Transaction.payee),
+        joinedload(Transaction.account)
+    ).order_by(Transaction.date).all()
+
+    if not all_transactions:
+        return {"message": "No transaction data available for analysis"}
+
+    # Comprehensive analysis data structure
+    analysis = {
+        "data_period": {
+            "start_date": all_transactions[0].date.isoformat(),
+            "end_date": all_transactions[-1].date.isoformat(),
+            "total_days": (all_transactions[-1].date - all_transactions[0].date).days,
+            "total_transactions": len(all_transactions)
+        },
+        "spending_patterns": {},
+        "category_insights": {},
+        "seasonal_trends": {},
+        "prediction_data": {},
+        "financial_health": {}
+    }
+
+    # Monthly aggregation for trend analysis
+    monthly_data = {}
+    category_monthly = {}
+    payee_patterns = {}
+
+    for transaction in all_transactions:
+        month_key = transaction.date.strftime("%Y-%m")
+        amount = float(transaction.amount)
+
+        # Monthly totals
+        if month_key not in monthly_data:
+            monthly_data[month_key] = {
+                "income": 0, "expense": 0, "transfers": 0,
+                "transaction_count": 0, "date": transaction.date
+            }
+
+        monthly_data[month_key]["transaction_count"] += 1
+        if transaction.type == "income":
+            monthly_data[month_key]["income"] += amount
+        elif transaction.type == "expense":
+            monthly_data[month_key]["expense"] += amount
+        elif transaction.type == "transfer":
+            monthly_data[month_key]["transfers"] += amount
+
+        # Category monthly tracking
+        if transaction.category:
+            cat_id = str(transaction.category.id)
+            if cat_id not in category_monthly:
+                category_monthly[cat_id] = {
+                    "name": transaction.category.name,
+                    "color": transaction.category.color,
+                    "monthly_amounts": {},
+                    "total": 0,
+                    "months_active": 0
+                }
+
+            if month_key not in category_monthly[cat_id]["monthly_amounts"]:
+                category_monthly[cat_id]["monthly_amounts"][month_key] = 0
+                category_monthly[cat_id]["months_active"] += 1
+
+            category_monthly[cat_id]["monthly_amounts"][month_key] += amount
+            category_monthly[cat_id]["total"] += amount
+
+    # Calculate spending patterns
+    monthly_expenses = [data["expense"] for data in monthly_data.values()]
+    monthly_incomes = [data["income"] for data in monthly_data.values()]
+
+    if monthly_expenses:
+        analysis["spending_patterns"] = {
+            "average_monthly_expense": statistics.mean(monthly_expenses),
+            "median_monthly_expense": statistics.median(monthly_expenses),
+            "expense_volatility": statistics.stdev(monthly_expenses) if len(monthly_expenses) > 1 else 0,
+            "highest_expense_month": max(monthly_expenses),
+            "lowest_expense_month": min(monthly_expenses),
+            "expense_trend": "increasing" if monthly_expenses[-3:] > monthly_expenses[:3] else "decreasing" if len(monthly_expenses) > 6 else "stable"
+        }
+
+    if monthly_incomes:
+        analysis["financial_health"] = {
+            "average_monthly_income": statistics.mean(monthly_incomes),
+            "income_stability": 1 - (statistics.stdev(monthly_incomes) / statistics.mean(monthly_incomes)) if statistics.mean(monthly_incomes) > 0 else 0,
+            "savings_rate": (statistics.mean(monthly_incomes) - statistics.mean(monthly_expenses)) / statistics.mean(monthly_incomes) if statistics.mean(monthly_incomes) > 0 else 0,
+            "months_analyzed": len(monthly_data)
+        }
+
+    # Category insights with predictions
+    for cat_id, data in category_monthly.items():
+        amounts = list(data["monthly_amounts"].values())
+        if len(amounts) >= 3:
+            avg_monthly = statistics.mean(amounts)
+            trend_factor = amounts[-1] / amounts[0] if amounts[0] > 0 else 1
+
+            # Simple linear trend prediction for next 3 months
+            if len(amounts) >= 6:
+                recent_trend = sum(amounts[-3:]) / 3 / (sum(amounts[-6:-3]) / 3) if sum(amounts[-6:-3]) > 0 else 1
+                predicted_next_month = amounts[-1] * recent_trend
+            else:
+                predicted_next_month = avg_monthly
+
+            analysis["category_insights"][cat_id] = {
+                "name": data["name"],
+                "color": data["color"],
+                "historical_average": avg_monthly,
+                "trend_factor": trend_factor,
+                "predicted_next_month": predicted_next_month,
+                "consistency_score": 1 - (statistics.stdev(amounts) / avg_monthly) if avg_monthly > 0 else 0,
+                "months_active": data["months_active"],
+                "total_spent": data["total"]
+            }
+
+    # Seasonal analysis
+    seasonal_data = {"spring": [], "summer": [], "fall": [], "winter": []}
+    for transaction in all_transactions:
+        month = transaction.date.month
+        amount = float(transaction.amount) if transaction.type == "expense" else 0
+
+        if month in [3, 4, 5]:
+            seasonal_data["spring"].append(amount)
+        elif month in [6, 7, 8]:
+            seasonal_data["summer"].append(amount)
+        elif month in [9, 10, 11]:
+            seasonal_data["fall"].append(amount)
+        else:
+            seasonal_data["winter"].append(amount)
+
+    analysis["seasonal_trends"] = {
+        season: {
+            "average_expense": statistics.mean(amounts) if amounts else 0,
+            "total_transactions": len(amounts),
+            "season_percentage": len(amounts) / len(all_transactions) * 100
+        }
+        for season, amounts in seasonal_data.items()
+    }
+
+    return analysis
+
+
+@router.post("/reports/retrain-models")
+def retrain_prediction_models(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retrain prediction models using all historical user data"""
+    from services.ai_trainer import TransactionAITrainer
+
+    try:
+        # Get all user transactions for training
+        all_transactions = db.query(Transaction).filter(
+            Transaction.user_id == current_user.id
+        ).options(
+            joinedload(Transaction.category),
+            joinedload(Transaction.payee),
+            joinedload(Transaction.account)
+        ).all()
+
+        if len(all_transactions) < 10:
+            return {"message": "Insufficient data for model training. Need at least 10 transactions."}
+
+        # Initialize trainer and retrain models
+        trainer = TransactionAITrainer(db)
+
+        # Train category prediction model
+        category_model_info = trainer.train_category_prediction_model(str(current_user.id))
+
+        # Train spending pattern model
+        spending_model_info = trainer.train_spending_pattern_model(str(current_user.id))
+
+        # Train anomaly detection model
+        anomaly_model_info = trainer.train_anomaly_detection_model(str(current_user.id))
+
+        return {
+            "message": "Models retrained successfully",
+            "training_data_size": len(all_transactions),
+            "models_updated": {
+                "category_prediction": category_model_info,
+                "spending_patterns": spending_model_info,
+                "anomaly_detection": anomaly_model_info
+            },
+            "last_retrain": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        return {"error": f"Model retraining failed: {str(e)}"}
+
+
+@router.get("/reports/prediction-insights")
+def get_prediction_insights(
+    months_ahead: int = Query(3, description="Number of months to predict ahead"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get advanced prediction insights using retrained models and all historical data"""
+    from services.ai_trainer import TransactionAITrainer
+    from datetime import datetime, timedelta
+    import statistics
+
+    # Get all historical data for context
+    all_transactions = db.query(Transaction).filter(
+        Transaction.user_id == current_user.id
+    ).options(
+        joinedload(Transaction.category),
+        joinedload(Transaction.payee)
+    ).order_by(Transaction.date).all()
+
+    if len(all_transactions) < 10:
+        return {"message": "Insufficient historical data for accurate predictions"}
+
+    # Category-wise historical analysis for predictions
+    category_patterns = {}
+    for transaction in all_transactions:
+        if transaction.category:
+            cat_id = str(transaction.category.id)
+            month_key = transaction.date.strftime("%Y-%m")
+
+            if cat_id not in category_patterns:
+                category_patterns[cat_id] = {
+                    "name": transaction.category.name,
+                    "color": transaction.category.color,
+                    "monthly_data": {},
+                    "amounts": []
+                }
+
+            if month_key not in category_patterns[cat_id]["monthly_data"]:
+                category_patterns[cat_id]["monthly_data"][month_key] = 0
+
+            amount = float(transaction.amount)
+            category_patterns[cat_id]["monthly_data"][month_key] += amount
+            category_patterns[cat_id]["amounts"].append(amount)
+
+    # Generate predictions
+    predictions = []
+    current_date = datetime.now().date()
+
+    for cat_id, pattern in category_patterns.items():
+        monthly_amounts = list(pattern["monthly_data"].values())
+
+        if len(monthly_amounts) >= 3:
+            # Calculate trend and seasonality
+            avg_monthly = statistics.mean(monthly_amounts)
+
+            # Linear trend calculation
+            if len(monthly_amounts) >= 6:
+                recent_avg = statistics.mean(monthly_amounts[-3:])
+                older_avg = statistics.mean(monthly_amounts[-6:-3])
+                trend_factor = recent_avg / older_avg if older_avg > 0 else 1
+            else:
+                trend_factor = 1
+
+            # Predict for next months
+            for month_offset in range(1, months_ahead + 1):
+                predicted_date = current_date + timedelta(days=30 * month_offset)
+
+                # Apply seasonal adjustment (simplified)
+                seasonal_factor = 1
+                month = predicted_date.month
+                if month in [11, 12, 1]:  # Holiday season
+                    seasonal_factor = 1.2
+                elif month in [6, 7, 8]:  # Summer
+                    seasonal_factor = 1.1
+
+                predicted_amount = avg_monthly * trend_factor * seasonal_factor
+
+                # Confidence based on data consistency
+                volatility = statistics.stdev(monthly_amounts) / avg_monthly if avg_monthly > 0 else 1
+                confidence = max(0.3, min(0.95, 1 - volatility))
+
+                predictions.append({
+                    "category_id": cat_id,
+                    "category_name": pattern["name"],
+                    "category_color": pattern["color"],
+                    "month": predicted_date.month,
+                    "year": predicted_date.year,
+                    "month_name": predicted_date.strftime("%B"),
+                    "predicted_amount": round(predicted_amount, 2),
+                    "confidence": round(confidence, 2),
+                    "trend": "increasing" if trend_factor > 1.1 else "decreasing" if trend_factor < 0.9 else "stable",
+                    "based_on_months": len(monthly_amounts)
+                })
+
+    return {
+        "predictions": sorted(predictions, key=lambda x: x["predicted_amount"], reverse=True),
+        "total_categories_analyzed": len(category_patterns),
+        "historical_months": len(set(t.date.strftime("%Y-%m") for t in all_transactions)),
+        "data_quality": "excellent" if len(all_transactions) > 100 else "good" if len(all_transactions) > 50 else "fair",
+        "next_retrain_recommended": len(all_transactions) < 100
+    }
+
+

@@ -46,6 +46,7 @@ import SmartAutocomplete from '../components/SmartAutocomplete';
 import InlineTextEdit from '../components/InlineTextEdit';
 import InlineDateEdit from '../components/InlineDateEdit';
 import InlineToggleEdit from '../components/InlineToggleEdit';
+import InlineSelectEdit from '../components/InlineSelectEdit';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
 
@@ -304,7 +305,7 @@ const Transactions: React.FC = () => {
   );
 
   // Inline editing functions
-  const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id' | 'description' | 'type' | 'date', value: string | null) => {
+  const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id' | 'description' | 'type' | 'date' | 'account_id' | 'to_account_id', value: string | null) => {
     // If bulk edit mode is enabled and multiple transactions are selected, update all selected transactions
     if (bulkEditMode && selectedTransactions.size > 1 && selectedTransactions.has(transactionId)) {
       const selectedIds = Array.from(selectedTransactions);
@@ -394,6 +395,14 @@ const Transactions: React.FC = () => {
 
   const handleInlineDateChange = async (transactionId: string, date: string) => {
     await handleInlineUpdate(transactionId, 'date', date);
+  };
+
+  const handleInlineAccountChange = async (transactionId: string, accountId: string | null) => {
+    await handleInlineUpdate(transactionId, 'account_id', accountId);
+  };
+
+  const handleInlineToAccountChange = async (transactionId: string, toAccountId: string | null) => {
+    await handleInlineUpdate(transactionId, 'to_account_id', toAccountId);
   };
 
   const handleOpenDialog = (transaction?: Transaction) => {
@@ -1444,15 +1453,44 @@ const Transactions: React.FC = () => {
                 <TableCell sx={{ width: columnWidths.account, minWidth: columnWidths.account, maxWidth: columnWidths.account }}>
                   {transaction.type === 'transfer' ? (
                     <Box>
-                      <Typography variant="body2">
-                        {transaction.account?.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        → {transaction.to_account?.name}
-                      </Typography>
+                      <InlineSelectEdit
+                        value={transaction.account_id}
+                        options={accounts?.map(acc => ({ value: acc.id, label: acc.name })) || []}
+                        onSave={(newValue) => handleInlineAccountChange(transaction.id, newValue)}
+                        isSaving={savingTransactions.has(transaction.id)}
+                        getDisplayValue={(value) => (
+                          <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
+                            {accounts?.find(acc => acc.id === value)?.name || 'Unknown'}
+                          </Typography>
+                        )}
+                      />
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary">→</Typography>
+                        <InlineSelectEdit
+                          value={transaction.to_account_id || ''}
+                          options={accounts?.map(acc => ({ value: acc.id, label: acc.name })) || []}
+                          onSave={(newValue) => handleInlineToAccountChange(transaction.id, newValue)}
+                          isSaving={savingTransactions.has(transaction.id)}
+                          getDisplayValue={(value) => (
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
+                              {accounts?.find(acc => acc.id === value)?.name || 'Select...'}
+                            </Typography>
+                          )}
+                        />
+                      </Box>
                     </Box>
                   ) : (
-                    transaction.account?.name
+                    <InlineSelectEdit
+                      value={transaction.account_id}
+                      options={accounts?.map(acc => ({ value: acc.id, label: acc.name })) || []}
+                      onSave={(newValue) => handleInlineAccountChange(transaction.id, newValue)}
+                      isSaving={savingTransactions.has(transaction.id)}
+                      getDisplayValue={(value) => (
+                        <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
+                          {accounts?.find(acc => acc.id === value)?.name || 'Unknown'}
+                        </Typography>
+                      )}
+                    />
                   )}
                 </TableCell>
                 <TableCell sx={{ width: columnWidths.payee, minWidth: columnWidths.payee, maxWidth: columnWidths.payee }}>

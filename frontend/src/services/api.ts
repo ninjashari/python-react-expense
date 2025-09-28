@@ -195,6 +195,36 @@ export const transactionsApi = {
   }).then(res => res),
   bulkReassign: (transaction_ids: string[]): Promise<any> =>
     api.post('/transactions/bulk-reassign', transaction_ids).then(res => res.data),
+  getByCategory: (params?: {
+    start_date?: string;
+    end_date?: string;
+    account_ids?: string;
+    use_all_data?: boolean;
+  }): Promise<any> => api.get('/transactions/reports/by-category', { params }).then(res => res.data),
+  getByPayee: (params?: {
+    start_date?: string;
+    end_date?: string;
+    account_ids?: string;
+    use_all_data?: boolean;
+  }): Promise<any> => api.get('/transactions/reports/by-payee', { params }).then(res => res.data),
+  getByAccount: (params?: {
+    start_date?: string;
+    end_date?: string;
+    use_all_data?: boolean;
+  }): Promise<any> => api.get('/transactions/reports/by-account', { params }).then(res => res.data),
+  getMonthlyTrend: (params?: {
+    months?: number;
+    account_ids?: string;
+    use_all_data?: boolean;
+  }): Promise<any> => api.get('/transactions/reports/monthly-trend', { params }).then(res => res.data),
+  getComprehensiveAnalysis: (): Promise<any> =>
+    api.get('/transactions/reports/comprehensive-analysis').then(res => res.data),
+  retrainModels: (): Promise<any> =>
+    api.post('/transactions/reports/retrain-models').then(res => res.data),
+  getPredictionInsights: (months_ahead?: number): Promise<any> =>
+    api.get('/transactions/reports/prediction-insights', {
+      params: { months_ahead: months_ahead || 3 }
+    }).then(res => res.data),
 };
 
 
