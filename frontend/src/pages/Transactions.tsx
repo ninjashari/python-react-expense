@@ -200,6 +200,7 @@ const Transactions: React.FC = () => {
   const [isRecalculatingBalances, setIsRecalculatingBalances] = useState(false);
   const [recalculateResult, setRecalculateResult] = useState<any>(null);
   const [recalculateDialogOpen, setRecalculateDialogOpen] = useState(false);
+  const [editingAccountField, setEditingAccountField] = useState<{transactionId: string, field: 'account_id' | 'to_account_id'} | null>(null);
   const queryClient = useQueryClient();
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateTransactionDto>({
@@ -1452,32 +1453,100 @@ const Transactions: React.FC = () => {
                 </TableCell>
                 <TableCell sx={{ width: columnWidths.account, minWidth: columnWidths.account, maxWidth: columnWidths.account }}>
                   {transaction.type === 'transfer' ? (
-                    <Box>
-                      <InlineSelectEdit
-                        value={transaction.account_id}
-                        options={accounts?.map(acc => ({ value: acc.id, label: acc.name })) || []}
-                        onSave={(newValue) => handleInlineAccountChange(transaction.id, newValue)}
-                        isSaving={savingTransactions.has(transaction.id)}
-                        getDisplayValue={(value) => (
-                          <Typography variant="body2" sx={{ fontSize: '0.875rem' }}>
-                            {accounts?.find(acc => acc.id === value)?.name || 'Unknown'}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, py: 0.25 }}>
+                      {/* Source Account */}
+                      {editingAccountField?.transactionId === transaction.id && editingAccountField?.field === 'account_id' ? (
+                        <TextField
+                          select
+                          value={transaction.account_id}
+                          onChange={(e) => {
+                            handleInlineAccountChange(transaction.id, e.target.value);
+                            setEditingAccountField(null);
+                          }}
+                          onBlur={() => setEditingAccountField(null)}
+                          size="small"
+                          fullWidth
+                          autoFocus
+                          sx={{
+                            '& .MuiInputBase-input': { fontSize: '0.75rem', py: 0.5 },
+                            '& .MuiOutlinedInput-root': { minHeight: '24px' }
+                          }}
+                        >
+                          {accounts?.map((account) => (
+                            <MenuItem key={account.id} value={account.id} sx={{ fontSize: '0.75rem' }}>
+                              {account.name}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                      ) : (
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            minHeight: '24px',
+                            cursor: 'pointer',
+                            padding: '2px 4px',
+                            borderRadius: 0.5,
+                            transition: 'background-color 0.2s',
+                            '&:hover': { backgroundColor: 'action.hover' }
+                          }}
+                          onClick={() => setEditingAccountField({transactionId: transaction.id, field: 'account_id'})}
+                        >
+                          <Typography variant="body2" sx={{ fontSize: '0.75rem', lineHeight: 1.3 }}>
+                            {accounts?.find(acc => acc.id === transaction.account_id)?.name || 'Unknown'}
                           </Typography>
-                        )}
-                      />
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary">→</Typography>
-                        <InlineSelectEdit
-                          value={transaction.to_account_id || ''}
-                          options={accounts?.map(acc => ({ value: acc.id, label: acc.name })) || []}
-                          onSave={(newValue) => handleInlineToAccountChange(transaction.id, newValue)}
-                          isSaving={savingTransactions.has(transaction.id)}
-                          getDisplayValue={(value) => (
-                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
-                              {accounts?.find(acc => acc.id === value)?.name || 'Select...'}
-                            </Typography>
-                          )}
-                        />
-                      </Box>
+                        </Box>
+                      )}
+
+                      {/* Destination Account */}
+                      {editingAccountField?.transactionId === transaction.id && editingAccountField?.field === 'to_account_id' ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', minWidth: '8px' }}>→</Typography>
+                          <TextField
+                            select
+                            value={transaction.to_account_id || ''}
+                            onChange={(e) => {
+                              handleInlineToAccountChange(transaction.id, e.target.value);
+                              setEditingAccountField(null);
+                            }}
+                            onBlur={() => setEditingAccountField(null)}
+                            size="small"
+                            fullWidth
+                            autoFocus
+                            sx={{
+                              '& .MuiInputBase-input': { fontSize: '0.65rem', py: 0.25 },
+                              '& .MuiOutlinedInput-root': { minHeight: '20px' }
+                            }}
+                          >
+                            {accounts?.map((account) => (
+                              <MenuItem key={account.id} value={account.id} sx={{ fontSize: '0.65rem' }}>
+                                {account.name}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        </Box>
+                      ) : (
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            minHeight: '20px',
+                            cursor: 'pointer',
+                            padding: '1px 4px',
+                            borderRadius: 0.5,
+                            transition: 'background-color 0.2s',
+                            '&:hover': { backgroundColor: 'action.hover' }
+                          }}
+                          onClick={() => setEditingAccountField({transactionId: transaction.id, field: 'to_account_id'})}
+                        >
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', minWidth: '8px' }}>→</Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', lineHeight: 1.3 }}>
+                            {accounts?.find(acc => acc.id === transaction.to_account_id)?.name || 'Select...'}
+                          </Typography>
+                        </Box>
+                      )}
                     </Box>
                   ) : (
                     <InlineSelectEdit
