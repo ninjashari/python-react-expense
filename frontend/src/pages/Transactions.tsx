@@ -522,8 +522,12 @@ const Transactions: React.FC = () => {
         newSet.add(transactionId);
       }
 
+      // Automatically enter bulk edit mode when multiple transactions are selected
+      if (newSet.size > 1) {
+        setBulkEditMode(true);
+      }
       // Exit bulk edit mode if no transactions are selected
-      if (newSet.size === 0) {
+      else if (newSet.size === 0) {
         setBulkEditMode(false);
       }
 
@@ -534,6 +538,11 @@ const Transactions: React.FC = () => {
   const handleSelectAll = () => {
     const allTransactionIds = transactionData?.items?.map(t => t.id) || [];
     setSelectedTransactions(new Set(allTransactionIds));
+    
+    // Automatically enter bulk edit mode when multiple transactions are selected
+    if (allTransactionIds.length > 1) {
+      setBulkEditMode(true);
+    }
   };
 
   const handleClearSelection = () => {
@@ -995,8 +1004,12 @@ const Transactions: React.FC = () => {
                 startIcon={<Edit />}
                 onClick={() => setBulkEditMode(!bulkEditMode)}
                 sx={{ ml: 2 }}
+                title={selectedTransactions.size > 1 && bulkEditMode 
+                  ? "Bulk edit mode is automatically enabled when multiple transactions are selected. Click to disable."
+                  : "Click to enable bulk edit mode for selected transactions"
+                }
               >
-                {bulkEditMode ? 'Exit Bulk Edit' : 'Bulk Edit'} ({selectedTransactions.size})
+                {bulkEditMode ? 'Exit Bulk Edit' : 'Enable Bulk Edit'} ({selectedTransactions.size})
               </Button>
               <Button
                 variant="outlined"
@@ -1204,6 +1217,9 @@ const Transactions: React.FC = () => {
         <Alert severity="info" sx={{ mb: 3 }}>
           <Typography variant="body2">
             <strong>Bulk Edit Mode:</strong> Editing any field in the selected {selectedTransactions.size} transaction{selectedTransactions.size > 1 ? 's' : ''} will apply the change to all selected transactions.
+            {selectedTransactions.size > 1 && (
+              <span> Bulk edit mode was automatically enabled when you selected multiple transactions.</span>
+            )}
           </Typography>
         </Alert>
       )}
