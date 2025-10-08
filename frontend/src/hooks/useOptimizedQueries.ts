@@ -12,7 +12,7 @@ export const useTransactions = (
   return useQuery({
     queryKey: queryKeys.transactionList(filters),
     queryFn: () => transactionsApi.getAll(filters),
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 1 * 60 * 1000, // 1 minute (reduced for more responsive updates)
     gcTime: 15 * 60 * 1000, // 15 minutes
     ...options,
   });
@@ -62,17 +62,47 @@ export const useUpdateTransaction = (options?: UseMutationOptions<Transaction, E
 
   return useMutation({
     mutationFn: ({ id, data }) => transactionsApi.update(id, data),
-    onSuccess: (data, variables) => {
+    onSuccess: (updatedTransaction, variables) => {
       showSuccess('Transaction updated successfully');
-      // Invalidate transaction queries
-      cacheInvalidationPatterns.invalidateTransactions(queryClient);
-      cacheInvalidationPatterns.invalidateAccounts(queryClient);
       
-      // Update specific transaction in cache
-      queryClient.setQueryData(queryKeys.transactionDetail(variables.id), data);
+      // Immediately update all cached transaction lists with the updated transaction
+      queryClient.getQueriesData({ queryKey: ['transactions', 'list'] }).forEach(([queryKey, queryData]) => {
+        if (queryData && typeof queryData === 'object' && 'items' in queryData) {
+          const transactionList = queryData as { items: Transaction[]; total: number };
+          const updatedItems = transactionList.items.map(transaction => 
+            transaction.id === variables.id ? updatedTransaction : transaction
+          );
+          queryClient.setQueryData(queryKey, { ...transactionList, items: updatedItems });
+        }
+      });
+      
+      // Update specific transaction cache
+      queryClient.setQueryData(queryKeys.transactionDetail(variables.id), updatedTransaction);
+      
+      // Force immediate invalidation and refetch for balance updates
+      queryClient.invalidateQueries({ 
+        queryKey: ['accounts'],
+        refetchType: 'active'
+      });
+      
+      // Also invalidate transaction summaries and reports
+      queryClient.invalidateQueries({ 
+        queryKey: ['transaction-summary'],
+        refetchType: 'active'
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ['reports'],
+        refetchType: 'active'
+      });
     },
     onError: (error) => {
       showError(error.message || 'Failed to update transaction');
+      
+      // Force refetch to get the correct data after error
+      queryClient.invalidateQueries({ 
+        queryKey: ['transactions'],
+        refetchType: 'active'
+      });
     },
     ...options,
   });
@@ -86,9 +116,21 @@ export const useBulkUpdateTransactions = (options?: UseMutationOptions<any, Erro
     mutationFn: ({ transaction_ids, updates }) => transactionsApi.bulkUpdate(transaction_ids, updates),
     onSuccess: (data, variables) => {
       showSuccess(`Updated ${variables.transaction_ids.length} transactions successfully`);
-      // Invalidate all transaction-related queries for bulk operations
-      cacheInvalidationPatterns.invalidateTransactions(queryClient);
-      cacheInvalidationPatterns.invalidateAccounts(queryClient);
+      
+      // Force immediate invalidation and refetch for bulk operations
+      queryClient.invalidateQueries({ 
+        queryKey: ['transactions'],
+        refetchType: 'active'
+      });
+      queryClient.invalidateQueries({ 
+        queryKey: ['accounts'],
+        refetchType: 'active'
+      });
+      
+      // Force refetch of transaction lists
+      queryClient.getQueriesData({ queryKey: ['transactions', 'list'] }).forEach(([queryKey]) => {
+        queryClient.invalidateQueries({ queryKey, refetchType: 'active' });
+      });
     },
     onError: (error) => {
       showError(error.message || 'Failed to update transactions');

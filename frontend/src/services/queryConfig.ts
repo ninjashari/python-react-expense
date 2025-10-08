@@ -5,8 +5,8 @@ export const createOptimizedQueryClient = () => {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        // Increase stale time for better caching
-        staleTime: 5 * 60 * 1000, // 5 minutes
+        // Increase stale time for better caching, but not too long for transaction data
+        staleTime: 2 * 60 * 1000, // 2 minutes (reduced from 5 for better responsiveness)
         // Keep data in cache longer
         gcTime: 30 * 60 * 1000, // 30 minutes (previously cacheTime)
         // Retry failed requests
@@ -30,22 +30,40 @@ export const createOptimizedQueryClient = () => {
 
 // Cache invalidation patterns
 export const cacheInvalidationPatterns = {
-  // Invalidate all transaction-related queries
+  // Invalidate all transaction-related queries with immediate refetch
   invalidateTransactions: (queryClient: QueryClient) => {
-    queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    queryClient.invalidateQueries({ queryKey: ['transaction-summary'] });
-    queryClient.invalidateQueries({ queryKey: ['reports'] });
+    queryClient.invalidateQueries({ 
+      queryKey: ['transactions'],
+      refetchType: 'active' // Only refetch currently mounted/active queries
+    });
+    queryClient.invalidateQueries({ 
+      queryKey: ['transaction-summary'],
+      refetchType: 'active'
+    });
+    queryClient.invalidateQueries({ 
+      queryKey: ['reports'],
+      refetchType: 'active'
+    });
   },
 
-  // Invalidate all account-related queries
+  // Invalidate all account-related queries with immediate refetch
   invalidateAccounts: (queryClient: QueryClient) => {
-    queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    queryClient.invalidateQueries({ 
+      queryKey: ['accounts'],
+      refetchType: 'active'
+    });
   },
 
   // Invalidate reference data (payees, categories)
   invalidateReferences: (queryClient: QueryClient) => {
-    queryClient.invalidateQueries({ queryKey: ['payees'] });
-    queryClient.invalidateQueries({ queryKey: ['categories'] });
+    queryClient.invalidateQueries({ 
+      queryKey: ['payees'],
+      refetchType: 'active'
+    });
+    queryClient.invalidateQueries({ 
+      queryKey: ['categories'],
+      refetchType: 'active'
+    });
   },
 
   // Invalidate all user data
