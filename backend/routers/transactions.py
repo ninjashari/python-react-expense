@@ -181,7 +181,7 @@ def recalculate_subsequent_balances(db: Session, account_ids: list, modified_tra
         # Recalculate balances for all subsequent transactions
         for transaction in subsequent_transactions:
             new_balance = calculate_balance_after_transaction_for_account(
-                account_id, account.type, running_balance, transaction
+                str(account_id), account.type, running_balance, transaction
             )
             
             # Update the appropriate balance field
@@ -191,6 +191,9 @@ def recalculate_subsequent_balances(db: Session, account_ids: list, modified_tra
                 transaction.to_account_balance_after = new_balance
                 
             running_balance = new_balance
+        
+        # Commit the balance updates for this account
+        db.commit()
 
 def get_account_starting_balance_for_recalc(db: Session, account_id: str) -> Decimal:
     """
@@ -204,7 +207,6 @@ def get_account_starting_balance_for_recalc(db: Session, account_id: str) -> Dec
     
     # Use the account's original opening balance as the starting point
     # This is the balance when the account was first created
-    from decimal import Decimal
     
     # Check if there's an initial balance transaction that represents the opening balance
     initial_transaction = db.query(Transaction).filter(
@@ -1048,6 +1050,7 @@ async def recalculate_account_balances(
             Transaction.user_id == current_user.id
         ).order_by(Transaction.date.desc(), Transaction.created_at.desc()).first()
         
+        balance_correction = 0
         if last_transaction:
             # Determine which balance field to use based on whether this account was source or destination
             if str(last_transaction.account_id) == str(account_id):
@@ -1065,12 +1068,17 @@ async def recalculate_account_balances(
         
         db.commit()
         
+        # Invalidate cache after recalculation
+        from services.cache_service import CacheInvalidator
+        CacheInvalidator.invalidate_user_transactions(str(current_user.id))
+        CacheInvalidator.invalidate_user_accounts(str(current_user.id))
+        
         return {
             "success": True,
             "message": f"Successfully recalculated balances for account {account.name}",
             "transactions_updated": transaction_count,
             "account_name": account.name,
-            "balance_correction": balance_correction if 'balance_correction' in locals() else 0
+            "balance_correction": balance_correction
         }
         
     except Exception as e:
