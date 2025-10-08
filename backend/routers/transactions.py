@@ -6,7 +6,7 @@ from typing import List, Optional
 import uuid
 import math
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import pandas as pd
 import io
 from database import get_db
@@ -24,6 +24,7 @@ from schemas.transactions import (
 )
 from utils.auth import get_current_active_user
 from services.learning_service import TransactionLearningService
+from services.cache_service import cache_service, cached, CacheInvalidator
 
 router = APIRouter()
 
@@ -352,6 +353,10 @@ async def create_transaction(
             selection_method='form_create'
         )
     
+    # Invalidate cache for this user
+    CacheInvalidator.invalidate_user_transactions(str(current_user.id))
+    CacheInvalidator.invalidate_user_accounts(str(current_user.id))
+    
     return db_transaction
 
 @router.get("/", response_model=PaginatedTransactionsResponse)
@@ -367,7 +372,15 @@ def get_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # Build base query
+    # Generate cache key based on all parameters
+    cache_key = f"user:{current_user.id}:transactions:{page}:{size}:{account_ids or 'none'}:{category_ids or 'none'}:{payee_ids or 'none'}:{transaction_type or 'none'}:{start_date or 'none'}:{end_date or 'none'}"
+    
+    # Try to get from cache first
+    cached_result = cache_service.get(cache_key)
+    if cached_result is not None:
+        return cached_result
+    
+    # Build base query with optimized loading
     query = db.query(Transaction).options(
         joinedload(Transaction.account),
         joinedload(Transaction.to_account),
@@ -436,8 +449,13 @@ def get_transactions(
     # Filter by current user
     query = query.filter(Transaction.user_id == current_user.id)
     
-    # Get total count
-    total = query.count()
+    # Get total count (use a separate cached query for counts when possible)
+    count_cache_key = f"user:{current_user.id}:transaction_count:{account_ids or 'none'}:{category_ids or 'none'}:{payee_ids or 'none'}:{transaction_type or 'none'}:{start_date or 'none'}:{end_date or 'none'}"
+    total = cache_service.get(count_cache_key)
+    if total is None:
+        total = query.count()
+        # Cache count for shorter time since it changes more frequently
+        cache_service.set(count_cache_key, total, expire=timedelta(minutes=5))
     
     # Calculate pagination
     skip = (page - 1) * size
@@ -446,13 +464,18 @@ def get_transactions(
     # Get paginated results
     transactions = query.order_by(Transaction.date.desc()).offset(skip).limit(size).all()
     
-    return PaginatedTransactionsResponse(
+    result = PaginatedTransactionsResponse(
         items=transactions,
         total=total,
         page=page,
         size=size,
         pages=pages
     )
+    
+    # Cache the result for 10 minutes (shorter than reference data due to frequent updates)
+    cache_service.set(cache_key, result, expire=timedelta(minutes=10))
+    
+    return result
 
 @router.get("/summary", response_model=TransactionSummary)
 def get_transaction_summary(

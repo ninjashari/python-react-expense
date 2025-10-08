@@ -6,6 +6,7 @@ import uuid
 import pandas as pd
 import io
 import json
+from datetime import timedelta
 from database import get_db
 from models.categories import Category
 from models.users import User
@@ -14,6 +15,7 @@ from schemas.categories import CategoryCreate, CategoryUpdate, CategoryResponse
 from utils.auth import get_current_active_user
 from utils.color_generator import assign_unique_colors_bulk, generate_unique_color
 from utils.slug import create_slug
+from services.cache_service import cache_service, cached, CacheInvalidator
 
 router = APIRouter()
 
@@ -59,6 +61,14 @@ def get_categories(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
+    # Generate cache key including search term
+    cache_key = f"user:{current_user.id}:categories:{search or 'all'}"
+    
+    # Try to get from cache first
+    cached_categories = cache_service.get(cache_key)
+    if cached_categories is not None:
+        return cached_categories
+    
     query = db.query(Category).filter(Category.user_id == current_user.id)
     if search:
         query = query.filter(Category.name.ilike(f"%{search}%"))
@@ -80,6 +90,11 @@ def get_categories(
     
     if needs_update:
         db.commit()
+        # Invalidate cache since we updated data
+        CacheInvalidator.invalidate_user_references(str(current_user.id))
+    else:
+        # Cache for 20 minutes (reference data changes less frequently)
+        cache_service.set(cache_key, categories, expire=timedelta(minutes=20))
     
     return categories
 

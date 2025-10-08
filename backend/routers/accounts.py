@@ -7,7 +7,7 @@ from decimal import Decimal
 import pandas as pd
 import io
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import get_db
 from models.accounts import Account
 from models.transactions import Transaction
@@ -15,6 +15,7 @@ from models.users import User
 from schemas.accounts import AccountCreate, AccountUpdate, AccountResponse
 from utils.auth import get_current_active_user
 from routers.transactions import update_account_balance
+from services.cache_service import cache_service, cached, CacheInvalidator
 
 router = APIRouter()
 
@@ -29,6 +30,10 @@ def create_account(
         db.add(db_account)
         db.commit()
         db.refresh(db_account)
+        
+        # Invalidate cache
+        CacheInvalidator.invalidate_user_accounts(str(current_user.id))
+        
         return db_account
     except Exception as e:
         db.rollback()
@@ -39,8 +44,18 @@ def get_accounts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
+    # Try to get from cache first
+    cache_key = f"user:{current_user.id}:accounts:all"
+    cached_accounts = cache_service.get(cache_key)
+    if cached_accounts is not None:
+        return cached_accounts
+    
     # Order by creation date descending (newest first) and return all accounts
     accounts = db.query(Account).filter(Account.user_id == current_user.id).order_by(Account.created_at.desc()).all()
+    
+    # Cache for 30 minutes (accounts change less frequently)
+    cache_service.set(cache_key, accounts, expire=timedelta(minutes=30))
+    
     return accounts
 
 @router.get("/{account_id}", response_model=AccountResponse)

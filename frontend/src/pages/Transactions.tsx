@@ -49,6 +49,16 @@ import InlineToggleEdit from '../components/InlineToggleEdit';
 import InlineSelectEdit from '../components/InlineSelectEdit';
 import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
+import { 
+  useTransactions, 
+  useAccounts, 
+  usePayees, 
+  useCategories,
+  useCreateTransaction,
+  useUpdateTransaction,
+  useDeleteTransaction,
+  useBulkUpdateTransactions
+} from '../hooks/useOptimizedQueries';
 
 // Resizable TableCell component
 const ResizableTableCell = ({ 
@@ -215,34 +225,20 @@ const Transactions: React.FC = () => {
 
   const watchTransactionType = watch('type');
 
-  const { data: transactionData, isLoading: transactionsLoading } = useQuery<PaginatedResponse<Transaction>>({
-    queryKey: ['transactions', filters],
-    queryFn: () => transactionsApi.getAll({ 
-      page: filters.showAll ? 1 : filters.page,
-      size: filters.showAll ? 10000 : filters.size, // Use large number for show all
-      start_date: filters.startDate,
-      end_date: filters.endDate,
-      account_ids: filters.accountId,
-      category_ids: filters.categoryIds?.join(','),
-      payee_ids: filters.payeeIds?.join(','),
-    }),
+  // Use optimized query hooks with better caching
+  const { data: transactionData, isLoading: transactionsLoading } = useTransactions({
+    page: filters.showAll ? 1 : filters.page,
+    size: filters.showAll ? 10000 : filters.size, // Use large number for show all
+    start_date: filters.startDate,
+    end_date: filters.endDate,
+    account_ids: filters.accountId,
+    category_ids: filters.categoryIds?.join(','),
+    payee_ids: filters.payeeIds?.join(','),
   });
 
-
-  const { data: accounts } = useQuery({
-    queryKey: ['accounts'],
-    queryFn: accountsApi.getAll,
-  });
-
-  const { data: payees } = useQuery({
-    queryKey: ['payees'],
-    queryFn: () => payeesApi.getAll(),
-  });
-
-  const { data: categories } = useQuery({
-    queryKey: ['categories'],
-    queryFn: () => categoriesApi.getAll(),
-  });
+  const { data: accounts } = useAccounts();
+  const { data: payees } = usePayees();
+  const { data: categories } = useCategories();
 
   // Smart suggestions state
   const [formDescription, setFormDescription] = useState('');
@@ -263,47 +259,22 @@ const Transactions: React.FC = () => {
     dialogOpen ? (categories || []) : []
   );
 
-  const createMutation = useCreateWithConfirm(transactionsApi.create, {
-    resourceName: 'Transaction',
+  // Use optimized mutation hooks with automatic cache invalidation
+  const createMutation = useCreateTransaction({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
       handleCloseDialog();
     },
   });
 
-  const updateMutation = useUpdateWithConfirm(
-    ({ id, data }: { id: string; data: Partial<CreateTransactionDto> }) =>
-      transactionsApi.update(id, data),
-    {
-      resourceName: 'Transaction',
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['transactions'] });
-        queryClient.invalidateQueries({ queryKey: ['accounts'] });
-        handleCloseDialog();
-      },
-    }
-  );
-
-  const deleteMutation = useDeleteWithConfirm(transactionsApi.delete, {
-    resourceName: 'Transaction',
+  const updateMutation = useUpdateTransaction({
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      handleCloseDialog();
     },
   });
 
-  const bulkUpdateMutation = useUpdateWithConfirm(
-    ({ transaction_ids, updates }: { transaction_ids: string[]; updates: any }) =>
-      transactionsApi.bulkUpdate(transaction_ids, updates),
-    {
-      resourceName: 'Transactions',
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: ['transactions'] });
-        queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      },
-    }
-  );
+  const deleteMutation = useDeleteTransaction();
+
+  const bulkUpdateMutation = useBulkUpdateTransactions();
 
   // Inline editing functions
   const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id' | 'description' | 'type' | 'date' | 'account_id' | 'to_account_id', value: string | null) => {
