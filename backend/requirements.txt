@@ -19,5 +19,3 @@ torch==2.2.0
 sentence-transformers==2.2.2
 langchain==0.0.348
 python-dotenv==1.0.0
-redis==5.0.1
-aioredis==2.0.1

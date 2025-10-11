@@ -4,9 +4,8 @@
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0+-red.svg)](https://www.sqlalchemy.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791.svg)](https://www.postgresql.org/)
-[![Redis](https://img.shields.io/badge/Redis-6+-DC382D.svg)](https://redis.io/)
 
-The FastAPI backend for the Expense Manager application, providing a robust REST API with authentication, high-performance caching, file processing, AI learning capabilities, and advanced data management features.
+The FastAPI backend for the Expense Manager application, providing a robust REST API with authentication, file processing, AI learning capabilities, and advanced data management features.
 
 ## 📋 Table of Contents
 
@@ -25,14 +24,13 @@ The FastAPI backend for the Expense Manager application, providing a robust REST
 ### Core Functionality
 - **Comprehensive Transaction Management**: Full CRUD operations with automatic balance calculation
 - **Multi-Account Support**: Support for checking, savings, credit card, and investment accounts
-- **Smart Balance Recalculation**: Automatic balance updates with Redis caching for optimal performance
+- **Smart Balance Recalculation**: Automatic balance updates for optimal performance
 - **Category & Payee Management**: Organized financial tracking with custom categories and payees
 
 ### Advanced Features
 - **AI-Powered Data Import**: Import transactions from CSV, Excel, and PDF files using local LLMs (Ollama)
 - **Intelligent Learning System**: AI learns from user corrections to improve future categorization
 - **OCR Integration**: Extract transaction data from PDF statements using Tesseract
-- **Real-time Caching**: Redis-based caching system for enhanced performance
 
 ### Technical Features
 - **High-Performance API**: FastAPI with async support and automatic OpenAPI documentation
@@ -46,7 +44,6 @@ The FastAPI backend for the Expense Manager application, providing a robust REST
 
 - Python 3.8 or higher
 - PostgreSQL 12 or higher
-- Redis Server (for caching)
 - pip (Python package manager)
 
 ### Setup Steps
@@ -70,7 +67,7 @@ The FastAPI backend for the Expense Manager application, providing a robust REST
 4. **Setup environment variables:**
    ```bash
    cp .env.example .env
-   # Edit .env with your database and Redis configurations
+   # Edit .env with your database configurations
    ```
 
 5. **Run database migrations:**
@@ -94,10 +91,6 @@ Create a `.env` file in the backend directory:
 ```bash
 # Database Configuration
 DATABASE_URL=postgresql://username:password@localhost:5432/expense_manager
-
-# Redis Configuration  
-REDIS_URL=redis://localhost:6379/0
-REDIS_PASSWORD=  # Optional
 
 # JWT Configuration
 SECRET_KEY=your-secret-key-here

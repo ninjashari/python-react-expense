@@ -35,7 +35,7 @@ import {
 import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate, AutoFixHigh } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
-import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
+import { transactionsApi, accountsApi } from '../services/api';
 import { Transaction, CreateTransactionDto, PaginatedResponse } from '../types';
 import { formatCurrency } from '../utils/formatters';
 import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
@@ -57,7 +57,9 @@ import {
   useCreateTransaction,
   useUpdateTransaction,
   useDeleteTransaction,
-  useBulkUpdateTransactions
+  useBulkUpdateTransactions,
+  useCreatePayee,
+  useCreateCategory
 } from '../hooks/useOptimizedQueries';
 
 // Resizable TableCell component
@@ -276,6 +278,10 @@ const Transactions: React.FC = () => {
 
   const bulkUpdateMutation = useBulkUpdateTransactions();
 
+  // Mutations for creating new payees and categories
+  const createPayeeMutation = useCreatePayee();
+  const createCategoryMutation = useCreateCategory();
+
   // Inline editing functions
   const handleInlineUpdate = async (transactionId: string, field: 'category_id' | 'payee_id' | 'description' | 'type' | 'date' | 'account_id' | 'to_account_id', value: string | null) => {
     // If bulk edit mode is enabled and multiple transactions are selected, update all selected transactions
@@ -342,12 +348,10 @@ const Transactions: React.FC = () => {
   // Create new payee function
   const handleCreatePayee = async (name: string): Promise<{ id: string; name: string; color?: string }> => {
     try {
-      const newPayee = await payeesApi.create({ name });
-      // Invalidate payees query to refresh the list
-      queryClient.invalidateQueries({ queryKey: ['payees'] });
+      const newPayee = await createPayeeMutation.mutateAsync({ name });
       return newPayee;
     } catch (error) {
-      showError('Failed to create payee');
+      // Error handling is already done by the mutation hook
       throw error;
     }
   };
@@ -355,12 +359,10 @@ const Transactions: React.FC = () => {
   // Create new category function
   const handleCreateCategory = async (name: string): Promise<{ id: string; name: string; color?: string }> => {
     try {
-      const newCategory = await categoriesApi.create({ name });
-      // Invalidate categories query to refresh the list
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      const newCategory = await createCategoryMutation.mutateAsync({ name });
       return newCategory;
     } catch (error) {
-      showError('Failed to create category');
+      // Error handling is already done by the mutation hook
       throw error;
     }
   };
