@@ -210,6 +210,19 @@ export interface InsightResponse {
   confidence: number;
 }
 
+// Simple Query Types
+export interface QueryRequest {
+  question: string;
+}
+
+export interface QueryResponse {
+  data: any[];
+  query_type: string;
+  description: string;
+  columns: string[];
+  total_records: number;
+}
+
 export interface FinancialDataSummary {
   period: string;
   total_transactions: number;

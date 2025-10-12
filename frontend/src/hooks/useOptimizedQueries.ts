@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, UseQueryOptions, UseMutationOptions } from '@tanstack/react-query';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi, insightsApi } from '../services/api';
 import { queryKeys, cacheInvalidationPatterns } from '../services/queryConfig';
-import { Transaction, Account, Payee, Category, PaginatedResponse, InsightResponse, FinancialDataSummary, QuestionSuggestions } from '../types';
+import { Transaction, Account, Payee, Category, PaginatedResponse, InsightResponse, FinancialDataSummary, QuestionSuggestions, QueryResponse } from '../types';
 import { useToast } from '../contexts/ToastContext';
 
 // Transaction Hooks
@@ -232,26 +232,17 @@ export const useReportMonthlyTrend = (filters?: any, options?: UseQueryOptions<a
 };
 
 // Insights Hooks
-export const useAskInsight = (options?: UseMutationOptions<InsightResponse, Error, { question: string; timeframe?: string }>) => {
+export const useQueryData = (options?: UseMutationOptions<QueryResponse, Error, { question: string }>) => {
   const { showSuccess, showError } = useToast();
 
   return useMutation({
-    mutationFn: ({ question, timeframe }) => insightsApi.askQuestion(question, timeframe),
+    mutationFn: ({ question }) => insightsApi.queryData(question),
     onSuccess: () => {
-      showSuccess('Insight generated successfully');
+      showSuccess('Query executed successfully');
     },
     onError: (error) => {
-      showError(error.message || 'Failed to generate insight');
+      showError(error.message || 'Failed to execute query');
     },
-    ...options,
-  });
-};
-
-export const useFinancialContext = (timeframe?: string, options?: UseQueryOptions<FinancialDataSummary>) => {
-  return useQuery({
-    queryKey: ['insights', 'context', timeframe],
-    queryFn: () => insightsApi.getFinancialContext(timeframe),
-    staleTime: 2 * 60 * 1000, // 2 minutes - financial data changes frequently
     ...options,
   });
 };

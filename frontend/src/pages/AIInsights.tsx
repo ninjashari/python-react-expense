@@ -7,62 +7,71 @@ import {
   TextField,
   Button,
   Chip,
-  Grid,
-  Paper,
   CircularProgress,
   Alert,
-  Divider,
-  List,
-  ListItem,
-  ListItemText,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  IconButton,
-  Tooltip,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Grid,
 } from '@mui/material';
 import {
-  ExpandMore as ExpandMoreIcon,
   Psychology as PsychologyIcon,
-  TrendingUp as TrendingUpIcon,
-  QuestionAnswer as QuestionAnswerIcon,
-  Refresh as RefreshIcon,
   Send as SendIcon,
+  TableChart as TableChartIcon,
 } from '@mui/icons-material';
-import { useAskInsight, useFinancialContext, useQuestionSuggestions } from '../hooks/useOptimizedQueries';
-import { InsightResponse } from '../types';
+import { useQueryData, useQuestionSuggestions } from '../hooks/useOptimizedQueries';
+import { QueryResponse } from '../types';
 import { formatCurrency } from '../utils/formatters';
 
 const AIInsights: React.FC = () => {
   const [question, setQuestion] = useState('');
-  const [timeframe, setTimeframe] = useState<string>('all_time');
-  const [currentInsight, setCurrentInsight] = useState<InsightResponse | null>(null);
+  const [currentResult, setCurrentResult] = useState<QueryResponse | null>(null);
 
   // Hooks
-  const askInsightMutation = useAskInsight();
-  const { data: financialContext, isLoading: contextLoading, refetch: refetchContext } = useFinancialContext(timeframe);
+  const queryDataMutation = useQueryData();
   const { data: suggestions, isLoading: suggestionsLoading } = useQuestionSuggestions();
 
   const handleAskQuestion = async () => {
     if (!question.trim()) return;
 
     try {
-      const result = await askInsightMutation.mutateAsync({
+      const result = await queryDataMutation.mutateAsync({
         question: question.trim(),
-        timeframe: timeframe === 'all_time' ? undefined : timeframe,
       });
-      setCurrentInsight(result);
+      setCurrentResult(result);
     } catch (error) {
-      console.error('Failed to get insight:', error);
+      console.error('Failed to execute query:', error);
     }
   };
 
   const handleSuggestionClick = (suggestedQuestion: string) => {
     setQuestion(suggestedQuestion);
+  };
+
+  const formatCellValue = (value: any, column: string): string => {
+    if (value === null || value === undefined) return '-';
+    
+    // Format currency columns
+    if (column.toLowerCase().includes('amount') || 
+        column.toLowerCase().includes('balance') || 
+        column.toLowerCase().includes('total')) {
+      return formatCurrency(value);
+    }
+    
+    // Format dates
+    if (column.toLowerCase().includes('date') && typeof value === 'string') {
+      try {
+        return new Date(value).toLocaleDateString('en-IN');
+      } catch {
+        return value;
+      }
+    }
+    
+    return String(value);
   };
 
   return (
@@ -71,46 +80,30 @@ const AIInsights: React.FC = () => {
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
           <PsychologyIcon color="primary" />
-          AI Financial Insights
+          AI Data Query
         </Typography>
         <Typography variant="subtitle1" color="text.secondary">
-          Ask questions about your financial data and get AI-powered insights
+          Ask questions about your financial data and get results in table format
         </Typography>
       </Box>
 
       <Grid container spacing={3}>
-        {/* Left Column - Question Input & Suggestions */}
-        <Grid item xs={12} md={6}>
-          {/* Question Input */}
+        {/* Question Input */}
+        <Grid item xs={12} md={8}>
           <Card sx={{ mb: 3 }}>
             <CardContent>
-              <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <QuestionAnswerIcon />
+              <Typography variant="h6" sx={{ mb: 2 }}>
                 Ask Your Question
               </Typography>
               
               <Box sx={{ mb: 2 }}>
-                <FormControl fullWidth size="small" sx={{ mb: 2 }}>
-                  <InputLabel>Time Period</InputLabel>
-                  <Select
-                    value={timeframe}
-                    label="Time Period"
-                    onChange={(e) => setTimeframe(e.target.value)}
-                  >
-                    <MenuItem value="last_month">Last Month</MenuItem>
-                    <MenuItem value="last_3_months">Last 3 Months</MenuItem>
-                    <MenuItem value="last_year">Last Year</MenuItem>
-                    <MenuItem value="all_time">All Time</MenuItem>
-                  </Select>
-                </FormControl>
-
                 <TextField
                   fullWidth
                   multiline
                   rows={3}
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  placeholder="e.g., How much did I spend on food last month? What are my top expense categories?"
+                  placeholder="e.g., Show me all my food expenses last month, What are my top 5 highest transactions?, List all my credit card accounts and balances"
                   variant="outlined"
                   onKeyPress={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -124,25 +117,27 @@ const AIInsights: React.FC = () => {
               <Button
                 variant="contained"
                 onClick={handleAskQuestion}
-                disabled={!question.trim() || askInsightMutation.isPending}
-                startIcon={askInsightMutation.isPending ? <CircularProgress size={20} /> : <SendIcon />}
+                disabled={!question.trim() || queryDataMutation.isPending}
+                startIcon={queryDataMutation.isPending ? <CircularProgress size={20} /> : <SendIcon />}
                 fullWidth
               >
-                {askInsightMutation.isPending ? 'Analyzing...' : 'Get Insight'}
+                {queryDataMutation.isPending ? 'Querying Data...' : 'Get Data'}
               </Button>
             </CardContent>
           </Card>
+        </Grid>
 
-          {/* Question Suggestions */}
+        {/* Question Suggestions */}
+        <Grid item xs={12} md={4}>
           <Card>
             <CardContent>
               <Typography variant="h6" sx={{ mb: 2 }}>
-                Suggested Questions
+                Sample Questions
               </Typography>
               {suggestionsLoading ? (
                 <CircularProgress />
               ) : (
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   {suggestions?.suggestions.map((suggestion, index) => (
                     <Chip
                       key={index}
@@ -151,6 +146,15 @@ const AIInsights: React.FC = () => {
                       clickable
                       variant="outlined"
                       size="small"
+                      sx={{ 
+                        justifyContent: 'flex-start',
+                        height: 'auto',
+                        padding: '8px',
+                        '& .MuiChip-label': {
+                          whiteSpace: 'normal',
+                          textAlign: 'left'
+                        }
+                      }}
                     />
                   ))}
                 </Box>
@@ -159,158 +163,55 @@ const AIInsights: React.FC = () => {
           </Card>
         </Grid>
 
-        {/* Right Column - Financial Context */}
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <TrendingUpIcon />
-                  Financial Overview
-                </Typography>
-                <Tooltip title="Refresh Data">
-                  <IconButton onClick={() => refetchContext()} disabled={contextLoading}>
-                    <RefreshIcon />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-
-              {contextLoading ? (
-                <CircularProgress />
-              ) : financialContext ? (
-                <Box>
-                  <Grid container spacing={2} sx={{ mb: 2 }}>
-                    <Grid item xs={6}>
-                      <Paper sx={{ p: 2, textAlign: 'center' }}>
-                        <Typography variant="h6" color="success.main">
-                          {formatCurrency(financialContext.total_income)}
-                        </Typography>
-                        <Typography variant="caption">Income</Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Paper sx={{ p: 2, textAlign: 'center' }}>
-                        <Typography variant="h6" color="error.main">
-                          {formatCurrency(financialContext.total_expenses)}
-                        </Typography>
-                        <Typography variant="caption">Expenses</Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Paper sx={{ p: 2, textAlign: 'center' }}>
-                        <Typography variant="h6" color={financialContext.net_savings >= 0 ? 'success.main' : 'error.main'}>
-                          {formatCurrency(financialContext.net_savings)}
-                        </Typography>
-                        <Typography variant="caption">Net Savings</Typography>
-                      </Paper>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Paper sx={{ p: 2, textAlign: 'center' }}>
-                        <Typography variant="h6">
-                          {formatCurrency(financialContext.current_net_worth)}
-                        </Typography>
-                        <Typography variant="caption">Net Worth</Typography>
-                      </Paper>
-                    </Grid>
-                  </Grid>
-
-                  <Accordion>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                      <Typography>Top Categories</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <List dense>
-                        {Object.entries(financialContext.top_categories).slice(0, 5).map(([category, amount]) => (
-                          <ListItem key={category}>
-                            <ListItemText 
-                              primary={category} 
-                              secondary={formatCurrency(amount)} 
-                            />
-                          </ListItem>
-                        ))}
-                      </List>
-                    </AccordionDetails>
-                  </Accordion>
-
-                  <Accordion>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                      <Typography>Account Balances</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <List dense>
-                        {Object.entries(financialContext.accounts).map(([accountName, account]) => (
-                          <ListItem key={accountName}>
-                            <ListItemText 
-                              primary={accountName} 
-                              secondary={`${account.type} - ${formatCurrency(account.balance)}`} 
-                            />
-                          </ListItem>
-                        ))}
-                      </List>
-                    </AccordionDetails>
-                  </Accordion>
-                </Box>
-              ) : (
-                <Alert severity="info">No financial data available</Alert>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* AI Insight Response */}
-        {currentInsight && (
+        {/* Query Results */}
+        {currentResult && (
           <Grid item xs={12}>
             <Card>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <PsychologyIcon color="primary" />
-                  AI Insight
+                  <TableChartIcon color="primary" />
+                  Query Results
                   <Chip 
-                    label={`${Math.round(currentInsight.confidence * 100)}% confidence`} 
+                    label={`${currentResult.total_records} records`} 
                     size="small" 
                     color="primary" 
                     variant="outlined" 
                   />
                 </Typography>
                 
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                    {currentInsight.answer}
-                  </Typography>
-                </Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  {currentResult.description}
+                </Typography>
 
-                {currentInsight.related_transactions.length > 0 && (
-                  <>
-                    <Divider sx={{ my: 2 }} />
-                    <Typography variant="h6" sx={{ mb: 2 }}>
-                      Related Transactions
-                    </Typography>
-                    <List>
-                      {currentInsight.related_transactions.slice(0, 5).map((transaction) => (
-                        <ListItem key={transaction.id} divider>
-                          <ListItemText
-                            primary={transaction.description}
-                            secondary={
-                              <Box>
-                                <Typography variant="body2" component="span">
-                                  {new Date(transaction.date).toLocaleDateString()} • 
-                                  {formatCurrency(transaction.amount)} • 
-                                  {transaction.type}
-                                </Typography>
-                                {transaction.category && (
-                                  <Chip 
-                                    label={transaction.category.name} 
-                                    size="small" 
-                                    sx={{ ml: 1 }} 
-                                  />
-                                )}
-                              </Box>
-                            }
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  </>
+                {currentResult.data.length === 0 ? (
+                  <Alert severity="info">
+                    No data found for your query. Try a different question.
+                  </Alert>
+                ) : (
+                  <TableContainer component={Paper} sx={{ maxHeight: 600 }}>
+                    <Table stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          {currentResult.columns.map((column) => (
+                            <TableCell key={column} sx={{ fontWeight: 'bold' }}>
+                              {column.charAt(0).toUpperCase() + column.slice(1).replace(/_/g, ' ')}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {currentResult.data.map((row, index) => (
+                          <TableRow key={index} hover>
+                            {currentResult.columns.map((column) => (
+                              <TableCell key={column}>
+                                {formatCellValue(row[column], column)}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
                 )}
               </CardContent>
             </Card>
@@ -318,10 +219,10 @@ const AIInsights: React.FC = () => {
         )}
 
         {/* Error Display */}
-        {askInsightMutation.isError && (
+        {queryDataMutation.isError && (
           <Grid item xs={12}>
             <Alert severity="error">
-              {askInsightMutation.error?.message || 'Failed to generate insight. Please try again.'}
+              {queryDataMutation.error?.message || 'Failed to execute query. Please try again.'}
             </Alert>
           </Grid>
         )}
