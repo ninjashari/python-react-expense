@@ -197,6 +197,24 @@ test_*.py
 debug_*.py
 *_debug.py
 validate_*.py
+verify_*.py
+migrate_*.py
+*_test.py
+
+# Server logs
+server.log
+*.log
+
+# Screenshots and captures
+screenshots/
+capture-screens.js
+
+# Setup and config scripts (development only)
+setup_*.sh
+*-dev.bat
+
+# Cache files
+CACHING_GUIDE.md
 
 # PDF files (except documentation)
 *.pdf
@@ -208,6 +226,8 @@ sample_*.csv
 *.xlsx
 *.xls
 
+# Claude AI files
+.claude/
 
 *.jpg
 node_modules/

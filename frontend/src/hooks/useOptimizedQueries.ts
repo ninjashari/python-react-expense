@@ -53,14 +53,52 @@ export const useUpdateTransaction = (options?: UseMutationOptions<Transaction, E
 
   return useMutation({
     mutationFn: ({ id, data }) => transactionsApi.update(id, data),
+    onMutate: async ({ id, data }) => {
+      // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries({ queryKey: ['transactions'] });
+
+      // Snapshot the previous value
+      const previousTransactions = queryClient.getQueriesData({ queryKey: ['transactions'] });
+
+      // Optimistically update all transaction lists in cache
+      queryClient.setQueriesData(
+        { queryKey: ['transactions'] },
+        (oldData: any) => {
+          if (!oldData?.items) return oldData;
+          
+          return {
+            ...oldData,
+            items: oldData.items.map((transaction: Transaction) => 
+              transaction.id === id 
+                ? { ...transaction, ...data }
+                : transaction
+            )
+          };
+        }
+      );
+
+      // Return a context object with the snapshotted value
+      return { previousTransactions };
+    },
     onSuccess: (data, variables) => {
       showSuccess('Transaction updated successfully');
-      cacheInvalidationPatterns.invalidateTransactions(queryClient);
-      cacheInvalidationPatterns.invalidateAccounts(queryClient);
+      // Update the specific transaction detail cache
       queryClient.setQueryData(queryKeys.transactionDetail(variables.id), data);
+      // Invalidate accounts to update balances
+      cacheInvalidationPatterns.invalidateAccounts(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
       showError(error.message || 'Failed to update transaction');
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousTransactions) {
+        context.previousTransactions.forEach(([queryKey, data]: [any, any]) => {
+          queryClient.setQueryData(queryKey, data);
+        });
+      }
+    },
+    onSettled: () => {
+      // Always refetch after error or success to ensure server state
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
     },
     ...options,
   });
