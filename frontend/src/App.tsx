@@ -19,7 +19,7 @@ import Import from './pages/Import';
 import Backup from './pages/Backup';
 import LearningDashboard from './pages/LearningDashboard';
 import Insights from './pages/Insights';
-import AdvancedInsights from './pages/AdvancedInsights';
+import AIInsights from './pages/AIInsights';
 import { useAppNotifications } from './hooks/useAppNotifications';
 import { createOptimizedQueryClient } from './services/queryConfig';
 
@@ -71,6 +71,7 @@ const AppContent: React.FC = () => {
           <Route path="/backup" element={<Backup />} />
           <Route path="/learning" element={<LearningDashboard />} />
           <Route path="/insights" element={<Insights />} />
+          <Route path="/ai-insights" element={<AIInsights />} />
         </Routes>
       </Layout>
     </ErrorBoundary>

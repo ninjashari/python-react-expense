@@ -196,3 +196,55 @@ export interface XLSLLMImportResponse {
   message?: string;
   error?: string;
 }
+
+// AI Insights Types
+export interface InsightRequest {
+  question: string;
+  timeframe?: 'last_month' | 'last_3_months' | 'last_year' | 'all_time';
+}
+
+export interface InsightResponse {
+  answer: string;
+  data_summary: FinancialDataSummary;
+  related_transactions: Transaction[];
+  confidence: number;
+}
+
+export interface FinancialDataSummary {
+  period: string;
+  total_transactions: number;
+  total_income: number;
+  total_expenses: number;
+  net_savings: number;
+  current_net_worth: number;
+  accounts: Record<string, AccountSummary>;
+  top_categories: Record<string, number>;
+  top_payees: Record<string, number>;
+  monthly_trends: Record<string, MonthlyTrend>;
+  significant_transactions: TransactionSummary[];
+}
+
+export interface AccountSummary {
+  type: string;
+  balance: number;
+  transactions: number;
+}
+
+export interface MonthlyTrend {
+  income: number;
+  expenses: number;
+}
+
+export interface TransactionSummary {
+  date: string;
+  amount: number;
+  description: string;
+  type: string;
+  category?: string;
+  payee?: string;
+  account?: string;
+}
+
+export interface QuestionSuggestions {
+  suggestions: string[];
+}

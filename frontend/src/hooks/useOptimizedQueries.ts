@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, UseQueryOptions, UseMutationOptions } from '@tanstack/react-query';
-import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
+import { transactionsApi, accountsApi, payeesApi, categoriesApi, insightsApi } from '../services/api';
 import { queryKeys, cacheInvalidationPatterns } from '../services/queryConfig';
-import { Transaction, Account, Payee, Category, PaginatedResponse } from '../types';
+import { Transaction, Account, Payee, Category, PaginatedResponse, InsightResponse, FinancialDataSummary, QuestionSuggestions } from '../types';
 import { useToast } from '../contexts/ToastContext';
 
 // Transaction Hooks
@@ -227,6 +227,40 @@ export const useReportMonthlyTrend = (filters?: any, options?: UseQueryOptions<a
     queryKey: queryKeys.reportMonthlyTrend(filters),
     queryFn: () => transactionsApi.getMonthlyTrend(filters),
     staleTime: 5 * 60 * 1000,
+    ...options,
+  });
+};
+
+// Insights Hooks
+export const useAskInsight = (options?: UseMutationOptions<InsightResponse, Error, { question: string; timeframe?: string }>) => {
+  const { showSuccess, showError } = useToast();
+
+  return useMutation({
+    mutationFn: ({ question, timeframe }) => insightsApi.askQuestion(question, timeframe),
+    onSuccess: () => {
+      showSuccess('Insight generated successfully');
+    },
+    onError: (error) => {
+      showError(error.message || 'Failed to generate insight');
+    },
+    ...options,
+  });
+};
+
+export const useFinancialContext = (timeframe?: string, options?: UseQueryOptions<FinancialDataSummary>) => {
+  return useQuery({
+    queryKey: ['insights', 'context', timeframe],
+    queryFn: () => insightsApi.getFinancialContext(timeframe),
+    staleTime: 2 * 60 * 1000, // 2 minutes - financial data changes frequently
+    ...options,
+  });
+};
+
+export const useQuestionSuggestions = (options?: UseQueryOptions<QuestionSuggestions>) => {
+  return useQuery({
+    queryKey: ['insights', 'suggestions'],
+    queryFn: () => insightsApi.getQuestionSuggestions(),
+    staleTime: 10 * 60 * 1000, // 10 minutes - suggestions change less frequently
     ...options,
   });
 };

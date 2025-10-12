@@ -7,7 +7,7 @@ export const formatCurrency = (amount: number): string => {
 
 export const formatDate = (date: string | Date): string => {
   const dateObj = typeof date === 'string' ? new Date(date) : date;
-  return dateObj.toLocaleDateString('en-US', {
+  return dateObj.toLocaleDateString('en-IN', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -16,7 +16,7 @@ export const formatDate = (date: string | Date): string => {
 
 export const formatDateTime = (date: string | Date): string => {
   const dateObj = typeof date === 'string' ? new Date(date) : date;
-  return dateObj.toLocaleString('en-US', {
+  return dateObj.toLocaleString('en-IN', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',

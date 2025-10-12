@@ -286,4 +286,18 @@ export const importApi = {
     }).then(res => res.data),
 };
 
+// Insights API
+export const insightsApi = {
+  askQuestion: (question: string, timeframe?: string): Promise<any> =>
+    api.post('/insights/ask', { question, timeframe }).then(res => res.data),
+  
+  getFinancialContext: (timeframe?: string): Promise<any> =>
+    api.get('/insights/context', { 
+      params: timeframe ? { timeframe } : {} 
+    }).then(res => res.data),
+  
+  getQuestionSuggestions: (): Promise<any> =>
+    api.get('/insights/suggestions').then(res => res.data),
+};
+
 export default api;

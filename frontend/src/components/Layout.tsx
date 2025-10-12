@@ -46,6 +46,7 @@ const menuItems = [
   { text: 'Reports', icon: <Analytics />, path: '/reports' },
   { text: 'Learning', icon: <Psychology />, path: '/learning' },
   { text: 'Advanced Insights', icon: <Insights />, path: '/insights' },
+  { text: 'AI Insights', icon: <Psychology />, path: '/ai-insights' },
   { text: 'Import', icon: <Upload />, path: '/import' },
   { text: 'Backup', icon: <Backup />, path: '/backup' },
   { text: 'Payees', icon: <Person />, path: '/payees' },

@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import accounts, transactions, payees, categories, import_data, auth, learning
+from routers import accounts, transactions, payees, categories, import_data, auth, learning, insights
 import models
 
 Base.metadata.create_all(bind=engine)
@@ -50,6 +50,7 @@ app.include_router(payees.router, prefix="/api/payees", tags=["payees"])
 app.include_router(categories.router, prefix="/api/categories", tags=["categories"])
 app.include_router(import_data.router, prefix="/api/import", tags=["import"])
 app.include_router(learning.router, prefix="/api/learning", tags=["learning"])
+app.include_router(insights.router, prefix="/api/insights", tags=["insights"])
 
 @app.get("/")
 def read_root():
