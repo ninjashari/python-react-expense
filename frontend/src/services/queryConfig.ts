@@ -5,7 +5,6 @@ export const createOptimizedQueryClient = () => {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        staleTime: 5 * 60 * 1000, // 5 minutes
         retry: 2,
         refetchOnWindowFocus: false,
       },
@@ -16,8 +15,8 @@ export const createOptimizedQueryClient = () => {
   });
 };
 
-// Simple cache invalidation patterns
-export const cacheInvalidationPatterns = {
+// Query invalidation patterns for data synchronization
+export const queryInvalidationPatterns = {
   invalidateTransactions: (queryClient: QueryClient) => {
     queryClient.invalidateQueries({ queryKey: ['transactions'] });
     queryClient.invalidateQueries({ queryKey: ['transaction-summary'] });

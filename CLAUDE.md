@@ -7,10 +7,9 @@ This document provides comprehensive information for developers working on this 
 A full-stack expense management application featuring comprehensive financial tracking, multi-account support, and AI-powered data import capabilities using local LLMs.
 
 ### Current Architecture
-- **Backend**: FastAPI + SQLAlchemy + PostgreSQL + Redis
+- **Backend**: FastAPI + SQLAlchemy + PostgreSQL
 - **Frontend**: React 19 + TypeScript + Material-UI + TanStack Query
 - **Database**: PostgreSQL with Alembic migrations
-- **Caching**: Redis for backend + optimized TanStack Query for frontend
 - **Authentication**: JWT-based auth system
 - **AI**: Ollama integration for PDF/document processing
 
@@ -23,7 +22,7 @@ cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env  # Configure database and Redis URLs
+cp .env.example .env  # Configure database URLs
 alembic upgrade head
 python -m uvicorn main:app --reload --port 8001
 
@@ -36,10 +35,6 @@ npm start  # Runs on http://localhost:3001
 
 ### Essential Services
 ```bash
-# Start Redis (required for backend caching)
-redis-server
-# Or with Docker: docker run -d --name redis -p 6379:6379 redis:latest
-
 # Start PostgreSQL
 sudo systemctl start postgresql
 # Or with Docker: docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password postgres
@@ -69,27 +64,12 @@ query = db.query(Transaction).options(
 query = db.query(Transaction).all()  # Will make additional queries for each relationship
 ```
 
-### Caching Strategy ⚠️
-**CRITICAL**: The application implements multi-layer caching:
-- **Backend**: Redis caching with automatic invalidation on mutations
-- **Frontend**: TanStack Query with optimized cache times
-- **Cache Keys**: Use pattern `user:{user_id}:resource:{resource_type}` for user-scoped data
-- **Invalidation**: Always invalidate related caches when data changes
-
 ## Recent Major Updates
 
 ### Balance Recalculation System (Latest)
 - **Fixed**: Missing `db.commit()` in balance recalculation functions
 - **Fixed**: Variable scope issues in `recalculate_account_balances()` endpoint
-- **Added**: Comprehensive cache invalidation after balance updates
 - **Added**: Test scripts (`test_recalculation.py`, `debug_recalculation.py`)
-- **Performance**: Measured 77% overall API response improvement with caching
-
-### Redis Integration & Performance Optimization
-- **Added**: Redis caching service with intelligent invalidation
-- **Performance**: 77% improvement in API response times
-- **Cache TTL**: 5 minutes for balance data, 15 minutes for reference data
-- **Fallback**: Graceful degradation when Redis is unavailable
 
 ### AI-Powered Import System
 - **PDF Processing**: OCR + LLM integration for statement processing
@@ -147,8 +127,6 @@ Authorization: Bearer <jwt_token>
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 5 * 60 * 1000,  // 5 minutes
-      cacheTime: 10 * 60 * 1000, // 10 minutes
       retry: 3,
       refetchOnWindowFocus: false,
     },
@@ -189,11 +167,10 @@ const utilizationPercent = (account.balance / account.credit_limit) * 100;
 
 ### Balance Recalculation
 ```python
-# Always commit changes and invalidate cache
+# Always commit changes
 async def recalculate_subsequent_balances(db: Session, account_id: str, start_date: date):
     # Update balances for all transactions after start_date
     db.commit()  # CRITICAL: Must commit changes
-    cache_service.invalidate_pattern(f"user:*:account:{account_id}:*")
 ```
 
 ## Common Issues & Solutions
@@ -210,18 +187,9 @@ Backend: Always use `joinedload()` for nested data:
 .options(joinedload(Transaction.payee))
 ```
 
-### Cache Invalidation Issues
-Always invalidate related caches after mutations:
-```python
-# After updating account balance
-cache_service.invalidate_pattern(f"user:{user_id}:account:{account_id}:*")
-cache_service.invalidate_pattern(f"user:{user_id}:transactions:*")
-```
-
 ### Balance Recalculation Failures
 Common causes and fixes:
 - **Missing commit**: Always call `db.commit()` after balance updates
-- **Cache not cleared**: Invalidate cache after recalculation
 - **Variable scope**: Ensure variables are properly initialized in endpoints
 
 ## Environment Setup
@@ -233,12 +201,6 @@ SECRET_KEY=your-secret-key-here
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
-
-# Redis Configuration (Required)
-REDIS_URL=redis://localhost:6379/0
-REDIS_PASSWORD=
-CACHE_ENABLED=true
-CACHE_DEFAULT_TTL=900
 
 # AI/LLM Features (Optional)
 OLLAMA_BASE_URL=http://localhost:11434
@@ -299,10 +261,9 @@ This application has evolved through several major iterations:
 2. **Credit Card Support** (2024): Added debt tracking logic
 3. **Import System** (2024): CSV/Excel import with AI categorization
 4. **PDF Processing** (2024): OCR + LLM integration
-5. **Performance Optimization** (2025): Redis caching implementation
-6. **Balance Recalculation** (2025): Robust balance management system
+5. **Balance Recalculation** (2025): Robust balance management system
 
-Each iteration maintained backward compatibility while adding new capabilities. The current version represents a mature, production-ready financial management system with enterprise-grade caching and AI integration.
+Each iteration maintained backward compatibility while adding new capabilities. The current version represents a mature, production-ready financial management system with AI integration.
 
 ### Frontend Environment Variables (.env)
 ```env

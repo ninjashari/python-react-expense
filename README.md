@@ -4,7 +4,6 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://reactjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791.svg)](https://www.postgresql.org/)
-[![Redis](https://img.shields.io/badge/Redis-6+-DC382D.svg)](https://redis.io/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
 [![Material-UI](https://img.shields.io/badge/Material--UI-5.18-007FFF.svg)](https://mui.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -60,8 +59,8 @@ A modern, full-stack expense management application designed for personal financ
 - **LLM-Powered PDF Analysis**: Advanced AI processing for unstructured PDF data
 
 ### ⚡ Performance Optimizations
-- **Multi-Layer Caching**: Redis backend caching + TanStack Query frontend caching
-- **Smart Cache Invalidation**: Automatic cache clearing on data mutations
+- **Frontend Caching**: TanStack Query frontend caching for optimal user experience
+- **Smart Query Management**: Automatic query invalidation on data mutations
 - **Optimized Queries**: Eager loading with SQLAlchemy for reduced N+1 queries
 - **Background Prefetching**: Proactive data loading for faster user experience
 - **Automatic Bulk Operations**: Streamlined bulk editing with instant activation
@@ -83,7 +82,6 @@ A modern, full-stack expense management application designed for personal financ
 - **[Alembic](https://alembic.sqlalchemy.org/)** - Database migration tool
 - **[Pydantic](https://pydantic.dev/)** - Data validation using Python type hints
 - **[JWT Authentication](https://python-jose.readthedocs.io/)** - Secure token-based auth
-- **[Redis](https://redis.io/)** - High-performance caching for optimized read operations
 - **[Ollama](https://ollama.ai/)** - Local LLM integration for PDF processing
 - **[Tesseract OCR](https://tesseract-ocr.github.io/)** - Optical character recognition
 - **[pandas](https://pandas.pydata.org/)** - Data manipulation and analysis
@@ -112,7 +110,6 @@ A modern, full-stack expense management application designed for personal financ
 - **[Node.js](https://nodejs.org/)** v16+ 
 - **[Python](https://www.python.org/)** v3.8+
 - **[PostgreSQL](https://www.postgresql.org/)** v12+
-- **[Redis](https://redis.io/)** v6+ (for performance caching)
 - **[Git](https://git-scm.com/)** for version control
 
 ### Optional Components
@@ -128,26 +125,7 @@ git clone https://github.com/yourusername/python-react-expense.git
 cd python-react-expense
 ```
 
-### 2. Redis Setup (Required for Caching)
-
-**Easy setup using our script:**
-```bash
-./setup_redis.sh
-```
-
-**Or install manually:**
-```bash
-# Ubuntu/Debian
-sudo apt install redis-server
-
-# macOS
-brew install redis
-
-# Or use Docker
-docker run -d --name redis -p 6379:6379 redis:latest
-```
-
-### 3. Database Setup
+### 2. Database Setup
 
 Create a PostgreSQL database:
 
@@ -173,10 +151,8 @@ pip install -r requirements.txt
 # Create environment file from example
 cp .env.example .env
 
-# Update .env with your database credentials and Redis settings:
+# Update .env with your database credentials:
 # DATABASE_URL=postgresql://expense_user:your_password@localhost:5432/expense_manager
-# REDIS_URL=redis://localhost:6379
-# CACHE_ENABLED=true
 
 # Run database migrations
 alembic upgrade head
@@ -398,9 +374,6 @@ npm start  # Runs on http://localhost:3001
 
 **Performance Tests:**
 ```bash
-# Test cache performance (requires backend running)
-python test_caching.py
-
 # Test balance recalculation functionality  
 python test_recalculation.py
 ```
@@ -449,16 +422,13 @@ python-react-expense/
 │   │   ├── pages/          # Main application pages (Dashboard, Transactions, etc.)
 │   │   ├── contexts/       # React context providers (Auth, Toast)
 │   │   ├── hooks/          # Custom React hooks (API, Learning, Notifications)
-│   │   ├── services/       # API communication layer with caching
+│   │   ├── services/       # API communication layer
 │   │   ├── types/          # TypeScript type definitions
 │   │   └── utils/          # Frontend utilities
 │   ├── public/             # Static assets
 │   └── package.json        # Node.js dependencies
-├── CACHING_GUIDE.md        # Performance caching documentation
 ├── CLAUDE.md               # Developer documentation
 ├── PDF_LLM_SETUP.md       # LLM setup instructions
-├── setup_redis.sh          # Redis installation script
-├── test_caching.py         # Cache performance tests
 ├── test_recalculation.py   # Balance recalculation tests
 └── README.md               # This file
 ```
@@ -469,13 +439,11 @@ python-react-expense/
 graph TD
     A[React Frontend] -->|HTTP/REST API| B[FastAPI Backend]
     B -->|SQLAlchemy ORM| C[PostgreSQL Database]
-    B -->|High-Performance Caching| R[Redis Cache]
     B -->|File Processing| D[Import Services]
     D -->|OCR| E[Tesseract]
     D -->|AI Processing| F[Ollama LLM]
     B -->|ML Training| G[Learning Engine]
     G -->|Pattern Analysis| H[User Behavior Data]
-    A -->|TanStack Query| I[Frontend Cache]
     A -->|Real-time Updates| J[Toast Notifications]
 ```
 
@@ -494,7 +462,6 @@ graph TD
 - **Type Safety**: Full TypeScript coverage in frontend
 - **API Documentation**: Auto-generated Swagger UI at `/docs`
 - **Database Migrations**: Alembic for schema versioning
-- **Caching Layer**: Redis + TanStack Query for performance
 - **AI Integration**: Local LLM processing with Ollama
 - **Balance Integrity**: Automated recalculation and validation tools
 
@@ -522,45 +489,26 @@ Contributions are welcome! Here's how to get started:
 
 ## ⚡ Performance
 
-This application is optimized for handling large datasets with a multi-layer caching strategy that delivers significant performance improvements:
-
-### Backend Caching (Redis)
-- **Transaction queries**: 10-minute cache for frequently accessed data
-- **Account data**: 30-minute cache (changes less frequently)  
-- **Reference data**: 20-minute cache for categories and payees
-- **Automatic invalidation**: Smart cache clearing on data mutations
-- **Pattern-based cache keys**: Efficient cache management by user and filters
+This application is optimized for handling large datasets with efficient data management:
 
 ### Frontend Optimization
-- **TanStack Query**: Enhanced caching with 5-30 minute stale times based on data volatility
-- **Background prefetching**: Proactive data loading for better UX
-- **Optimistic updates**: Instant UI feedback on mutations
+- **TanStack Query**: Efficient data fetching and state management
 - **Query deduplication**: Prevents duplicate requests
-- **Intelligent cache invalidation**: Automatic cache updates on data changes
-
-### Measured Performance Benefits
-- **52.4% faster** transaction list loading with caching
-- **31.8% average** speed improvement across all endpoints
-- **Near-instant** navigation between cached pages
-- **90%+ reduction** in database queries for repeated requests
-- **Automatic bulk edit mode** for improved user workflow
+- **Background refetching**: Keeps data fresh automatically
+- **Automatic bulk edit mode**: Improved user workflow for multiple operations
 
 ### Balance Recalculation System
 - **Data integrity tools**: Built-in balance recalculation for maintenance
 - **Automatic corrections**: Smart detection and fixing of balance inconsistencies  
-- **Cache-aware updates**: Proper cache invalidation after recalculations
 - **Audit trails**: Detailed reporting of balance corrections
+
+```
 
 ### Testing Performance
 ```bash
-# Test cache performance (requires backend running)
-python test_caching.py
-
 # Test balance recalculation functionality
 python test_recalculation.py
 ```
-
-For comprehensive caching setup, see [CACHING_GUIDE.md](CACHING_GUIDE.md).
 
 ## ⚙️ Configuration
 
@@ -576,11 +524,6 @@ ACCESS_TOKEN_EXPIRE_MINUTES=30
 
 # CORS Settings
 CORS_ORIGINS=http://localhost:3001,http://127.0.0.1:3001
-
-# Redis Caching (Required)
-REDIS_URL=redis://localhost:6379
-CACHE_ENABLED=true
-CACHE_DEFAULT_TTL=900
 
 # Optional: PDF LLM Import
 OLLAMA_HOST=http://localhost:11434
@@ -600,9 +543,6 @@ REACT_APP_API_BASE_URL=http://localhost:8001/api
 The project includes convenient setup scripts:
 
 ```bash
-# Setup Redis (automatic installation and configuration)
-./setup_redis.sh
-
 # Setup Ollama for LLM features (if needed)
 ./setup_ollama.sh
 

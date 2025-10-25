@@ -216,34 +216,6 @@ python test_recalculation.py
 
 ## ⚡ Performance
 
-### Caching Strategy
-
-The backend implements a comprehensive Redis-based caching system for optimal performance:
-
-#### Cache Implementation
-- **Account Balance Caching**: Frequently accessed account balances are cached with automatic invalidation
-- **Transaction List Caching**: Paginated transaction queries are cached to reduce database load
-- **Category/Payee Caching**: Reference data is cached for quick access
-- **Cache Invalidation**: Smart cache invalidation on data mutations
-
-#### Performance Metrics
-Based on load testing with typical workloads:
-
-| Operation | Without Cache | With Cache | Improvement |
-|-----------|---------------|------------|-------------|
-| Account List | 45ms | 8ms | 82% faster |
-| Transaction List | 120ms | 32ms | 73% faster |
-| Balance Queries | 35ms | 5ms | 86% faster |
-| **Overall API Response** | **Average 67ms** | **Average 15ms** | **77% improvement** |
-
-#### Cache Configuration
-```bash
-# Redis connection settings
-REDIS_URL=redis://localhost:6379/0
-REDIS_TTL=300  # 5 minutes default TTL
-REDIS_MAX_CONNECTIONS=20
-```
-
 ### Database Optimization
 - **Connection Pooling**: SQLAlchemy connection pool for efficient database connections
 - **Eager Loading**: Optimized queries with `joinedload()` to prevent N+1 problems
@@ -260,9 +232,9 @@ REDIS_MAX_CONNECTIONS=20
 │   Port 3001     │    │   Port 8001     │    │   Port 5432     │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                                 │
-                        ┌───────▼───────┐    ┌─────────────────┐
-                        │   Caching     │    │   AI Services   │
-                        │   Redis       │    │   Ollama LLM    │
+                        ┌───────▼───────┐
+                        │   AI Services │
+                        │   Ollama LLM  │
                         │   Port 6379   │    │   Port 11434    │
                         └───────────────┘    └─────────────────┘
 ```
@@ -288,13 +260,7 @@ REDIS_MAX_CONNECTIONS=20
 #### 4. Service Layer (`services/`)
 - Business logic separation from API layer
 - AI/LLM integration services
-- Caching service with Redis integration
 - File processing services (CSV, Excel, PDF)
-
-#### 5. Caching Layer (`services/cache_service.py`)
-- Redis-based caching with TTL management
-- Intelligent cache invalidation strategies
-- Performance monitoring and metrics
 
 ### Project Structure
 
@@ -335,7 +301,6 @@ backend/
 │   └── learning.py   # Learning system schemas
 ├── services/          # Business logic services
 │   ├── __init__.py
-│   ├── cache_service.py    # Redis caching service
 │   ├── llm_service.py      # LLM integration service
 │   ├── pdf_llm_processor.py # PDF processing with LLM
 │   ├── pdf_processor.py    # OCR-based PDF processing

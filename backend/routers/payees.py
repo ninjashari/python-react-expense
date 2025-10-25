@@ -106,7 +106,6 @@ def get_payees(
     
     if needs_update:
         db.commit()
-        # Invalidate cache since we updated data
     
     return payees
 

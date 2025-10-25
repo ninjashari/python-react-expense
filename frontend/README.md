@@ -33,7 +33,6 @@ A modern React TypeScript frontend for the Expense Manager application, featurin
 - **Multi-Select Dropdowns** - Advanced filtering with search
 - **File Upload Drag & Drop** - Intuitive file import interface
 - **Data Virtualization** - Optimized rendering for large datasets
-- **Optimistic Updates** - Instant UI feedback with server reconciliation
 - **Error Boundaries** - Graceful error handling and recovery
 - **Progressive Web App** - Offline capability and app-like experience
 
@@ -293,7 +292,6 @@ Used for server state management:
 const { data: transactions, isLoading, error } = useQuery({
   queryKey: ['transactions', filters],
   queryFn: () => api.getTransactions(filters),
-  staleTime: 5 * 60 * 1000, // 5 minutes
 });
 
 // Mutation for data updates
