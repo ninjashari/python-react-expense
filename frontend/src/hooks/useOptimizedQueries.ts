@@ -51,13 +51,50 @@ export const useUpdateTransaction = (options?: UseMutationOptions<Transaction, E
 
   return useMutation({
     mutationFn: ({ id, data }) => transactionsApi.update(id, data),
+    onMutate: async ({ id, data }) => {
+      // Cancel any outgoing refetches for transactions
+      await queryClient.cancelQueries({ queryKey: ['transactions'] });
+
+      // Snapshot the previous value
+      const previousTransactions = queryClient.getQueriesData({ queryKey: ['transactions'] });
+
+      // Optimistically update to the new value
+      queryClient.setQueriesData(
+        { queryKey: ['transactions'] },
+        (oldData: any) => {
+          if (!oldData?.items) return oldData;
+          
+          return {
+            ...oldData,
+            items: oldData.items.map((transaction: Transaction) => 
+              transaction.id === id 
+                ? { ...transaction, ...data }
+                : transaction
+            )
+          };
+        }
+      );
+
+      // Return a context object with the snapshotted value
+      return { previousTransactions };
+    },
     onSuccess: (data, variables) => {
       showSuccess('Transaction updated successfully');
       queryInvalidationPatterns.invalidateTransactions(queryClient);
       queryInvalidationPatterns.invalidateAccounts(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context: any) => {
       showError(error.message || 'Failed to update transaction');
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousTransactions) {
+        context.previousTransactions.forEach(([queryKey, data]: [any, any]) => {
+          queryClient.setQueryData(queryKey, data);
+        });
+      }
+    },
+    onSettled: () => {
+      // Always refetch after error or success to ensure server state
+      queryInvalidationPatterns.invalidateTransactions(queryClient);
     },
     ...options,
   });
@@ -69,13 +106,49 @@ export const useBulkUpdateTransactions = (options?: UseMutationOptions<any, Erro
 
   return useMutation({
     mutationFn: ({ transaction_ids, updates }) => transactionsApi.bulkUpdate(transaction_ids, updates),
+    onMutate: async ({ transaction_ids, updates }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['transactions'] });
+
+      // Snapshot the previous value
+      const previousTransactions = queryClient.getQueriesData({ queryKey: ['transactions'] });
+
+      // Optimistically update all transaction lists
+      queryClient.setQueriesData(
+        { queryKey: ['transactions'] },
+        (oldData: any) => {
+          if (!oldData?.items) return oldData;
+          
+          return {
+            ...oldData,
+            items: oldData.items.map((transaction: Transaction) => 
+              transaction_ids.includes(transaction.id)
+                ? { ...transaction, ...updates }
+                : transaction
+            )
+          };
+        }
+      );
+
+      return { previousTransactions };
+    },
     onSuccess: (data, variables) => {
       showSuccess(`Updated ${variables.transaction_ids.length} transactions successfully`);
       queryInvalidationPatterns.invalidateTransactions(queryClient);
       queryInvalidationPatterns.invalidateAccounts(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context: any) => {
       showError(error.message || 'Failed to update transactions');
+      // Roll back on error
+      if (context?.previousTransactions) {
+        context.previousTransactions.forEach(([queryKey, data]: [any, any]) => {
+          queryClient.setQueryData(queryKey, data);
+        });
+      }
+    },
+    onSettled: () => {
+      // Always refetch after error or success to ensure server state
+      queryInvalidationPatterns.invalidateTransactions(queryClient);
     },
     ...options,
   });
@@ -87,13 +160,46 @@ export const useDeleteTransaction = (options?: UseMutationOptions<void, Error, s
 
   return useMutation({
     mutationFn: transactionsApi.delete,
+    onMutate: async (transactionId) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['transactions'] });
+
+      // Snapshot the previous value
+      const previousTransactions = queryClient.getQueriesData({ queryKey: ['transactions'] });
+
+      // Optimistically remove the transaction
+      queryClient.setQueriesData(
+        { queryKey: ['transactions'] },
+        (oldData: any) => {
+          if (!oldData?.items) return oldData;
+          
+          return {
+            ...oldData,
+            items: oldData.items.filter((transaction: Transaction) => transaction.id !== transactionId),
+            total: oldData.total - 1
+          };
+        }
+      );
+
+      return { previousTransactions };
+    },
     onSuccess: (data, transactionId) => {
       showSuccess('Transaction deleted successfully');
       queryInvalidationPatterns.invalidateTransactions(queryClient);
       queryInvalidationPatterns.invalidateAccounts(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context: any) => {
       showError(error.message || 'Failed to delete transaction');
+      // Roll back on error
+      if (context?.previousTransactions) {
+        context.previousTransactions.forEach(([queryKey, data]: [any, any]) => {
+          queryClient.setQueryData(queryKey, data);
+        });
+      }
+    },
+    onSettled: () => {
+      // Always refetch to ensure server state
+      queryInvalidationPatterns.invalidateTransactions(queryClient);
     },
     ...options,
   });
