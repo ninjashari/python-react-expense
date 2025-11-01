@@ -62,6 +62,13 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
   const [showSuccess, setShowSuccess] = useState(false);
   const [lastSuggestionUsed, setLastSuggestionUsed] = useState<SuggestionItem | null>(null);
   
+  // Update internal state when currentValue prop changes (for optimistic updates)
+  useEffect(() => {
+    if (!isEditing) {
+      setShowSuccess(false);
+    }
+  }, [currentValue, isEditing]);
+  
   const recordSelection = useRecordSelection();
   const { trackSuggestionShown, trackSuggestionAccepted } = useLearningMetrics();
   

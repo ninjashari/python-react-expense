@@ -55,6 +55,10 @@ export const useUpdateTransaction = (options?: UseMutationOptions<Transaction, E
       // Cancel any outgoing refetches for transactions
       await queryClient.cancelQueries({ queryKey: ['transactions'] });
 
+      // Get current data for enhanced optimistic updates
+      const payeesData = queryClient.getQueryData(queryKeys.payeesList()) as any[];
+      const categoriesData = queryClient.getQueryData(queryKeys.categoriesList()) as any[];
+
       // Snapshot the previous value
       const previousTransactions = queryClient.getQueriesData({ queryKey: ['transactions'] });
 
@@ -66,11 +70,37 @@ export const useUpdateTransaction = (options?: UseMutationOptions<Transaction, E
           
           return {
             ...oldData,
-            items: oldData.items.map((transaction: Transaction) => 
-              transaction.id === id 
-                ? { ...transaction, ...data }
-                : transaction
-            )
+            items: oldData.items.map((transaction: Transaction) => {
+              if (transaction.id !== id) return transaction;
+              
+              const updatedTransaction = { ...transaction, ...data };
+              
+              // Update nested payee object if payee_id changed
+              if (data.payee_id !== undefined) {
+                if (data.payee_id === null) {
+                  updatedTransaction.payee = null;
+                } else {
+                  const payee = payeesData?.find(p => p.id === data.payee_id);
+                  if (payee) {
+                    updatedTransaction.payee = payee;
+                  }
+                }
+              }
+              
+              // Update nested category object if category_id changed
+              if (data.category_id !== undefined) {
+                if (data.category_id === null) {
+                  updatedTransaction.category = null;
+                } else {
+                  const category = categoriesData?.find(c => c.id === data.category_id);
+                  if (category) {
+                    updatedTransaction.category = category;
+                  }
+                }
+              }
+              
+              return updatedTransaction;
+            })
           };
         }
       );
@@ -110,6 +140,10 @@ export const useBulkUpdateTransactions = (options?: UseMutationOptions<any, Erro
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: ['transactions'] });
 
+      // Get current data for enhanced optimistic updates
+      const payeesData = queryClient.getQueryData(queryKeys.payeesList()) as any[];
+      const categoriesData = queryClient.getQueryData(queryKeys.categoriesList()) as any[];
+
       // Snapshot the previous value
       const previousTransactions = queryClient.getQueriesData({ queryKey: ['transactions'] });
 
@@ -121,11 +155,37 @@ export const useBulkUpdateTransactions = (options?: UseMutationOptions<any, Erro
           
           return {
             ...oldData,
-            items: oldData.items.map((transaction: Transaction) => 
-              transaction_ids.includes(transaction.id)
-                ? { ...transaction, ...updates }
-                : transaction
-            )
+            items: oldData.items.map((transaction: Transaction) => {
+              if (!transaction_ids.includes(transaction.id)) return transaction;
+              
+              const updatedTransaction = { ...transaction, ...updates };
+              
+              // Update nested payee object if payee_id changed
+              if (updates.payee_id !== undefined) {
+                if (updates.payee_id === null) {
+                  updatedTransaction.payee = null;
+                } else {
+                  const payee = payeesData?.find(p => p.id === updates.payee_id);
+                  if (payee) {
+                    updatedTransaction.payee = payee;
+                  }
+                }
+              }
+              
+              // Update nested category object if category_id changed
+              if (updates.category_id !== undefined) {
+                if (updates.category_id === null) {
+                  updatedTransaction.category = null;
+                } else {
+                  const category = categoriesData?.find(c => c.id === updates.category_id);
+                  if (category) {
+                    updatedTransaction.category = category;
+                  }
+                }
+              }
+              
+              return updatedTransaction;
+            })
           };
         }
       );
