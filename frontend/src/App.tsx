@@ -19,7 +19,6 @@ import Import from './pages/Import';
 import Backup from './pages/Backup';
 import LearningDashboard from './pages/LearningDashboard';
 import Insights from './pages/Insights';
-import AdvancedInsights from './pages/AdvancedInsights';
 import { useAppNotifications } from './hooks/useAppNotifications';
 
 const queryClient = new QueryClient({

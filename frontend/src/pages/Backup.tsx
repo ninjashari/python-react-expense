@@ -24,10 +24,7 @@ import {
   AccountBalance, 
   Category, 
   Person, 
-  Receipt,
-  Warning,
-  CheckCircle,
-  Info
+  Receipt
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { accountsApi, categoriesApi, payeesApi, transactionsApi } from '../services/api';
@@ -151,28 +148,6 @@ const Backup: React.FC = () => {
   const handleImportClick = (type: 'accounts' | 'categories' | 'payees') => {
     setSelectedImportType(type);
     setImportDialogOpen(true);
-  };
-
-  const handleImportFile = (file: File) => {
-    if (!selectedImportType) return;
-
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.xlsx,.xls,.csv';
-    fileInput.onchange = (e) => {
-      const selectedFile = (e.target as HTMLInputElement).files?.[0];
-      if (selectedFile) {
-        // Redirect to the appropriate page for import
-        const pages = {
-          accounts: '/accounts',
-          categories: '/categories', 
-          payees: '/payees'
-        };
-        window.location.href = pages[selectedImportType];
-      }
-    };
-    fileInput.click();
-    setImportDialogOpen(false);
   };
 
   const dataItems = [

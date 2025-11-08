@@ -28,44 +28,35 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  TextField,
   Button,
-  Autocomplete,
 } from '@mui/material';
 import {
   TrendingUp,
   Warning,
-  AccountBalance as BudgetIcon,
   Timeline,
   TrendingDown,
   ShowChart,
   InfoOutlined,
   CheckCircle,
   ErrorOutline,
-  CalendarToday,
   Insights as InsightsIcon,
   Assessment,
   Category as CategoryIcon,
   Payment,
-  LocalAtm,
   Refresh,
-  FilterList,
   PieChart,
   BarChart,
   AccountBox,
-  DateRange,
 } from '@mui/icons-material';
 import {
   useSpendingPredictions,
   useSpendingAnomalies,
-  useBudgetRecommendations,
-  useTrendForecast
+  useBudgetRecommendations
 } from '../hooks/useLearning';
 import { usePageTitle, getPageTitle } from '../hooks/usePageTitle';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { useQuery } from '@tanstack/react-query';
-import { transactionsApi, accountsApi, categoriesApi, payeesApi } from '../services/api';
-import { Transaction, Account, Category, Payee } from '../types';
+import { transactionsApi, accountsApi } from '../services/api';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -140,19 +131,7 @@ const Insights: React.FC = () => {
   // Data queries with automatic refetching
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
-    queryFn: accountsApi.getAll,
-    refetchOnWindowFocus: true,
-  });
-
-  const { data: categories } = useQuery({
-    queryKey: ['categories'],
-    queryFn: () => categoriesApi.getAll(),
-    refetchOnWindowFocus: true,
-  });
-
-  const { data: payees } = useQuery({
-    queryKey: ['payees'],
-    queryFn: () => payeesApi.getAll(),
+    queryFn: () => accountsApi.getAll(),
     refetchOnWindowFocus: true,
   });
 
@@ -225,7 +204,6 @@ const Insights: React.FC = () => {
   const { data: predictions, isLoading: predictionsLoading } = useSpendingPredictions();
   const { data: anomalies, isLoading: anomaliesLoading } = useSpendingAnomalies();
   const { data: budgetRecs, isLoading: budgetLoading } = useBudgetRecommendations();
-  const { data: trends, isLoading: trendsLoading } = useTrendForecast();
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);

@@ -1,104 +1,205 @@
-# 💰 Expense Manager
+# 💰 Expense Manager# 💰 Expense Manager
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://reactjs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791.svg)](https://www.postgresql.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
+
+
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+
+[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://reactjs.org/)[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://reactjs.org/)
+
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com/)[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg)](https://fastapi.tiangolo.com/)
+
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791.svg)](https://www.postgresql.org/)[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-12+-336791.svg)](https://www.postgresql.org/)
+
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
+
 [![Material-UI](https://img.shields.io/badge/Material--UI-5.18-007FFF.svg)](https://mui.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A modern, full-stack expense management application designed for personal financial tracking and analysis. Built with React 19 and FastAPI, featuring comprehensive transaction management, intelligent AI-powered imports, and advanced reporting capabilities.
+A modern, full-stack expense management application with AI-powered features for personal financial tracking and analysis.[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## 📋 Table of Contents
 
-- [Features](#-features)
-- [Technology Stack](#-technology-stack)
-- [Quick Start](#-quick-start)
+
+## ✨ Key FeaturesA modern, full-stack expense management application designed for personal financial tracking and analysis. Built with React 19 and FastAPI, featuring comprehensive transaction management, intelligent AI-powered imports, and advanced reporting capabilities.
+
+
+
+- 💼 **Multi-Account Support** - Track checking, savings, credit cards, investments## 📋 Table of Contents
+
+- 📊 **Smart Analytics** - Comprehensive reports and spending insights
+
+- 🤖 **AI-Powered Import** - Automatic categorization from CSV, Excel, and PDF files- [Features](#-features)
+
+- 🔒 **Secure & Private** - JWT authentication with local LLM processing- [Technology Stack](#-technology-stack)
+
+- 📱 **Modern UI** - React 19 with Material-UI components- [Quick Start](#-quick-start)
+
 - [Installation](#-installation)
-- [Configuration](#-configuration)
+
+## 🚀 Quick Start- [Configuration](#-configuration)
+
 - [Usage](#-usage)
-- [API Documentation](#-api-documentation)
-- [Development](#-development)
-- [Contributing](#-contributing)
-- [License](#-license)
 
-## ✨ Features
+### Prerequisites- [API Documentation](#-api-documentation)
 
-### 💼 Core Financial Management
-- **Multi-Account Support**: Checking, savings, credit cards, cash, investment, and PPF accounts
-- **Transaction Tracking**: Income, expenses, and transfers with automatic balance calculations  
-- **Credit Card Management**: Track balances, credit limits, utilization, and payment due dates
+- Node.js 16+- [Development](#-development)
+
+- Python 3.8+- [Contributing](#-contributing)
+
+- PostgreSQL 12+- [License](#-license)
+
+
+
+### Installation## ✨ Features
+
+
+
+```bash### 💼 Core Financial Management
+
+# Clone repository- **Multi-Account Support**: Checking, savings, credit cards, cash, investment, and PPF accounts
+
+git clone https://github.com/yourusername/python-react-expense.git- **Transaction Tracking**: Income, expenses, and transfers with automatic balance calculations  
+
+cd python-react-expense- **Credit Card Management**: Track balances, credit limits, utilization, and payment due dates
+
 - **Category & Payee Organization**: Smart categorization with auto-generated unique colors
-- **Real-time Balance Updates**: Automatic account balance synchronization across all transactions
 
-### 🤖 AI-Powered Features
-- **Smart Import Processing**: AI categorization for CSV, Excel, and PDF files
-- **Local LLM Integration**: Offline PDF processing with Ollama (llama3.1, mistral, gemma)
-- **Machine Learning Engine**: Continuous learning from user patterns and corrections
-- **Intelligent Suggestions**: Context-aware payee and category recommendations
-- **Pattern Recognition**: Advanced transaction analysis with confidence scoring
+# Backend setup- **Real-time Balance Updates**: Automatic account balance synchronization across all transactions
 
-### 📊 Analytics & Reporting
-- **Comprehensive Reports**: Summary, category breakdown, payee analysis, monthly trends
-- **Advanced Filtering**: Multi-dimensional search across accounts, dates, amounts, and tags
-- **Credit Utilization Tracking**: Visual progress bars with health indicators
-- **Export Capabilities**: Multiple format support for data portability
+cd backend
+
+python -m venv venv### 🤖 AI-Powered Features
+
+source venv/bin/activate- **Smart Import Processing**: AI categorization for CSV, Excel, and PDF files
+
+pip install -r requirements.txt- **Local LLM Integration**: Offline PDF processing with Ollama (llama3.1, mistral, gemma)
+
+cp .env.example .env  # Configure your database- **Machine Learning Engine**: Continuous learning from user patterns and corrections
+
+alembic upgrade head- **Intelligent Suggestions**: Context-aware payee and category recommendations
+
+python -m uvicorn main:app --reload --port 8001- **Pattern Recognition**: Advanced transaction analysis with confidence scoring
+
+
+
+# Frontend setup (in new terminal)### 📊 Analytics & Reporting
+
+cd frontend- **Comprehensive Reports**: Summary, category breakdown, payee analysis, monthly trends
+
+npm install- **Advanced Filtering**: Multi-dimensional search across accounts, dates, amounts, and tags
+
+npm start- **Credit Utilization Tracking**: Visual progress bars with health indicators
+
+```- **Export Capabilities**: Multiple format support for data portability
+
 - **Financial Insights**: Spending patterns and account performance metrics
 
-### 🔧 Advanced Import System
-- **Multi-Format Support**: CSV, Excel (.xlsx/.xls), and PDF with OCR
-- **Column Mapping**: Intelligent field detection and manual mapping options
+**Or use the convenience script:**
+
+```bash### 🔧 Advanced Import System
+
+./start-dev.sh- **Multi-Format Support**: CSV, Excel (.xlsx/.xls), and PDF with OCR
+
+```- **Column Mapping**: Intelligent field detection and manual mapping options
+
 - **Preview & Validation**: Review transactions before committing to database
-- **Error Handling**: Comprehensive validation with detailed error reporting
+
+🎉 **Access the app at:** `http://localhost:3001`- **Error Handling**: Comprehensive validation with detailed error reporting
+
 - **Batch Processing**: Efficient handling of large transaction sets
+
+## 📚 Documentation
 
 ## 🛠 Technology Stack
 
-### Backend
-- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern, high-performance web framework
-- **[PostgreSQL](https://www.postgresql.org/)** - Robust relational database
-- **[SQLAlchemy](https://www.sqlalchemy.org/)** - Python SQL toolkit and ORM
-- **[Alembic](https://alembic.sqlalchemy.org/)** - Database migration tool
-- **[Pydantic](https://pydantic.dev/)** - Data validation using Python type hints
+For complete documentation including:
+
+- Detailed installation instructions### Backend
+
+- Architecture and design patterns- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern, high-performance web framework
+
+- API reference- **[PostgreSQL](https://www.postgresql.org/)** - Robust relational database
+
+- AI features and PDF import setup- **[SQLAlchemy](https://www.sqlalchemy.org/)** - Python SQL toolkit and ORM
+
+- Development guidelines- **[Alembic](https://alembic.sqlalchemy.org/)** - Database migration tool
+
+- Troubleshooting- **[Pydantic](https://pydantic.dev/)** - Data validation using Python type hints
+
 - **[JWT Authentication](https://python-jose.readthedocs.io/)** - Secure token-based auth
-- **[Ollama](https://ollama.ai/)** - Local LLM integration for PDF processing
+
+**👉 See [DOCUMENTATION.md](DOCUMENTATION.md)**- **[Ollama](https://ollama.ai/)** - Local LLM integration for PDF processing
+
 - **[Tesseract OCR](https://tesseract-ocr.github.io/)** - Optical character recognition
-- **[pandas](https://pandas.pydata.org/)** - Data manipulation and analysis
 
-### Frontend
-- **[React 19](https://reactjs.org/)** - Modern UI library with latest features
-- **[TypeScript](https://www.typescriptlang.org/)** - Type-safe JavaScript development
+## 🛠 Tech Stack- **[pandas](https://pandas.pydata.org/)** - Data manipulation and analysis
+
+
+
+**Backend:** FastAPI, PostgreSQL, SQLAlchemy, Alembic, Ollama  ### Frontend
+
+**Frontend:** React 19, TypeScript, Material-UI, TanStack Query  - **[React 19](https://reactjs.org/)** - Modern UI library with latest features
+
+**AI:** Local LLM processing with Ollama, Tesseract OCR- **[TypeScript](https://www.typescriptlang.org/)** - Type-safe JavaScript development
+
 - **[Material-UI v5](https://mui.com/)** - Comprehensive component library
-- **[TanStack Query](https://tanstack.com/query)** - Powerful data synchronization
+
+## 📦 Project Structure- **[TanStack Query](https://tanstack.com/query)** - Powerful data synchronization
+
 - **[React Router v7](https://reactrouter.com/)** - Declarative routing
-- **[React Hook Form](https://react-hook-form.com/)** - Performant forms with easy validation
-- **[React Select](https://react-select.com/)** - Flexible select input control
-- **[React Dropzone](https://react-dropzone.js.org/)** - File upload with drag & drop
 
-## 🚀 Quick Start
+```- **[React Hook Form](https://react-hook-form.com/)** - Performant forms with easy validation
 
-### Prerequisites
+python-react-expense/- **[React Select](https://react-select.com/)** - Flexible select input control
 
-- **[Node.js](https://nodejs.org/)** v16+ 
-- **[Python](https://www.python.org/)** v3.8+
-- **[PostgreSQL](https://www.postgresql.org/)** v12+
-- **[Git](https://git-scm.com/)** for version control
+├── backend/          # FastAPI backend- **[React Dropzone](https://react-dropzone.js.org/)** - File upload with drag & drop
+
+│   ├── models/       # Database models
+
+│   ├── routers/      # API endpoints## 🚀 Quick Start
+
+│   └── services/     # Business logic & AI
+
+├── frontend/         # React frontend### Prerequisites
+
+│   ├── src/
+
+│   │   ├── pages/    # Main pages- **[Node.js](https://nodejs.org/)** v16+ 
+
+│   │   ├── components/ # UI components- **[Python](https://www.python.org/)** v3.8+
+
+│   │   └── hooks/    # Custom hooks- **[PostgreSQL](https://www.postgresql.org/)** v12+
+
+└── DOCUMENTATION.md  # Complete docs- **[Git](https://git-scm.com/)** for version control
+
+```
 
 ### Optional Components
-- **[Tesseract OCR](https://tesseract-ocr.github.io/)** - For PDF text extraction
+
+## 🤝 Contributing- **[Tesseract OCR](https://tesseract-ocr.github.io/)** - For PDF text extraction
+
 - **[Ollama](https://ollama.ai/)** - For local LLM-powered PDF processing
+
+Contributions welcome! Please see [DOCUMENTATION.md](DOCUMENTATION.md) for development guidelines.
 
 ## 📦 Installation
 
+## 📄 License
+
 ### 1. Clone the Repository
 
-```bash
-git clone https://github.com/yourusername/python-react-expense.git
-cd python-react-expense
-```
+MIT License - see [LICENSE](LICENSE) file for details.
 
-### 2. Database Setup
+```bash
+
+---git clone https://github.com/yourusername/python-react-expense.git
+
+cd python-react-expense
+
+<div align="center">```
+
+  Made with ❤️ for financial clarity
+
+</div>### 2. Database Setup
+
 
 Create a PostgreSQL database:
 
