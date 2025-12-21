@@ -144,7 +144,8 @@ const Transactions: React.FC = () => {
     page: 1,
     size: 50,
     showAll: false,
-    sortDirection: 'asc' as SortDirection
+    sortDirection: 'desc' as SortDirection,
+    sortField: 'date'
   };
   
   const { filters, setFilters, clearSavedFilters } = usePersistentFilters<TransactionFilters>(
@@ -890,6 +891,19 @@ const Transactions: React.FC = () => {
         case 'date':
           aValue = a.date ? new Date(a.date).getTime() : 0;
           bValue = b.date ? new Date(b.date).getTime() : 0;
+          
+          // If dates are equal, use created_at as secondary sort
+          if (aValue === bValue) {
+            const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0;
+            if (aCreated < bCreated) {
+              return filters.sortDirection === 'asc' ? -1 : 1;
+            }
+            if (aCreated > bCreated) {
+              return filters.sortDirection === 'asc' ? 1 : -1;
+            }
+            return 0;
+          }
           break;
         case 'description':
           aValue = (a.description || '').toLowerCase();

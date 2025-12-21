@@ -26,7 +26,6 @@ import {
   Logout,
   Analytics,
   Psychology,
-  Insights,
   Lock,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -45,7 +44,6 @@ const menuItems = [
   { text: 'Transactions', icon: <Receipt />, path: '/transactions' },
   { text: 'Reports', icon: <Analytics />, path: '/reports' },
   { text: 'Learning', icon: <Psychology />, path: '/learning' },
-  { text: 'Advanced Insights', icon: <Insights />, path: '/insights' },
   { text: 'Import', icon: <Upload />, path: '/import' },
   { text: 'Backup', icon: <Backup />, path: '/backup' },
   { text: 'Payees', icon: <Person />, path: '/payees' },

@@ -18,7 +18,6 @@ import Categories from './pages/Categories';
 import Import from './pages/Import';
 import Backup from './pages/Backup';
 import LearningDashboard from './pages/LearningDashboard';
-import Insights from './pages/Insights';
 import { useAppNotifications } from './hooks/useAppNotifications';
 
 const queryClient = new QueryClient({
@@ -75,7 +74,6 @@ const AppContent: React.FC = () => {
           <Route path="/import" element={<Import />} />
           <Route path="/backup" element={<Backup />} />
           <Route path="/learning" element={<LearningDashboard />} />
-          <Route path="/insights" element={<Insights />} />
         </Routes>
       </Layout>
     </ErrorBoundary>

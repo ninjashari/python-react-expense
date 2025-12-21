@@ -1448,17 +1448,19 @@ def get_transactions_by_payee(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    use_all_data: bool = Query(False, description="Use all historical data for comprehensive analysis"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get transaction summary grouped by payee"""
     query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
 
-    # Apply filters
-    if start_date:
-        query = query.filter(Transaction.date >= start_date)
-    if end_date:
-        query = query.filter(Transaction.date <= end_date)
+    # Apply filters only if not using all data
+    if not use_all_data:
+        if start_date:
+            query = query.filter(Transaction.date >= start_date)
+        if end_date:
+            query = query.filter(Transaction.date <= end_date)
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
         query = query.filter(Transaction.account_id.in_(account_id_list))
@@ -1471,6 +1473,9 @@ def get_transactions_by_payee(
         payee_id = str(transaction.payee.id) if transaction.payee else "none"
         payee_color = transaction.payee.color if transaction.payee else "#cccccc"
 
+        # Monthly tracking for trends
+        month_key = transaction.date.strftime("%Y-%m")
+
         if payee_id not in payee_data:
             payee_data[payee_id] = {
                 "id": payee_id,
@@ -1480,22 +1485,77 @@ def get_transactions_by_payee(
                 "transaction_count": 0,
                 "income": 0,
                 "expense": 0,
-                "average_amount": 0
+                "average_amount": 0,
+                "monthly_data": {},
+                "first_transaction": transaction.date,
+                "last_transaction": transaction.date,
+                "peak_month": {"month": "", "amount": 0},
+                "trend": "stable"
+            }
+
+        # Track monthly data for trend analysis
+        if month_key not in payee_data[payee_id]["monthly_data"]:
+            payee_data[payee_id]["monthly_data"][month_key] = {
+                "amount": 0,
+                "count": 0,
+                "month_name": transaction.date.strftime("%B %Y")
             }
 
         amount = float(transaction.amount)
         payee_data[payee_id]["total_amount"] += amount
         payee_data[payee_id]["transaction_count"] += 1
+        payee_data[payee_id]["monthly_data"][month_key]["amount"] += amount
+        payee_data[payee_id]["monthly_data"][month_key]["count"] += 1
+
+        # Update date range
+        if transaction.date < payee_data[payee_id]["first_transaction"]:
+            payee_data[payee_id]["first_transaction"] = transaction.date
+        if transaction.date > payee_data[payee_id]["last_transaction"]:
+            payee_data[payee_id]["last_transaction"] = transaction.date
+
+        # Track peak month
+        if payee_data[payee_id]["monthly_data"][month_key]["amount"] > payee_data[payee_id]["peak_month"]["amount"]:
+            payee_data[payee_id]["peak_month"] = {
+                "month": payee_data[payee_id]["monthly_data"][month_key]["month_name"],
+                "amount": payee_data[payee_id]["monthly_data"][month_key]["amount"]
+            }
 
         if transaction.type == "income":
             payee_data[payee_id]["income"] += amount
         elif transaction.type == "expense":
             payee_data[payee_id]["expense"] += amount
 
-    # Calculate averages
+    # Calculate averages and trends
     for payee in payee_data.values():
         if payee["transaction_count"] > 0:
             payee["average_amount"] = payee["total_amount"] / payee["transaction_count"]
+
+            # Calculate active months
+            payee["active_months"] = len(payee["monthly_data"])
+
+            # Calculate spending trend over time
+            monthly_amounts = [data["amount"] for data in payee["monthly_data"].values()]
+            if len(monthly_amounts) >= 3:
+                recent_avg = sum(monthly_amounts[-3:]) / 3
+                older_avg = sum(monthly_amounts[:-3]) / len(monthly_amounts[:-3]) if len(monthly_amounts) > 3 else recent_avg
+
+                if recent_avg > older_avg * 1.1:
+                    payee["trend"] = "increasing"
+                elif recent_avg < older_avg * 0.9:
+                    payee["trend"] = "decreasing"
+                else:
+                    payee["trend"] = "stable"
+
+            # Convert monthly data to list for easier frontend consumption
+            payee["monthly_trend"] = sorted(
+                [{"month": k, **v} for k, v in payee["monthly_data"].items()],
+                key=lambda x: x["month"]
+            )
+            del payee["monthly_data"]  # Remove dict version
+
+            # Format dates
+            payee["first_transaction"] = payee["first_transaction"].isoformat()
+            payee["last_transaction"] = payee["last_transaction"].isoformat()
 
     return sorted(payee_data.values(), key=lambda x: x["total_amount"], reverse=True)
 
@@ -1504,17 +1564,19 @@ def get_transactions_by_payee(
 def get_transactions_by_account(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    use_all_data: bool = Query(False, description="Use all historical data for comprehensive analysis"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Get transaction summary grouped by account"""
     query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
 
-    # Apply filters
-    if start_date:
-        query = query.filter(Transaction.date >= start_date)
-    if end_date:
-        query = query.filter(Transaction.date <= end_date)
+    # Apply filters only if not using all data
+    if not use_all_data:
+        if start_date:
+            query = query.filter(Transaction.date >= start_date)
+        if end_date:
+            query = query.filter(Transaction.date <= end_date)
 
     transactions = query.options(joinedload(Transaction.account)).all()
 
@@ -1523,6 +1585,9 @@ def get_transactions_by_account(
         account_name = transaction.account.name if transaction.account else "Unknown Account"
         account_id = str(transaction.account.id) if transaction.account else "none"
         account_type = transaction.account.type if transaction.account else "unknown"
+
+        # Monthly tracking for trends
+        month_key = transaction.date.strftime("%Y-%m")
 
         if account_id not in account_data:
             account_data[account_id] = {
@@ -1535,12 +1600,40 @@ def get_transactions_by_account(
                 "expense": 0,
                 "transfers_in": 0,
                 "transfers_out": 0,
-                "average_amount": 0
+                "average_amount": 0,
+                "monthly_data": {},
+                "first_transaction": transaction.date,
+                "last_transaction": transaction.date,
+                "peak_month": {"month": "", "amount": 0},
+                "trend": "stable"
+            }
+
+        # Track monthly data for trend analysis
+        if month_key not in account_data[account_id]["monthly_data"]:
+            account_data[account_id]["monthly_data"][month_key] = {
+                "amount": 0,
+                "count": 0,
+                "month_name": transaction.date.strftime("%B %Y")
             }
 
         amount = float(transaction.amount)
         account_data[account_id]["total_amount"] += amount
         account_data[account_id]["transaction_count"] += 1
+        account_data[account_id]["monthly_data"][month_key]["amount"] += amount
+        account_data[account_id]["monthly_data"][month_key]["count"] += 1
+
+        # Update date range
+        if transaction.date < account_data[account_id]["first_transaction"]:
+            account_data[account_id]["first_transaction"] = transaction.date
+        if transaction.date > account_data[account_id]["last_transaction"]:
+            account_data[account_id]["last_transaction"] = transaction.date
+
+        # Track peak month
+        if account_data[account_id]["monthly_data"][month_key]["amount"] > account_data[account_id]["peak_month"]["amount"]:
+            account_data[account_id]["peak_month"] = {
+                "month": account_data[account_id]["monthly_data"][month_key]["month_name"],
+                "amount": account_data[account_id]["monthly_data"][month_key]["amount"]
+            }
 
         if transaction.type == "income":
             account_data[account_id]["income"] += amount
@@ -1550,14 +1643,21 @@ def get_transactions_by_account(
             # Check if this account is source or destination
             if transaction.account_id == transaction.account.id:
                 account_data[account_id]["transfers_out"] += amount
-            # Also check for transfers coming in (to_account_id)
 
     # Check for incoming transfers
-    incoming_transfers = db.query(Transaction).filter(
+    incoming_transfers_query = db.query(Transaction).filter(
         Transaction.user_id == current_user.id,
         Transaction.type == "transfer",
         Transaction.to_account_id.isnot(None)
-    ).options(joinedload(Transaction.to_account)).all()
+    ).options(joinedload(Transaction.to_account))
+    
+    if not use_all_data:
+        if start_date:
+            incoming_transfers_query = incoming_transfers_query.filter(Transaction.date >= start_date)
+        if end_date:
+            incoming_transfers_query = incoming_transfers_query.filter(Transaction.date <= end_date)
+    
+    incoming_transfers = incoming_transfers_query.all()
 
     for transfer in incoming_transfers:
         if transfer.to_account:
@@ -1565,10 +1665,37 @@ def get_transactions_by_account(
             if to_account_id in account_data:
                 account_data[to_account_id]["transfers_in"] += float(transfer.amount)
 
-    # Calculate averages
+    # Calculate averages and trends
     for account in account_data.values():
         if account["transaction_count"] > 0:
             account["average_amount"] = account["total_amount"] / account["transaction_count"]
+
+            # Calculate active months
+            account["active_months"] = len(account["monthly_data"])
+
+            # Calculate activity trend over time
+            monthly_amounts = [data["amount"] for data in account["monthly_data"].values()]
+            if len(monthly_amounts) >= 3:
+                recent_avg = sum(monthly_amounts[-3:]) / 3
+                older_avg = sum(monthly_amounts[:-3]) / len(monthly_amounts[:-3]) if len(monthly_amounts) > 3 else recent_avg
+
+                if recent_avg > older_avg * 1.1:
+                    account["trend"] = "increasing"
+                elif recent_avg < older_avg * 0.9:
+                    account["trend"] = "decreasing"
+                else:
+                    account["trend"] = "stable"
+
+            # Convert monthly data to list for easier frontend consumption
+            account["monthly_trend"] = sorted(
+                [{"month": k, **v} for k, v in account["monthly_data"].items()],
+                key=lambda x: x["month"]
+            )
+            del account["monthly_data"]  # Remove dict version
+
+            # Format dates
+            account["first_transaction"] = account["first_transaction"].isoformat()
+            account["last_transaction"] = account["last_transaction"].isoformat()
 
     return sorted(account_data.values(), key=lambda x: x["total_amount"], reverse=True)
 
