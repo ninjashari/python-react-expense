@@ -229,6 +229,12 @@ const Transactions: React.FC = () => {
     }),
   });
 
+  // Auto-disable showAll if total transactions > 200
+  React.useEffect(() => {
+    if (transactionData && transactionData.total > 200 && filters.showAll) {
+      setFilters(prev => ({ ...prev, showAll: false, page: 1 }));
+    }
+  }, [transactionData?.total]);
 
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
@@ -1750,9 +1756,10 @@ const Transactions: React.FC = () => {
                     checked={filters.showAll}
                     onChange={(e) => setFilters(prev => ({ ...prev, showAll: e.target.checked }))}
                     size="small"
+                    disabled={transactionData && transactionData.total > 100}
                   />
                 }
-                label="Show All"
+                label={transactionData && transactionData.total > 100 ? "Show All (disabled for >100)" : "Show All"}
                 sx={{ ml: 1 }}
               />
               
