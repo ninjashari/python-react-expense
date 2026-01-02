@@ -360,13 +360,17 @@ def get_transactions(
     size: int = Query(50, ge=1, le=10000, description="Page size"),
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
+    exclude_category_ids: Optional[str] = Query(None, description="Comma-separated category IDs to exclude"),
     payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs"),
+    exclude_payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs to exclude"),
     transaction_type: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     description: Optional[str] = Query(None, description="Search in description"),
     sort_by: Optional[str] = Query(None, description="Field to sort by"),
     sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
+    exclude_accounts: Optional[bool] = Query(False, description="Exclude selected accounts"),
+    exclude_types: Optional[bool] = Query(False, description="Exclude selected transaction types"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -381,11 +385,18 @@ def get_transactions(
     # Apply filters
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
-        # Include transactions where the account is either source OR destination (for transfers)
-        query = query.filter(
-            (Transaction.account_id.in_(account_id_list)) | 
-            (Transaction.to_account_id.in_(account_id_list))
-        )
+        if exclude_accounts:
+            # Exclude transactions where the account is either source OR destination
+            query = query.filter(
+                ~((Transaction.account_id.in_(account_id_list)) | 
+                  (Transaction.to_account_id.in_(account_id_list)))
+            )
+        else:
+            # Include transactions where the account is either source OR destination (for transfers)
+            query = query.filter(
+                (Transaction.account_id.in_(account_id_list)) | 
+                (Transaction.to_account_id.in_(account_id_list))
+            )
     
     if category_ids:
         category_id_parts = [id.strip() for id in category_ids.split(',') if id.strip()]
@@ -405,6 +416,25 @@ def get_transactions(
             category_id_list = [uuid.UUID(id) for id in category_id_parts]
             query = query.filter(Transaction.category_id.in_(category_id_list))
     
+    # Handle exclude category IDs separately
+    if exclude_category_ids:
+        exclude_category_id_parts = [id.strip() for id in exclude_category_ids.split(',') if id.strip()]
+        if 'none' in exclude_category_id_parts:
+            # Handle "none" case for excluding transactions with no category
+            other_ids = [uuid.UUID(id) for id in exclude_category_id_parts if id != 'none']
+            if other_ids:
+                # Exclude transactions with no category AND specific category IDs
+                query = query.filter(
+                    ~((Transaction.category_id.is_(None)) | (Transaction.category_id.in_(other_ids)))
+                )
+            else:
+                # Exclude transactions with no category
+                query = query.filter(Transaction.category_id.isnot(None))
+        else:
+            # Normal case: exclude specific category IDs
+            exclude_category_id_list = [uuid.UUID(id) for id in exclude_category_id_parts]
+            query = query.filter(~Transaction.category_id.in_(exclude_category_id_list))
+    
     if payee_ids:
         payee_id_parts = [id.strip() for id in payee_ids.split(',') if id.strip()]
         if 'none' in payee_id_parts:
@@ -423,14 +453,39 @@ def get_transactions(
             payee_id_list = [uuid.UUID(id) for id in payee_id_parts]
             query = query.filter(Transaction.payee_id.in_(payee_id_list))
     
+    # Handle exclude payee IDs separately
+    if exclude_payee_ids:
+        exclude_payee_id_parts = [id.strip() for id in exclude_payee_ids.split(',') if id.strip()]
+        if 'none' in exclude_payee_id_parts:
+            # Handle "none" case for excluding transactions with no payee
+            other_ids = [uuid.UUID(id) for id in exclude_payee_id_parts if id != 'none']
+            if other_ids:
+                # Exclude transactions with no payee AND specific payee IDs
+                query = query.filter(
+                    ~((Transaction.payee_id.is_(None)) | (Transaction.payee_id.in_(other_ids)))
+                )
+            else:
+                # Exclude transactions with no payee
+                query = query.filter(Transaction.payee_id.isnot(None))
+        else:
+            # Normal case: exclude specific payee IDs
+            exclude_payee_id_list = [uuid.UUID(id) for id in exclude_payee_id_parts]
+            query = query.filter(~Transaction.payee_id.in_(exclude_payee_id_list))
+    
     if transaction_type:
         transaction_type_parts = [type.strip() for type in transaction_type.split(',') if type.strip()]
         if len(transaction_type_parts) == 1:
             # Single transaction type
-            query = query.filter(Transaction.type == transaction_type_parts[0])
+            if exclude_types:
+                query = query.filter(Transaction.type != transaction_type_parts[0])
+            else:
+                query = query.filter(Transaction.type == transaction_type_parts[0])
         else:
             # Multiple transaction types
-            query = query.filter(Transaction.type.in_(transaction_type_parts))
+            if exclude_types:
+                query = query.filter(~Transaction.type.in_(transaction_type_parts))
+            else:
+                query = query.filter(Transaction.type.in_(transaction_type_parts))
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
@@ -498,10 +553,14 @@ def get_transactions(
 def get_transaction_summary(
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
+    exclude_category_ids: Optional[str] = Query(None, description="Comma-separated category IDs to exclude"),
     payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs"),
+    exclude_payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs to exclude"),
     transaction_type: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    exclude_accounts: Optional[bool] = Query(False, description="Exclude selected accounts"),
+    exclude_types: Optional[bool] = Query(False, description="Exclude selected transaction types"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -511,11 +570,18 @@ def get_transaction_summary(
     # Apply filters (same logic as get_transactions)
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
-        # Include transactions where the account is either source OR destination (for transfers)
-        query = query.filter(
-            (Transaction.account_id.in_(account_id_list)) | 
-            (Transaction.to_account_id.in_(account_id_list))
-        )
+        if exclude_accounts:
+            # Exclude transactions where the account is either source OR destination
+            query = query.filter(
+                ~((Transaction.account_id.in_(account_id_list)) | 
+                  (Transaction.to_account_id.in_(account_id_list)))
+            )
+        else:
+            # Include transactions where the account is either source OR destination (for transfers)
+            query = query.filter(
+                (Transaction.account_id.in_(account_id_list)) | 
+                (Transaction.to_account_id.in_(account_id_list))
+            )
     
     if category_ids:
         category_id_parts = [id.strip() for id in category_ids.split(',') if id.strip()]
@@ -535,6 +601,25 @@ def get_transaction_summary(
             category_id_list = [uuid.UUID(id) for id in category_id_parts]
             query = query.filter(Transaction.category_id.in_(category_id_list))
     
+    # Handle exclude category IDs separately
+    if exclude_category_ids:
+        exclude_category_id_parts = [id.strip() for id in exclude_category_ids.split(',') if id.strip()]
+        if 'none' in exclude_category_id_parts:
+            # Handle "none" case for excluding transactions with no category
+            other_ids = [uuid.UUID(id) for id in exclude_category_id_parts if id != 'none']
+            if other_ids:
+                # Exclude transactions with no category AND specific category IDs
+                query = query.filter(
+                    ~((Transaction.category_id.is_(None)) | (Transaction.category_id.in_(other_ids)))
+                )
+            else:
+                # Exclude transactions with no category
+                query = query.filter(Transaction.category_id.isnot(None))
+        else:
+            # Normal case: exclude specific category IDs
+            exclude_category_id_list = [uuid.UUID(id) for id in exclude_category_id_parts]
+            query = query.filter(~Transaction.category_id.in_(exclude_category_id_list))
+    
     if payee_ids:
         payee_id_parts = [id.strip() for id in payee_ids.split(',') if id.strip()]
         if 'none' in payee_id_parts:
@@ -553,14 +638,39 @@ def get_transaction_summary(
             payee_id_list = [uuid.UUID(id) for id in payee_id_parts]
             query = query.filter(Transaction.payee_id.in_(payee_id_list))
     
+    # Handle exclude payee IDs separately
+    if exclude_payee_ids:
+        exclude_payee_id_parts = [id.strip() for id in exclude_payee_ids.split(',') if id.strip()]
+        if 'none' in exclude_payee_id_parts:
+            # Handle "none" case for excluding transactions with no payee
+            other_ids = [uuid.UUID(id) for id in exclude_payee_id_parts if id != 'none']
+            if other_ids:
+                # Exclude transactions with no payee AND specific payee IDs
+                query = query.filter(
+                    ~((Transaction.payee_id.is_(None)) | (Transaction.payee_id.in_(other_ids)))
+                )
+            else:
+                # Exclude transactions with no payee
+                query = query.filter(Transaction.payee_id.isnot(None))
+        else:
+            # Normal case: exclude specific payee IDs
+            exclude_payee_id_list = [uuid.UUID(id) for id in exclude_payee_id_parts]
+            query = query.filter(~Transaction.payee_id.in_(exclude_payee_id_list))
+    
     if transaction_type:
         transaction_type_parts = [type.strip() for type in transaction_type.split(',') if type.strip()]
         if len(transaction_type_parts) == 1:
             # Single transaction type
-            query = query.filter(Transaction.type == transaction_type_parts[0])
+            if exclude_types:
+                query = query.filter(Transaction.type != transaction_type_parts[0])
+            else:
+                query = query.filter(Transaction.type == transaction_type_parts[0])
         else:
             # Multiple transaction types
-            query = query.filter(Transaction.type.in_(transaction_type_parts))
+            if exclude_types:
+                query = query.filter(~Transaction.type.in_(transaction_type_parts))
+            else:
+                query = query.filter(Transaction.type.in_(transaction_type_parts))
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:

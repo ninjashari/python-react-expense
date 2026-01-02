@@ -124,6 +124,7 @@ interface TransactionFilters {
   categoryIds?: string[];
   payeeIds?: string[];
   descriptionSearch?: string;
+  transactionType?: string;
   page: number;
   size: number;
   showAll: boolean;
@@ -228,6 +229,7 @@ const Transactions: React.FC = () => {
       category_ids: filters.categoryIds?.join(','),
       payee_ids: filters.payeeIds?.join(','),
       description: filters.descriptionSearch,
+      transaction_type: filters.transactionType,
       sort_by: filters.sortField,
       sort_order: filters.sortDirection,
     }),
@@ -966,7 +968,7 @@ const Transactions: React.FC = () => {
     return sorted;
   }, [transactionData?.items, filters.sortField, filters.sortDirection, payees, categories]);
 
-  const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId || (filters.categoryIds && filters.categoryIds.length > 0) || (filters.payeeIds && filters.payeeIds.length > 0) || selectedMonth || selectedYear;
+  const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId || (filters.categoryIds && filters.categoryIds.length > 0) || (filters.payeeIds && filters.payeeIds.length > 0) || filters.descriptionSearch || filters.transactionType || selectedMonth || selectedYear;
   
 
 
@@ -1146,6 +1148,31 @@ const Transactions: React.FC = () => {
                     </MenuItem>
                   ))}
                 </TextField>
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  select
+                  label="Transaction Type"
+                  value={filters.transactionType || ''}
+                  onChange={(e) => handleFilterChange('transactionType', e.target.value || undefined)}
+                  fullWidth
+                  size="small"
+                >
+                  <MenuItem value="">All Types</MenuItem>
+                  <MenuItem value="income">Income</MenuItem>
+                  <MenuItem value="expense">Expense</MenuItem>
+                  <MenuItem value="transfer">Transfer</MenuItem>
+                </TextField>
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  label="Search Description"
+                  placeholder="Search in descriptions..."
+                  value={filters.descriptionSearch || ''}
+                  onChange={(e) => handleFilterChange('descriptionSearch', e.target.value || undefined)}
+                  fullWidth
+                  size="small"
+                />
               </Grid>
               <Grid item xs={12} sm={6} md={4}>
                 <Autocomplete

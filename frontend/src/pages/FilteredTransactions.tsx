@@ -24,6 +24,7 @@ import {
   Select,
   Switch,
   FormControlLabel,
+  TableSortLabel,
 } from '@mui/material';
 import { Clear, FilterList, Analytics, TrendingUp, FileDownload } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -41,8 +42,14 @@ interface FilteredTransactionFilters {
   endDate?: string;
   accountIds: Option[];
   categoryIds: Option[];
+  excludeCategoryIds: Option[];
   payeeIds: Option[];
+  excludePayeeIds: Option[];
   transactionTypeIds: Option[];
+  excludeAccounts: boolean;
+  excludeTypes: boolean;
+  sortBy?: string;
+  sortOrder: 'asc' | 'desc';
   page: number;
   size: number;
 }
@@ -67,8 +74,14 @@ const FilteredTransactions: React.FC = () => {
   const defaultFilters: FilteredTransactionFilters = {
     accountIds: [],
     categoryIds: [],
+    excludeCategoryIds: [],
     payeeIds: [],
+    excludePayeeIds: [],
     transactionTypeIds: [],
+    excludeAccounts: false,
+    excludeTypes: false,
+    sortBy: 'date',
+    sortOrder: 'desc',
     page: 1,
     size: 50
   };
@@ -107,8 +120,14 @@ const FilteredTransactions: React.FC = () => {
     end_date: filters.endDate,
     account_ids: filters.accountIds.length > 0 ? filters.accountIds.map(opt => opt.value).join(',') : undefined,
     category_ids: filters.categoryIds.length > 0 ? filters.categoryIds.map(opt => opt.value).join(',') : undefined,
+    exclude_category_ids: filters.excludeCategoryIds.length > 0 ? filters.excludeCategoryIds.map(opt => opt.value).join(',') : undefined,
     payee_ids: filters.payeeIds.length > 0 ? filters.payeeIds.map(opt => opt.value).join(',') : undefined,
+    exclude_payee_ids: filters.excludePayeeIds.length > 0 ? filters.excludePayeeIds.map(opt => opt.value).join(',') : undefined,
     transaction_type: filters.transactionTypeIds.length > 0 ? filters.transactionTypeIds.map(opt => opt.value).join(',') : undefined,
+    exclude_accounts: filters.excludeAccounts || undefined,
+    exclude_types: filters.excludeTypes || undefined,
+    sort_by: filters.sortBy,
+    sort_order: filters.sortOrder,
   });
 
   // Fetch transactions
@@ -123,7 +142,9 @@ const FilteredTransactions: React.FC = () => {
            filters.endDate || 
            filters.accountIds.length > 0 || 
            filters.categoryIds.length > 0 || 
+           filters.excludeCategoryIds.length > 0 || 
            filters.payeeIds.length > 0 || 
+           filters.excludePayeeIds.length > 0 || 
            filters.transactionTypeIds.length > 0;
   };
 
@@ -193,6 +214,15 @@ const FilteredTransactions: React.FC = () => {
       ...prev, 
       size: event.target.value,
       page: 1 // Reset to first page when changing page size
+    }));
+  };
+
+  const handleSort = (column: string) => {
+    setFilters(prev => ({
+      ...prev,
+      sortBy: column,
+      sortOrder: prev.sortBy === column && prev.sortOrder === 'asc' ? 'desc' : 'asc',
+      page: 1 // Reset to first page when changing sort
     }));
   };
 
@@ -510,40 +540,106 @@ const FilteredTransactions: React.FC = () => {
               </Typography>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <MultiSelectDropdown
-                label="Transaction Type"
-                options={transactionTypes}
-                value={filters.transactionTypeIds || []}
-                onChange={(values) => handleFilterChange('transactionTypeIds', values || [])}
-                placeholder="Select types..."
-              />
+              <Box>
+                <MultiSelectDropdown
+                  label="Transaction Type"
+                  options={transactionTypes}
+                  value={filters.transactionTypeIds || []}
+                  onChange={(values) => handleFilterChange('transactionTypeIds', values || [])}
+                  placeholder="Select types..."
+                />
+                {filters.transactionTypeIds.length > 0 && (
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={filters.excludeTypes}
+                        onChange={(e) => handleFilterChange('excludeTypes', e.target.checked)}
+                        color="error"
+                      />
+                    }
+                    label={
+                      <Typography variant="caption" color={filters.excludeTypes ? 'error' : 'textSecondary'}>
+                        {filters.excludeTypes ? 'Exclude selected' : 'Include selected'}
+                      </Typography>
+                    }
+                    sx={{ mt: -1, ml: 0 }}
+                  />
+                )}
+              </Box>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <MultiSelectDropdown
-                label="Accounts"
-                options={formatAccountOptions(accounts)}
-                value={filters.accountIds}
-                onChange={(values) => handleFilterChange('accountIds', values || [])}
-                placeholder="Select accounts..."
-              />
+              <Box>
+                <MultiSelectDropdown
+                  label="Accounts"
+                  options={formatAccountOptions(accounts)}
+                  value={filters.accountIds}
+                  onChange={(values) => handleFilterChange('accountIds', values || [])}
+                  placeholder="Select accounts..."
+                />
+                {filters.accountIds.length > 0 && (
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={filters.excludeAccounts}
+                        onChange={(e) => handleFilterChange('excludeAccounts', e.target.checked)}
+                        color="error"
+                      />
+                    }
+                    label={
+                      <Typography variant="caption" color={filters.excludeAccounts ? 'error' : 'textSecondary'}>
+                        {filters.excludeAccounts ? 'Exclude selected' : 'Include selected'}
+                      </Typography>
+                    }
+                    sx={{ mt: -1, ml: 0 }}
+                  />
+                )}
+              </Box>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <MultiSelectDropdown
-                label="Categories"
-                options={formatCategoryOptions(categories)}
-                value={filters.categoryIds}
-                onChange={(values) => handleFilterChange('categoryIds', values || [])}
-                placeholder="Select categories..."
-              />
+              <Box>
+                <MultiSelectDropdown
+                  label="Categories"
+                  options={formatCategoryOptions(categories)}
+                  value={filters.categoryIds}
+                  onChange={(values) => handleFilterChange('categoryIds', values || [])}
+                  placeholder="Select categories..."
+                />
+              </Box>
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
-              <MultiSelectDropdown
-                label="Payees"
-                options={formatPayeeOptions(payees)}
-                value={filters.payeeIds}
-                onChange={(values) => handleFilterChange('payeeIds', values || [])}
-                placeholder="Select payees..."
-              />
+              <Box>
+                <MultiSelectDropdown
+                  label="Exclude Categories"
+                  options={formatCategoryOptions(categories)}
+                  value={filters.excludeCategoryIds}
+                  onChange={(values) => handleFilterChange('excludeCategoryIds', values || [])}
+                  placeholder="Select categories to exclude..."
+                />
+              </Box>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Box>
+                <MultiSelectDropdown
+                  label="Payees"
+                  options={formatPayeeOptions(payees)}
+                  value={filters.payeeIds}
+                  onChange={(values) => handleFilterChange('payeeIds', values || [])}
+                  placeholder="Select payees..."
+                />
+              </Box>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Box>
+                <MultiSelectDropdown
+                  label="Exclude Payees"
+                  options={formatPayeeOptions(payees)}
+                  value={filters.excludePayeeIds}
+                  onChange={(values) => handleFilterChange('excludePayeeIds', values || [])}
+                  placeholder="Select payees to exclude..."
+                />
+              </Box>
             </Grid>
 
             {/* Actions Section */}
@@ -695,13 +791,69 @@ const FilteredTransactions: React.FC = () => {
               <Table>
                 <TableHead sx={{ bgcolor: 'grey.50' }}>
                   <TableRow>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Date</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Description</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Account</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Payee</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Category</TableCell>
-                    <TableCell sx={{ fontWeight: 'bold' }}>Type</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Amount</TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>
+                      <TableSortLabel
+                        active={filters.sortBy === 'date'}
+                        direction={filters.sortBy === 'date' ? filters.sortOrder : 'asc'}
+                        onClick={() => handleSort('date')}
+                      >
+                        Date
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>
+                      <TableSortLabel
+                        active={filters.sortBy === 'description'}
+                        direction={filters.sortBy === 'description' ? filters.sortOrder : 'asc'}
+                        onClick={() => handleSort('description')}
+                      >
+                        Description
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>
+                      <TableSortLabel
+                        active={filters.sortBy === 'account'}
+                        direction={filters.sortBy === 'account' ? filters.sortOrder : 'asc'}
+                        onClick={() => handleSort('account')}
+                      >
+                        Account
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>
+                      <TableSortLabel
+                        active={filters.sortBy === 'payee'}
+                        direction={filters.sortBy === 'payee' ? filters.sortOrder : 'asc'}
+                        onClick={() => handleSort('payee')}
+                      >
+                        Payee
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>
+                      <TableSortLabel
+                        active={filters.sortBy === 'category'}
+                        direction={filters.sortBy === 'category' ? filters.sortOrder : 'asc'}
+                        onClick={() => handleSort('category')}
+                      >
+                        Category
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 'bold' }}>
+                      <TableSortLabel
+                        active={filters.sortBy === 'type'}
+                        direction={filters.sortBy === 'type' ? filters.sortOrder : 'asc'}
+                        onClick={() => handleSort('type')}
+                      >
+                        Type
+                      </TableSortLabel>
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                      <TableSortLabel
+                        active={filters.sortBy === 'amount'}
+                        direction={filters.sortBy === 'amount' ? filters.sortOrder : 'asc'}
+                        onClick={() => handleSort('amount')}
+                      >
+                        Amount
+                      </TableSortLabel>
+                    </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
