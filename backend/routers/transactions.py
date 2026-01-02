@@ -364,6 +364,9 @@ def get_transactions(
     transaction_type: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    description: Optional[str] = Query(None, description="Search in description"),
+    sort_by: Optional[str] = Query(None, description="Field to sort by"),
+    sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -433,6 +436,10 @@ def get_transactions(
     if end_date:
         query = query.filter(Transaction.date <= end_date)
     
+    # Filter by description (case-insensitive search)
+    if description:
+        query = query.filter(Transaction.description.ilike(f"%{description}%"))
+    
     # Filter by current user
     query = query.filter(Transaction.user_id == current_user.id)
     
@@ -443,8 +450,41 @@ def get_transactions(
     skip = (page - 1) * size
     pages = math.ceil(total / size) if total > 0 else 0
     
+    # Apply sorting
+    if sort_by:
+        if sort_by == 'date':
+            sort_column = Transaction.date
+        elif sort_by == 'description':
+            sort_column = Transaction.description
+        elif sort_by == 'amount':
+            sort_column = Transaction.amount
+        elif sort_by == 'type':
+            sort_column = Transaction.type
+        elif sort_by == 'account':
+            sort_column = Account.name
+            query = query.join(Account, Transaction.account_id == Account.id)
+        elif sort_by == 'payee':
+            from models.payees import Payee
+            sort_column = Payee.name
+            query = query.outerjoin(Payee, Transaction.payee_id == Payee.id)
+        elif sort_by == 'category':
+            from models.categories import Category
+            sort_column = Category.name
+            query = query.outerjoin(Category, Transaction.category_id == Category.id)
+        else:
+            sort_column = Transaction.date
+        
+        # Apply sort order
+        if sort_order == 'asc':
+            query = query.order_by(sort_column.asc())
+        else:
+            query = query.order_by(sort_column.desc())
+    else:
+        # Default sort by date descending
+        query = query.order_by(Transaction.date.desc())
+    
     # Get paginated results
-    transactions = query.order_by(Transaction.date.desc()).offset(skip).limit(size).all()
+    transactions = query.offset(skip).limit(size).all()
     
     return PaginatedTransactionsResponse(
         items=transactions,

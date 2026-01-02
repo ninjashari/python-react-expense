@@ -159,6 +159,9 @@ export const transactionsApi = {
     transaction_type?: string;
     start_date?: string;
     end_date?: string;
+    description?: string;
+    sort_by?: string;
+    sort_order?: string;
   }) => api.get('/transactions', { params }).then(res => res.data),
   getSummary: (params?: {
     account_ids?: string;

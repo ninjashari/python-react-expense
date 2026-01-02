@@ -123,6 +123,7 @@ interface TransactionFilters {
   accountId?: string;
   categoryIds?: string[];
   payeeIds?: string[];
+  descriptionSearch?: string;
   page: number;
   size: number;
   showAll: boolean;
@@ -226,12 +227,15 @@ const Transactions: React.FC = () => {
       account_ids: filters.accountId,
       category_ids: filters.categoryIds?.join(','),
       payee_ids: filters.payeeIds?.join(','),
+      description: filters.descriptionSearch,
+      sort_by: filters.sortField,
+      sort_order: filters.sortDirection,
     }),
   });
 
-  // Auto-disable showAll if total transactions > 200
+  // Auto-disable showAll if total transactions > 250
   React.useEffect(() => {
-    if (transactionData && transactionData.total > 200 && filters.showAll) {
+    if (transactionData && transactionData.total > 250 && filters.showAll) {
       setFilters(prev => ({ ...prev, showAll: false, page: 1 }));
     }
   }, [transactionData?.total]);
@@ -1756,10 +1760,10 @@ const Transactions: React.FC = () => {
                     checked={filters.showAll}
                     onChange={(e) => setFilters(prev => ({ ...prev, showAll: e.target.checked }))}
                     size="small"
-                    disabled={transactionData && transactionData.total > 100}
+                    disabled={transactionData && transactionData.total > 250}
                   />
                 }
-                label={transactionData && transactionData.total > 100 ? "Show All (disabled for >100)" : "Show All"}
+                label={transactionData && transactionData.total > 250 ? "Show All (disabled for >250)" : "Show All"}
                 sx={{ ml: 1 }}
               />
               
