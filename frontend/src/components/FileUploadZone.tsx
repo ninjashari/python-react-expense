@@ -26,10 +26,13 @@ const FileUploadZone: React.FC<FileUploadZoneProps> = ({
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
-        Select or drag a file to upload
+        Select or drag files to upload
       </Typography>
       <Typography variant="body2" color="text.secondary" gutterBottom>
         Supported formats: CSV, Excel (.xlsx, .xls), PDF (with AI extraction)
+      </Typography>
+      <Typography variant="body2" color="primary" gutterBottom>
+        You can upload up to 15 CSV/Excel files at once (PDF: one at a time)
       </Typography>
 
       <Paper
@@ -71,13 +74,13 @@ const FileUploadZone: React.FC<FileUploadZoneProps> = ({
             
             <Typography variant="h6" gutterBottom>
               {isDragActive
-                ? 'Drop the file here...'
-                : 'Drag & drop your file here, or click to select'
+                ? 'Drop the files here...'
+                : 'Drag & drop your files here, or click to select'
               }
             </Typography>
             
             <Typography variant="body2" color="text.secondary">
-              Maximum file size: 10MB
+              Maximum file size: 10MB per file (up to 15 CSV/Excel files, 1 PDF)
             </Typography>
           </Box>
         )}

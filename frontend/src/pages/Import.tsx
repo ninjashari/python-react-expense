@@ -41,7 +41,7 @@ const getSteps = (isLlm: boolean) =>
     : ['Upload File', 'Configure', 'Preview', 'Import'];
 
 interface ImportData {
-  file: File | null;
+  files: File[];
   fileType: string;
   columns: string[];
   sampleData: any[];
@@ -61,13 +61,13 @@ interface ImportData {
   isPdfLlm: boolean;
   llmModel?: string;
   pdfPreview?: PDFLLMPreviewResponse;
-  llmResults?: PDFLLMImportResponse;
+  llmResults?: PDFLLMImportResponse[];
 }
 
 const Import: React.FC = () => {
   const [activeStep, setActiveStep] = useState(0);
   const [importData, setImportData] = useState<ImportData>({
-    file: null,
+    files: [],
     fileType: '',
     columns: [],
     sampleData: [],
@@ -96,16 +96,29 @@ const Import: React.FC = () => {
   });
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
+    if (!acceptedFiles || acceptedFiles.length === 0) return;
+
+    // Check if multiple PDF files are being uploaded
+    const pdfFiles = acceptedFiles.filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    if (pdfFiles.length > 1) {
+      alert('Multiple PDF file uploads are not supported. Please upload PDF files one at a time.');
+      return;
+    }
+    
+    // Check if mixing PDF with other file types
+    if (pdfFiles.length === 1 && acceptedFiles.length > 1) {
+      alert('Cannot upload PDF files together with CSV/Excel files. Please upload them separately.');
+      return;
+    }
 
     setIsProcessing(true);
     try {
+      const file = acceptedFiles[0];
       const fileName = file.name.toLowerCase();
       let fileType = '';
       let isPdfLlm = false;
 
-      // Determine file type
+      // Determine file type from first file
       if (fileName.endsWith('.csv')) {
         fileType = 'csv';
       } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
@@ -116,7 +129,7 @@ const Import: React.FC = () => {
       }
 
       if (isPdfLlm) {
-        // Handle PDF LLM import
+        // Handle PDF LLM import (single file only)
         const formData = new FormData();
         formData.append('file', file);
         
@@ -124,7 +137,7 @@ const Import: React.FC = () => {
         
         setImportData(prev => ({
           ...prev,
-          file,
+          files: [file], // Single file for PDF
           fileType,
           isPdfLlm: true,
           pdfPreview: previewData,
@@ -135,7 +148,7 @@ const Import: React.FC = () => {
         // For PDF LLM, skip column mapping and go to account selection
         setActiveStep(1);
       } else {
-        // Handle CSV/Excel import
+        // Handle CSV/Excel import - use first file for mapping
         const formData = new FormData();
         formData.append('file', file);
         
@@ -143,7 +156,7 @@ const Import: React.FC = () => {
         
         setImportData(prev => ({
           ...prev,
-          file,
+          files: acceptedFiles,
           fileType,
           isPdfLlm: false,
           columns: mappingData.columns,
@@ -177,7 +190,7 @@ const Import: React.FC = () => {
       'application/vnd.ms-excel': ['.xls'],
       'application/pdf': ['.pdf'],
     },
-    maxFiles: 1,
+    maxFiles: 15,
   });
 
   const handleNext = () => {
@@ -191,7 +204,7 @@ const Import: React.FC = () => {
   const handleReset = () => {
     setActiveStep(0);
     setImportData({
-      file: null,
+      files: [],
       fileType: '',
       columns: [],
       sampleData: [],
@@ -213,7 +226,7 @@ const Import: React.FC = () => {
   };
 
   const handlePDFLLMProcessing = async () => {
-    if (!importData.file || !importData.account) return;
+    if (!importData.files || importData.files.length === 0 || !importData.account) return;
 
     setIsLLMProcessing(true);
     setCurrentProcessingStep(0);
@@ -245,18 +258,22 @@ const Import: React.FC = () => {
       setProcessingSteps([...steps]);
       setCurrentProcessingStep(2);
 
-      // Actual LLM processing
-      const formData = new FormData();
-      formData.append('file', importData.file);
-      formData.append('account_id', importData.account.id.toString());
-      formData.append('llm_model', importData.llmModel || 'llama3.1');
-      formData.append('preview_only', 'true'); // Preview mode first
+      // Process all files
+      const allResults: PDFLLMImportResponse[] = [];
+      for (const file of importData.files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('account_id', importData.account.id.toString());
+        formData.append('llm_model', importData.llmModel || 'llama3.1');
+        formData.append('preview_only', 'true'); // Preview mode first
 
-      const results = await importApi.importPdfLlm(formData);
+        const results = await importApi.importPdfLlm(formData);
+        allResults.push(results);
+      }
 
       // Step 4: Data Validation
       steps[2].status = 'completed';
-      steps[2].details = `Model: ${importData.llmModel}`;
+      steps[2].details = `Model: ${importData.llmModel}, Files: ${importData.files.length}`;
       steps[3].status = 'active';
       setProcessingSteps([...steps]);
       setCurrentProcessingStep(3);
@@ -277,7 +294,7 @@ const Import: React.FC = () => {
       setCurrentProcessingStep(5);
 
       // Store results for review
-      setImportData(prev => ({ ...prev, llmResults: results }));
+      setImportData(prev => ({ ...prev, llmResults: allResults }));
 
     } catch (error) {
       console.error('LLM processing error:', error);
@@ -290,53 +307,68 @@ const Import: React.FC = () => {
   };
 
   const handleImport = async () => {
-    if (!importData.file || !importData.account) return;
+    if (!importData.files || importData.files.length === 0 || !importData.account) return;
 
     setIsProcessing(true);
     try {
       let results: any;
 
       if (importData.isPdfLlm && importData.llmResults) {
-        // Handle LLM final import with reviewed transactions (use batch import)
-        console.log('Importing transactions:', importData.llmResults.transactions.length, 'transactions');
-        console.log('Sample transaction:', importData.llmResults.transactions[0]);
+        // Handle LLM final import with reviewed transactions from all files
+        const allTransactions = importData.llmResults.flatMap(result => result.transactions);
+        console.log('Importing transactions:', allTransactions.length, 'transactions from', importData.llmResults.length, 'files');
+        console.log('Sample transaction:', allTransactions[0]);
         console.log('Account ID:', importData.account.id);
         results = await importApi.importTransactionsBatch(
-          importData.llmResults.transactions,
+          allTransactions,
           importData.account.id
         );
         console.log('Import results:', results);
       } else {
-        // Handle CSV/Excel import
-        const formData = new FormData();
-        formData.append('file', importData.file);
-        formData.append('account_id', importData.account.id.toString());
-        formData.append('date_column', importData.columnMappings.date);
-        formData.append('amount_column', importData.columnMappings.amount);
-        formData.append('description_column', importData.columnMappings.description);
-        formData.append('default_transaction_type', importData.defaultTransactionType);
-        
-        if (importData.columnMappings.payee) {
-          formData.append('payee_column', importData.columnMappings.payee);
-        }
-        if (importData.columnMappings.category) {
-          formData.append('category_column', importData.columnMappings.category);
-        }
-        if (importData.columnMappings.transactionType) {
-          formData.append('transaction_type_column', importData.columnMappings.transactionType);
-        }
-        if (importData.columnMappings.withdrawal) {
-          formData.append('withdrawal_column', importData.columnMappings.withdrawal);
-        }
-        if (importData.columnMappings.deposit) {
-          formData.append('deposit_column', importData.columnMappings.deposit);
-        }
+        // Handle CSV/Excel import - process all files
+        const allResults = [];
+        for (const file of importData.files) {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('account_id', importData.account.id.toString());
+          formData.append('date_column', importData.columnMappings.date);
+          formData.append('amount_column', importData.columnMappings.amount);
+          formData.append('description_column', importData.columnMappings.description);
+          formData.append('default_transaction_type', importData.defaultTransactionType);
+          
+          if (importData.columnMappings.payee) {
+            formData.append('payee_column', importData.columnMappings.payee);
+          }
+          if (importData.columnMappings.category) {
+            formData.append('category_column', importData.columnMappings.category);
+          }
+          if (importData.columnMappings.transactionType) {
+            formData.append('transaction_type_column', importData.columnMappings.transactionType);
+          }
+          if (importData.columnMappings.withdrawal) {
+            formData.append('withdrawal_column', importData.columnMappings.withdrawal);
+          }
+          if (importData.columnMappings.deposit) {
+            formData.append('deposit_column', importData.columnMappings.deposit);
+          }
 
-        if (importData.fileType === 'csv') {
-          results = await importApi.importCsv(formData);
-        } else {
-          results = await importApi.importExcel(formData);
+          if (importData.fileType === 'csv') {
+            const fileResult = await importApi.importCsv(formData);
+            allResults.push(fileResult);
+          } else {
+            const fileResult = await importApi.importExcel(formData);
+            allResults.push(fileResult);
+          }
         }
+        
+        // Combine results from all files
+        results = {
+          success: allResults.every(r => r.success),
+          message: `Imported from ${allResults.length} files`,
+          imported: allResults.reduce((sum, r) => sum + (r.imported || 0), 0),
+          skipped: allResults.reduce((sum, r) => sum + (r.skipped || 0), 0),
+          errors: allResults.flatMap(r => r.errors || []),
+        };
       }
 
       setImportResults(results);
@@ -352,12 +384,45 @@ const Import: React.FC = () => {
     switch (step) {
       case 0:
         return (
-          <FileUploadZone
-            getRootProps={getRootProps}
-            getInputProps={getInputProps}
-            isDragActive={isDragActive}
-            isProcessing={isProcessing}
-          />
+          <>
+            <FileUploadZone
+              getRootProps={getRootProps}
+              getInputProps={getInputProps}
+              isDragActive={isDragActive}
+              isProcessing={isProcessing}
+            />
+            {importData.files.length > 0 && (
+              <Box mt={3}>
+                <Typography variant="h6" gutterBottom>
+                  Selected Files ({importData.files.length})
+                </Typography>
+                <TableContainer component={Paper}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>File Name</TableCell>
+                        <TableCell align="right">Size</TableCell>
+                        <TableCell align="right">Type</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {importData.files.map((file, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{file.name}</TableCell>
+                          <TableCell align="right">
+                            {(file.size / 1024).toFixed(2)} KB
+                          </TableCell>
+                          <TableCell align="right">
+                            {file.name.split('.').pop()?.toUpperCase()}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            )}
+          </>
         );
       case 1:
         return importData.isPdfLlm ? (
@@ -423,25 +488,30 @@ const Import: React.FC = () => {
                 currentStep={currentProcessingStep}
                 steps={processingSteps}
                 estimatedTime={importData.pdfPreview?.estimated_processing_time || 15}
-                processingNotes={importData.llmResults?.processing_notes || []}
-                extractedCount={importData.llmResults?.transactions?.length}
+                processingNotes={importData.llmResults?.[0]?.processing_notes || []}
+                extractedCount={importData.llmResults?.reduce((sum, r) => sum + (r.transactions?.length || 0), 0)}
               />
             );
           } else if (importData.llmResults) {
-            // Show transaction review
+            // Show transaction review - combine all transactions from multiple files
+            const allTransactions = importData.llmResults.flatMap(r => r.transactions || []);
+            const firstResult = importData.llmResults[0];
+            
             return (
               <TransactionReviewStep
-                transactions={importData.llmResults.transactions || []}
+                transactions={allTransactions}
                 account={importData.account!}
                 onTransactionsChange={(transactions) => 
                   setImportData(prev => ({ 
                     ...prev, 
-                    llmResults: prev.llmResults ? { ...prev.llmResults, transactions } : undefined 
+                    llmResults: prev.llmResults ? [
+                      { ...prev.llmResults[0], transactions }
+                    ] : undefined 
                   }))
                 }
                 onConfirm={handleImport}
-                extractionMethod={importData.llmResults.extraction_method}
-                processingNotes={importData.llmResults.processing_notes || []}
+                extractionMethod={firstResult.extraction_method}
+                processingNotes={firstResult.processing_notes || []}
                 isImporting={isProcessing}
               />
             );
@@ -450,7 +520,7 @@ const Import: React.FC = () => {
           // Regular CSV/Excel preview
           return (
             <ImportPreview
-              file={importData.file}
+              file={importData.files[0]}
               account={importData.account}
               columnMappings={importData.columnMappings}
               sampleData={importData.sampleData}
@@ -475,7 +545,7 @@ const Import: React.FC = () => {
   const canProceed = () => {
     switch (activeStep) {
       case 0:
-        return importData.file !== null;
+        return importData.files.length > 0;
       case 1:
         if (importData.isPdfLlm) {
           return importData.account !== null && importData.pdfPreview?.has_financial_data;
@@ -492,7 +562,8 @@ const Import: React.FC = () => {
       case 2:
         if (importData.isPdfLlm) {
           // For PDF LLM import, can proceed if we have LLM results and not currently processing
-          return importData.llmResults && !isLLMProcessing && (importData.llmResults.transactions?.length || 0) > 0;
+          const totalTransactions = importData.llmResults?.reduce((sum, r) => sum + (r.transactions?.length || 0), 0) || 0;
+          return importData.llmResults && !isLLMProcessing && totalTransactions > 0;
         } else {
           return true; // Regular import can always proceed to import step
         }
