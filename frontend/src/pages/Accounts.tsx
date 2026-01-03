@@ -448,8 +448,32 @@ const Accounts: React.FC = () => {
         </Alert>
       )}
 
-      <Grid container spacing={3}>
-        {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
+      {/* Group accounts by type */}
+      {(() => {
+        const sortedAccounts = accounts?.sort((a, b) => a.name.localeCompare(b.name)) || [];
+        const groupedAccounts: { [key: string]: Account[] } = {};
+        
+        sortedAccounts.forEach((account) => {
+          if (!groupedAccounts[account.type]) {
+            groupedAccounts[account.type] = [];
+          }
+          groupedAccounts[account.type].push(account);
+        });
+
+        // Define order of account types
+        const typeOrder = ['checking', 'savings', 'credit', 'cash', 'investment', 'ppf'];
+        
+        return typeOrder.map((type) => {
+          const accountsOfType = groupedAccounts[type];
+          if (!accountsOfType || accountsOfType.length === 0) return null;
+
+          return (
+            <Box key={type} mb={4}>
+              <Typography variant="h5" gutterBottom sx={{ mb: 2, fontWeight: 600, color: 'primary.main' }}>
+                {formatAccountType(type)} Accounts ({accountsOfType.length})
+              </Typography>
+              <Grid container spacing={3}>
+                {accountsOfType.map((account) => (
           <Grid item xs={12} sm={6} md={4} key={account.id}>
             <Card>
               <CardContent>
@@ -552,8 +576,12 @@ const Accounts: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-        ))}
-      </Grid>
+                ))}
+              </Grid>
+            </Box>
+          );
+        });
+      })()}
 
       {/* Calculation Overlay */}
       <Backdrop
