@@ -254,7 +254,8 @@ def process_transactions_data(
             ai_prediction = ai_trainer.predict_payee_and_category(
                 description,
                 transaction_type,
-                amount
+                amount,
+                str(account_id)
             )
             
             if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
@@ -681,7 +682,8 @@ async def import_pdf_with_llm(
                 ai_prediction = ai_trainer.predict_payee_and_category(
                     llm_transaction.description,
                     llm_transaction.transaction_type,
-                    llm_transaction.amount
+                    llm_transaction.amount,
+                    str(account_id)
                 )
                 
                 if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
@@ -779,7 +781,8 @@ async def import_transactions_batch(
                 ai_prediction = ai_trainer.predict_payee_and_category(
                     transaction_data.description,
                     transaction_data.transaction_type,
-                    transaction_data.amount
+                    transaction_data.amount,
+                    str(request.account_id)
                 )
                 
                 if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
@@ -971,7 +974,8 @@ async def import_xls_with_llm(
                     ai_prediction = ai_trainer.predict_payee_and_category(
                         transaction_obj.description,
                         transaction_obj.transaction_type,
-                        transaction_obj.amount
+                        transaction_obj.amount,
+                        str(request.account_id)
                     )
                     
                     if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:

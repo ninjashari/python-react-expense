@@ -1,6 +1,7 @@
 """
 Enhanced AI Training Service for Transaction Categorization
-Uses Random Forest Classifier with TF-IDF vectorization for better predictions
+Uses Deep Neural Network with PyTorch for better predictions
+Features: description tokens, account info, account type, transaction type, and amount
 Trains on user's historical data and provides predictions for new transactions
 """
 from typing import List, Dict, Optional, Tuple
@@ -9,19 +10,59 @@ from sqlalchemy import and_
 from models.transactions import Transaction
 from models.categories import Category
 from models.payees import Payee
+from models.accounts import Account
 from models.users import User
 import re
 from collections import defaultdict, Counter
 import uuid
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
 try:
-    from sklearn.ensemble import RandomForestClassifier
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.preprocessing import LabelEncoder
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
     print("Warning: scikit-learn not available. Using fallback pattern matching.")
+
+
+class TransactionDataset(Dataset):
+    """Custom Dataset for transaction data"""
+    def __init__(self, features, labels):
+        self.features = torch.FloatTensor(features)
+        self.labels = torch.LongTensor(labels)
+    
+    def __len__(self):
+        return len(self.labels)
+    
+    def __getitem__(self, idx):
+        return self.features[idx], self.labels[idx]
+
+
+class DeepTransactionClassifier(nn.Module):
+    """Deep Neural Network for transaction classification"""
+    def __init__(self, input_size, hidden_sizes, num_classes, dropout=0.3):
+        super(DeepTransactionClassifier, self).__init__()
+        
+        layers = []
+        prev_size = input_size
+        
+        for hidden_size in hidden_sizes:
+            layers.append(nn.Linear(prev_size, hidden_size))
+            layers.append(nn.BatchNorm1d(hidden_size))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            prev_size = hidden_size
+        
+        layers.append(nn.Linear(prev_size, num_classes))
+        
+        self.network = nn.Sequential(*layers)
+        
+    def forward(self, x):
+        return self.network(x)
 
 
 class TransactionAITrainer:
@@ -34,45 +75,59 @@ class TransactionAITrainer:
         }
         self.existing_payees = {}
         self.existing_categories = {}
+        self.existing_accounts = {}
         
-        # Machine Learning models (if sklearn available)
+        # Deep Learning models
         self.payee_model = None
         self.category_model = None
         self.payee_label_encoder = LabelEncoder() if SKLEARN_AVAILABLE else None
         self.category_label_encoder = LabelEncoder() if SKLEARN_AVAILABLE else None
+        self.account_label_encoder = LabelEncoder() if SKLEARN_AVAILABLE else None
+        self.account_type_encoder = LabelEncoder() if SKLEARN_AVAILABLE else None
+        
         self.tfidf_vectorizer = TfidfVectorizer(
-            max_features=100,
+            max_features=150,  # Increased for more description features
             ngram_range=(1, 3),
             min_df=1,
             max_df=0.95,
             lowercase=True,
             strip_accents='unicode'
         ) if SKLEARN_AVAILABLE else None
-        self.min_training_samples = 10  # Minimum samples needed for ML
+        
+        self.min_training_samples = 15  # Minimum samples needed for deep learning
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Model hyperparameters
+        self.hidden_sizes = [256, 128, 64]  # Deep architecture
+        self.learning_rate = 0.001
+        self.batch_size = 32
+        self.num_epochs = 50
+        self.dropout = 0.3
         
     def train_from_historical_data(self) -> Dict:
         """
-        Train AI model on user's historical transaction data
-        Uses Random Forest Classifier for better predictions with fallback to pattern matching
+        Train Deep Learning model on user's historical transaction data
+        Uses PyTorch Neural Network with multiple features
         Returns training statistics
         """
-        # Get user's existing payees and categories
+        # Get user's existing payees, categories, and accounts
         self._load_existing_entities()
         
         # Get ALL historical transactions to maximize training data
         all_transactions = self.db.query(Transaction).filter(
             Transaction.user_id == self.user_id,
-            Transaction.description.isnot(None)
+            Transaction.description.isnot(None),
+            Transaction.account_id.isnot(None)
         ).all()
         
         # Separate training data
         payee_training_data = [
             tx for tx in all_transactions 
-            if tx.payee_id is not None and tx.description
+            if tx.payee_id is not None and tx.description and tx.account_id
         ]
         category_training_data = [
             tx for tx in all_transactions 
-            if tx.category_id is not None and tx.description
+            if tx.category_id is not None and tx.description and tx.account_id
         ]
         
         training_stats = {
@@ -83,7 +138,8 @@ class TransactionAITrainer:
             'category_patterns_learned': 0,
             'payee_model_trained': False,
             'category_model_trained': False,
-            'model_type': 'RandomForestClassifier' if SKLEARN_AVAILABLE else 'PatternMatching'
+            'model_type': 'DeepNeuralNetwork',
+            'device': str(self.device)
         }
         
         # Train pattern-based models for fallback
@@ -91,7 +147,7 @@ class TransactionAITrainer:
             if transaction.category_id:
                 self._extract_patterns(transaction)
         
-        # Train Machine Learning models if sklearn is available and we have enough data
+        # Train Deep Learning models if we have enough data
         if SKLEARN_AVAILABLE:
             if len(payee_training_data) >= self.min_training_samples:
                 try:
@@ -99,6 +155,8 @@ class TransactionAITrainer:
                     training_stats['payee_model_trained'] = True
                 except Exception as e:
                     print(f"Error training payee model: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
             if len(category_training_data) >= self.min_training_samples:
                 try:
@@ -106,6 +164,8 @@ class TransactionAITrainer:
                     training_stats['category_model_trained'] = True
                 except Exception as e:
                     print(f"Error training category model: {e}")
+                    import traceback
+                    traceback.print_exc()
         
         # Calculate pattern statistics
         training_stats['payee_patterns_learned'] = len(self.trained_patterns['payee_patterns'])
@@ -114,106 +174,169 @@ class TransactionAITrainer:
         return training_stats
     
     def _train_payee_model(self, training_data: List[Transaction]):
-        """Train Random Forest model for payee prediction"""
+        """Train Deep Neural Network model for payee prediction"""
         if len(training_data) < self.min_training_samples:
             return
             
         # Prepare features and labels
-        descriptions = [self._prepare_description(tx.description) for tx in training_data]
-        amounts = [float(tx.amount) for tx in training_data]
-        types = [tx.type for tx in training_data]
-        payee_ids = [str(tx.payee_id) for tx in training_data]
+        X, y = self._prepare_features_and_labels(training_data, 'payee')
         
-        # Encode labels
-        try:
-            payee_labels = self.payee_label_encoder.fit_transform(payee_ids)
-        except Exception as e:
-            print(f"Error encoding payee labels: {e}")
+        if X is None or y is None:
             return
         
-        # Create TF-IDF features from descriptions
-        try:
-            tfidf_features = self.tfidf_vectorizer.fit_transform(descriptions).toarray()
-        except Exception as e:
-            print(f"Error creating TF-IDF features: {e}")
-            return
+        # Get input size and number of classes
+        input_size = X.shape[1]
+        num_classes = len(np.unique(y))
         
-        # Create amount features (log-normalized)
-        amount_features = np.array([[self._normalize_amount(amt)] for amt in amounts])
+        # Create model
+        self.payee_model = DeepTransactionClassifier(
+            input_size=input_size,
+            hidden_sizes=self.hidden_sizes,
+            num_classes=num_classes,
+            dropout=self.dropout
+        ).to(self.device)
         
-        # Create type features (one-hot encoded)
-        type_features = np.array([[
-            1 if t == 'income' else 0,
-            1 if t == 'expense' else 0,
-            1 if t == 'transfer' else 0
-        ] for t in types])
-        
-        # Combine all features
-        X = np.hstack([tfidf_features, amount_features, type_features])
-        y = payee_labels
-        
-        # Train Random Forest model with optimized parameters
-        self.payee_model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=20,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            random_state=42,
-            class_weight='balanced',
-            n_jobs=-1  # Use all CPU cores
-        )
-        self.payee_model.fit(X, y)
+        # Train model
+        self._train_model(self.payee_model, X, y)
     
     def _train_category_model(self, training_data: List[Transaction]):
-        """Train Random Forest model for category prediction"""
+        """Train Deep Neural Network model for category prediction"""
         if len(training_data) < self.min_training_samples:
             return
             
         # Prepare features and labels
-        descriptions = [self._prepare_description(tx.description) for tx in training_data]
-        amounts = [float(tx.amount) for tx in training_data]
-        types = [tx.type for tx in training_data]
-        category_ids = [str(tx.category_id) for tx in training_data]
+        X, y = self._prepare_features_and_labels(training_data, 'category')
         
-        # Encode labels
-        try:
-            category_labels = self.category_label_encoder.fit_transform(category_ids)
-        except Exception as e:
-            print(f"Error encoding category labels: {e}")
+        if X is None or y is None:
             return
         
-        # Create TF-IDF features (use same vectorizer for consistency)
+        # Get input size and number of classes
+        input_size = X.shape[1]
+        num_classes = len(np.unique(y))
+        
+        # Create model
+        self.category_model = DeepTransactionClassifier(
+            input_size=input_size,
+            hidden_sizes=self.hidden_sizes,
+            num_classes=num_classes,
+            dropout=self.dropout
+        ).to(self.device)
+        
+        # Train model
+        self._train_model(self.category_model, X, y)
+    
+    def _prepare_features_and_labels(self, training_data: List[Transaction], label_type: str):
+        """Prepare comprehensive feature set and labels for training"""
         try:
-            tfidf_features = self.tfidf_vectorizer.transform(descriptions).toarray()
+            # Extract raw data
+            descriptions = [self._prepare_description(tx.description) for tx in training_data]
+            amounts = [float(tx.amount) for tx in training_data]
+            types = [tx.type for tx in training_data]
+            account_ids = [str(tx.account_id) for tx in training_data]
+            
+            # Get account types
+            account_types = []
+            for tx in training_data:
+                if tx.account_id in self.existing_accounts:
+                    account_types.append(self.existing_accounts[tx.account_id].type)
+                else:
+                    account_types.append('unknown')
+            
+            # Extract labels
+            if label_type == 'payee':
+                labels = [str(tx.payee_id) for tx in training_data]
+                label_encoded = self.payee_label_encoder.fit_transform(labels)
+            else:  # category
+                labels = [str(tx.category_id) for tx in training_data]
+                label_encoded = self.category_label_encoder.fit_transform(labels)
+            
+            # Feature 1: TF-IDF from descriptions (150 features)
+            tfidf_features = self.tfidf_vectorizer.fit_transform(descriptions).toarray()
+            
+            # Feature 2: Amount features (3 features - raw, log, normalized)
+            amount_raw = np.array([[amt] for amt in amounts])
+            amount_log = np.array([[np.log10(max(amt, 1))] for amt in amounts])
+            amount_norm = np.array([[self._normalize_amount(amt)] for amt in amounts])
+            amount_features = np.hstack([amount_raw, amount_log, amount_norm])
+            
+            # Feature 3: Transaction type (one-hot encoded, 3 features)
+            type_features = np.array([[
+                1 if t == 'income' else 0,
+                1 if t == 'expense' else 0,
+                1 if t == 'transfer' else 0
+            ] for t in types])
+            
+            # Feature 4: Account ID (encoded, 1 feature)
+            account_encoded = self.account_label_encoder.fit_transform(account_ids)
+            account_features = account_encoded.reshape(-1, 1)
+            
+            # Feature 5: Account type (one-hot encoded, 6 features)
+            account_type_mapping = {
+                'checking': [1, 0, 0, 0, 0, 0],
+                'savings': [0, 1, 0, 0, 0, 0],
+                'credit': [0, 0, 1, 0, 0, 0],
+                'cash': [0, 0, 0, 1, 0, 0],
+                'investment': [0, 0, 0, 0, 1, 0],
+                'ppf': [0, 0, 0, 0, 0, 1],
+                'unknown': [0, 0, 0, 0, 0, 0]
+            }
+            account_type_features = np.array([
+                account_type_mapping.get(at, [0, 0, 0, 0, 0, 0]) 
+                for at in account_types
+            ])
+            
+            # Combine all features
+            X = np.hstack([
+                tfidf_features,      # 150 features
+                amount_features,     # 3 features
+                type_features,       # 3 features
+                account_features,    # 1 feature
+                account_type_features  # 6 features
+            ])  # Total: 163 features
+            
+            return X, label_encoded
+            
         except Exception as e:
-            print(f"Error transforming descriptions: {e}")
-            return
+            print(f"Error preparing features: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, None
+    
+    def _train_model(self, model, X, y):
+        """Train the neural network model"""
+        # Create dataset and dataloader
+        dataset = TransactionDataset(X, y)
+        dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         
-        # Create amount features
-        amount_features = np.array([[self._normalize_amount(amt)] for amt in amounts])
+        # Loss and optimizer
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=self.learning_rate)
         
-        # Create type features
-        type_features = np.array([[
-            1 if t == 'income' else 0,
-            1 if t == 'expense' else 0,
-            1 if t == 'transfer' else 0
-        ] for t in types])
+        # Training loop
+        model.train()
+        for epoch in range(self.num_epochs):
+            total_loss = 0
+            for batch_features, batch_labels in dataloader:
+                batch_features = batch_features.to(self.device)
+                batch_labels = batch_labels.to(self.device)
+                
+                # Forward pass
+                outputs = model(batch_features)
+                loss = criterion(outputs, batch_labels)
+                
+                # Backward pass
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                
+                total_loss += loss.item()
+            
+            # Print progress every 10 epochs
+            if (epoch + 1) % 10 == 0:
+                avg_loss = total_loss / len(dataloader)
+                print(f"Epoch [{epoch+1}/{self.num_epochs}], Loss: {avg_loss:.4f}")
         
-        # Combine all features
-        X = np.hstack([tfidf_features, amount_features, type_features])
-        y = category_labels
-        
-        # Train Random Forest model
-        self.category_model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=20,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            random_state=42,
-            class_weight='balanced',
-            n_jobs=-1
-        )
-        self.category_model.fit(X, y)
+        model.eval()
     
     def _prepare_description(self, description: str) -> str:
         """Prepare description text for vectorization"""
@@ -231,7 +354,7 @@ class TransactionAITrainer:
         return min(1.0, np.log10(max(amount, 1)) / 5)  # Assuming max ~100K
         
     def _load_existing_entities(self):
-        """Load existing payees and categories for the user"""
+        """Load existing payees, categories, and accounts for the user"""
         # Load payees
         payees = self.db.query(Payee).filter(Payee.user_id == self.user_id).all()
         self.existing_payees = {payee.id: payee for payee in payees}
@@ -239,6 +362,10 @@ class TransactionAITrainer:
         # Load categories
         categories = self.db.query(Category).filter(Category.user_id == self.user_id).all()
         self.existing_categories = {category.id: category for category in categories}
+        
+        # Load accounts
+        accounts = self.db.query(Account).filter(Account.user_id == self.user_id).all()
+        self.existing_accounts = {account.id: account for account in accounts}
     
     def _extract_patterns(self, transaction: Transaction):
         """Extract patterns from a historical transaction for fallback matching"""
@@ -334,20 +461,20 @@ class TransactionAITrainer:
         keywords_str = '_'.join(sorted(features['description_words']))
         return f"{keywords_str}_{features['transaction_type']}_{features['amount_range']}"
     
-    def predict_payee_and_category(self, description: str, transaction_type: str, amount: float) -> Dict:
+    def predict_payee_and_category(self, description: str, transaction_type: str, amount: float, account_id: Optional[str] = None) -> Dict:
         """
-        Predict payee and category for a new transaction
-        Uses ML model if available, falls back to pattern matching
+        Predict payee and category for a new transaction using Deep Learning model
+        Uses DNN model if available, falls back to pattern matching
         Returns only existing payees and categories, never creates new ones
         """
         # Try ML prediction first
         if SKLEARN_AVAILABLE and self.payee_model is not None:
-            payee_prediction = self._ml_predict_payee(description, transaction_type, amount)
+            payee_prediction = self._ml_predict_payee(description, transaction_type, amount, account_id)
         else:
             payee_prediction = None
         
         if SKLEARN_AVAILABLE and self.category_model is not None:
-            category_prediction = self._ml_predict_category(description, transaction_type, amount)
+            category_prediction = self._ml_predict_category(description, transaction_type, amount, account_id)
         else:
             category_prediction = None
         
@@ -379,26 +506,26 @@ class TransactionAITrainer:
             'category': category_prediction
         }
     
-    def _ml_predict_payee(self, description: str, transaction_type: str, amount: float) -> Optional[Dict]:
-        """Predict payee using ML model"""
+    def _ml_predict_payee(self, description: str, transaction_type: str, amount: float, account_id: Optional[str] = None) -> Optional[Dict]:
+        """Predict payee using Deep Learning model"""
         if self.payee_model is None or self.tfidf_vectorizer is None:
             return None
         
         try:
             # Prepare features
-            desc_clean = self._prepare_description(description)
-            tfidf_features = self.tfidf_vectorizer.transform([desc_clean]).toarray()
-            amount_feature = np.array([[self._normalize_amount(amount)]])
-            type_feature = np.array([[
-                1 if transaction_type == 'income' else 0,
-                1 if transaction_type == 'expense' else 0,
-                1 if transaction_type == 'transfer' else 0
-            ]])
+            X = self._prepare_prediction_features(description, transaction_type, amount, account_id)
             
-            X = np.hstack([tfidf_features, amount_feature, type_feature])
+            if X is None:
+                return None
             
-            # Get prediction with probability
-            probabilities = self.payee_model.predict_proba(X)[0]
+            # Convert to tensor and predict
+            X_tensor = torch.FloatTensor(X).to(self.device)
+            
+            with torch.no_grad():
+                outputs = self.payee_model(X_tensor)
+                probabilities = torch.softmax(outputs, dim=1).cpu().numpy()[0]
+            
+            # Get best prediction
             predicted_class = np.argmax(probabilities)
             confidence = probabilities[predicted_class]
             
@@ -413,34 +540,36 @@ class TransactionAITrainer:
                     'id': payee_id,
                     'name': payee.name,
                     'confidence': float(confidence),
-                    'match_type': 'ml_model'
+                    'match_type': 'deep_learning'
                 }
         except Exception as e:
-            print(f"Error in ML payee prediction: {e}")
+            print(f"Error in DNN payee prediction: {e}")
+            import traceback
+            traceback.print_exc()
             return None
         
         return None
     
-    def _ml_predict_category(self, description: str, transaction_type: str, amount: float) -> Optional[Dict]:
-        """Predict category using ML model"""
+    def _ml_predict_category(self, description: str, transaction_type: str, amount: float, account_id: Optional[str] = None) -> Optional[Dict]:
+        """Predict category using Deep Learning model"""
         if self.category_model is None or self.tfidf_vectorizer is None:
             return None
         
         try:
             # Prepare features
-            desc_clean = self._prepare_description(description)
-            tfidf_features = self.tfidf_vectorizer.transform([desc_clean]).toarray()
-            amount_feature = np.array([[self._normalize_amount(amount)]])
-            type_feature = np.array([[
-                1 if transaction_type == 'income' else 0,
-                1 if transaction_type == 'expense' else 0,
-                1 if transaction_type == 'transfer' else 0
-            ]])
+            X = self._prepare_prediction_features(description, transaction_type, amount, account_id)
             
-            X = np.hstack([tfidf_features, amount_feature, type_feature])
+            if X is None:
+                return None
             
-            # Get prediction with probability
-            probabilities = self.category_model.predict_proba(X)[0]
+            # Convert to tensor and predict
+            X_tensor = torch.FloatTensor(X).to(self.device)
+            
+            with torch.no_grad():
+                outputs = self.category_model(X_tensor)
+                probabilities = torch.softmax(outputs, dim=1).cpu().numpy()[0]
+            
+            # Get best prediction
             predicted_class = np.argmax(probabilities)
             confidence = probabilities[predicted_class]
             
@@ -455,13 +584,85 @@ class TransactionAITrainer:
                     'id': category_id,
                     'name': category.name,
                     'confidence': float(confidence),
-                    'match_type': 'ml_model'
+                    'match_type': 'deep_learning'
                 }
         except Exception as e:
-            print(f"Error in ML category prediction: {e}")
+            print(f"Error in DNN category prediction: {e}")
+            import traceback
+            traceback.print_exc()
             return None
         
         return None
+    
+    def _prepare_prediction_features(self, description: str, transaction_type: str, amount: float, account_id: Optional[str] = None):
+        """Prepare feature vector for a single prediction"""
+        try:
+            # Feature 1: TF-IDF from description
+            desc_clean = self._prepare_description(description)
+            tfidf_features = self.tfidf_vectorizer.transform([desc_clean]).toarray()
+            
+            # Feature 2: Amount features (3 features)
+            amount_raw = np.array([[amount]])
+            amount_log = np.array([[np.log10(max(amount, 1))]])
+            amount_norm = np.array([[self._normalize_amount(amount)]])
+            amount_features = np.hstack([amount_raw, amount_log, amount_norm])
+            
+            # Feature 3: Transaction type (one-hot)
+            type_features = np.array([[
+                1 if transaction_type == 'income' else 0,
+                1 if transaction_type == 'expense' else 0,
+                1 if transaction_type == 'transfer' else 0
+            ]])
+            
+            # Feature 4: Account ID (encoded)
+            if account_id and self.account_label_encoder is not None:
+                try:
+                    # Try to transform the account_id
+                    account_encoded = self.account_label_encoder.transform([str(account_id)])
+                    account_features = account_encoded.reshape(-1, 1)
+                except:
+                    # If account_id not seen during training, use -1
+                    account_features = np.array([[-1]])
+            else:
+                account_features = np.array([[-1]])
+            
+            # Feature 5: Account type (one-hot)
+            account_type = 'unknown'
+            if account_id:
+                try:
+                    account_uuid = uuid.UUID(str(account_id))
+                    if account_uuid in self.existing_accounts:
+                        account_type = self.existing_accounts[account_uuid].type
+                except:
+                    pass
+            
+            account_type_mapping = {
+                'checking': [1, 0, 0, 0, 0, 0],
+                'savings': [0, 1, 0, 0, 0, 0],
+                'credit': [0, 0, 1, 0, 0, 0],
+                'cash': [0, 0, 0, 1, 0, 0],
+                'investment': [0, 0, 0, 0, 1, 0],
+                'ppf': [0, 0, 0, 0, 0, 1],
+                'unknown': [0, 0, 0, 0, 0, 0]
+            }
+            account_type_features = np.array([account_type_mapping.get(account_type, [0, 0, 0, 0, 0, 0])])
+            
+            # Combine all features
+            X = np.hstack([
+                tfidf_features,
+                amount_features,
+                type_features,
+                account_features,
+                account_type_features
+            ])
+            
+            return X
+            
+        except Exception as e:
+            print(f"Error preparing prediction features: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _find_best_match(self, field_type: str, features: Dict) -> Optional[Dict]:
         """Find best matching payee or category based on pattern features (fallback method)"""
