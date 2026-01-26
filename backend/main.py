@@ -1,9 +1,13 @@
 import os
+import warnings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 from routers import accounts, transactions, payees, categories, import_data, auth, learning
 import models
+
+# Suppress PyTorch deprecation warnings from transformers library
+warnings.filterwarnings("ignore", message="torch.utils._pytree._register_pytree_node is deprecated")
 
 Base.metadata.create_all(bind=engine)
 

@@ -362,11 +362,11 @@ const Import: React.FC = () => {
         }
         
         // Combine results from all files
+        const totalTransactionsCreated = allResults.reduce((sum, r) => sum + (r.transactions_created || 0), 0);
         results = {
-          success: allResults.every(r => r.success),
-          message: `Imported from ${allResults.length} files`,
-          imported: allResults.reduce((sum, r) => sum + (r.imported || 0), 0),
-          skipped: allResults.reduce((sum, r) => sum + (r.skipped || 0), 0),
+          success: allResults.every(r => r.success !== false),
+          message: `Imported from ${allResults.length} file${allResults.length !== 1 ? 's' : ''}`,
+          transactions_created: totalTransactionsCreated,
           errors: allResults.flatMap(r => r.errors || []),
         };
       }
