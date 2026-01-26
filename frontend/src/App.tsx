@@ -18,6 +18,8 @@ import Categories from './pages/Categories';
 import Import from './pages/Import';
 import Backup from './pages/Backup';
 import LearningDashboard from './pages/LearningDashboard';
+import CategoryReports from './pages/CategoryReports';
+import MonthwiseCategoryReport from './pages/MonthwiseCategoryReport';
 import { useAppNotifications } from './hooks/useAppNotifications';
 
 const queryClient = new QueryClient({
@@ -69,6 +71,8 @@ const AppContent: React.FC = () => {
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/reports" element={<FilteredTransactions />} />
+          <Route path="/reports/by-category" element={<CategoryReports />} />
+          <Route path="/reports/monthwise" element={<MonthwiseCategoryReport />} />
           <Route path="/payees" element={<Payees />} />
           <Route path="/categories" element={<Categories />} />
           <Route path="/import" element={<Import />} />

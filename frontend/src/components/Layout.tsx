@@ -27,6 +27,8 @@ import {
   Analytics,
   Psychology,
   Lock,
+  PieChart,
+  CalendarMonth,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,6 +45,8 @@ const menuItems = [
   { text: 'Accounts', icon: <AccountBalance />, path: '/accounts' },
   { text: 'Transactions', icon: <Receipt />, path: '/transactions' },
   { text: 'Reports', icon: <Analytics />, path: '/reports' },
+  { text: 'By Category', icon: <PieChart />, path: '/reports/by-category', indent: true },
+  { text: 'Month-wise', icon: <CalendarMonth />, path: '/reports/monthwise', indent: true },
   { text: 'Learning', icon: <Psychology />, path: '/learning' },
   { text: 'Import', icon: <Upload />, path: '/import' },
   { text: 'Backup', icon: <Backup />, path: '/backup' },
@@ -156,6 +160,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <ListItemButton
                   selected={location.pathname === item.path}
                   onClick={() => navigate(item.path)}
+                  sx={{ pl: item.indent ? 4 : 2 }}
                 >
                   <ListItemIcon>{item.icon}</ListItemIcon>
                   <ListItemText primary={item.text} />
