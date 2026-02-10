@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -16,13 +17,9 @@ import {
   Paper,
   CircularProgress,
   Alert,
-  Tabs,
-  Tab,
 } from '@mui/material';
 import {
   Download,
-  TrendingDown,
-  TrendingUp,
   ShowChart,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
@@ -77,7 +74,7 @@ const defaultFilters: MonthwiseReportFilters = {
 
 const MonthwiseCategoryReport: React.FC = () => {
   usePageTitle({ title: 'Month-wise Category Report' });
-  const [activeTab, setActiveTab] = useState(0);
+  const navigate = useNavigate();
   const { filters, setFilters } = usePersistentFilters<MonthwiseReportFilters>(
     'monthwise-category-filters',
     defaultFilters
@@ -130,10 +127,12 @@ const MonthwiseCategoryReport: React.FC = () => {
         });
       }
 
-      const hasIncome = cat.income > 0;
-      const hasExpense = cat.expense < 0;
+      const hasIncome = cat.income && cat.income > 0;
+      const hasExpense = cat.expense && cat.expense > 0;
+      // Exclude transfers (where both income and expense are 0, or when they equal each other and represent transfers)
+      const isTransfer = cat.income === 0 && cat.expense === 0;
 
-      if (hasIncome || hasExpense) {
+      if ((hasIncome || hasExpense) && !isTransfer) {
         categories.push(cat);
       }
     });
@@ -152,6 +151,7 @@ const MonthwiseCategoryReport: React.FC = () => {
     });
 
     const rows = categories.map(cat => {
+      const isExpenseCategory = (cat.expense || 0) > (cat.income || 0);
       const row: any = {
         id: cat.id,
         name: cat.name,
@@ -159,6 +159,7 @@ const MonthwiseCategoryReport: React.FC = () => {
         income: cat.income || 0,
         expense: cat.expense || 0,
         total: cat.total_amount || 0,
+        isExpenseCategory,
         byMonth: {},
       };
 
@@ -188,19 +189,20 @@ const MonthwiseCategoryReport: React.FC = () => {
       months.forEach(month => {
         const amount = row.byMonth[month];
         totalsByMonth[month].total += amount;
-        if (amount > 0) {
-          totalsByMonth[month].income += amount;
+        if (row.isExpenseCategory) {
+          totalsByMonth[month].expense += amount;
         } else {
-          totalsByMonth[month].expense += Math.abs(amount);
+          totalsByMonth[month].income += amount;
         }
       });
     });
 
     const grandTotal = {
       income: rows.reduce((sum, r) => sum + (r.income > 0 ? r.income : 0), 0),
-      expense: rows.reduce((sum, r) => sum + (r.expense < 0 ? Math.abs(r.expense) : 0), 0),
-      total: rows.reduce((sum, r) => sum + r.total, 0),
+      expense: rows.reduce((sum, r) => sum + (r.expense > 0 ? r.expense : 0), 0),
+      total: 0,
     };
+    grandTotal.total = grandTotal.income - grandTotal.expense;
 
     return {
       monthColumns: monthCols,
@@ -210,14 +212,41 @@ const MonthwiseCategoryReport: React.FC = () => {
   }, [categoryData]);
 
   const filteredRows = useMemo(() => {
-    if (activeTab === 0) {
-      return categoryRows.filter(r => r.expense < 0).sort((a, b) => a.expense - b.expense);
-    } else if (activeTab === 1) {
-      return categoryRows.filter(r => r.income > 0).sort((a, b) => b.income - a.income);
-    } else {
-      return categoryRows.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+    // Show all categories sorted by total amount
+    return categoryRows.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+  }, [categoryRows]);
+
+  const handleCategoryClick = (categoryId: string, categoryName: string, monthKey?: string) => {
+    let startDate = filters.startDate;
+    let endDate = filters.endDate;
+    
+    if (monthKey) {
+      // monthKey format: "2025-04"
+      const [year, month] = monthKey.split('-');
+      const monthNum = parseInt(month);
+      const yearNum = parseInt(year);
+      
+      // First day of the month
+      startDate = `${year}-${month}-01`;
+      
+      // Last day of the month
+      const lastDay = new Date(yearNum, monthNum, 0).getDate();
+      endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
     }
-  }, [categoryRows, activeTab]);
+    
+    const reportFilters = {
+      startDate,
+      endDate,
+      accountIds: filters.accountIds,
+      categoryIds: [{ value: categoryId, label: categoryName }],
+      payeeIds: [],
+      search: '',
+      page: 1,
+      size: 50,
+    };
+    localStorage.setItem('filtered-transactions-filters', JSON.stringify(reportFilters));
+    navigate('/reports');
+  };
 
   const handleExport = () => {
     const lines: string[] = [];
@@ -241,7 +270,7 @@ const MonthwiseCategoryReport: React.FC = () => {
     
     lines.push('');
     const totalsRow = [
-      activeTab === 0 ? 'Expenses' : activeTab === 1 ? 'Income' : 'Total',
+      'Total',
       ...monthColumns.map(m => totals.byMonth[m.key]?.total.toFixed(2) || '0.00'),
       totals.grandTotal.total.toFixed(2),
     ];
@@ -334,12 +363,11 @@ const MonthwiseCategoryReport: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={activeTab} onChange={(_, newValue) => setActiveTab(newValue)}>
-          <Tab icon={<TrendingDown />} label="Expenses" iconPosition="start" />
-          <Tab icon={<TrendingUp />} label="Income" iconPosition="start" />
-          <Tab icon={<ShowChart />} label="Both" iconPosition="start" />
-        </Tabs>
+      <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+        <ShowChart sx={{ color: 'primary.main' }} />
+        <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+          Combined View
+        </Typography>
       </Box>
 
       <TableContainer component={Paper} sx={{ maxHeight: '70vh' }}>
@@ -414,15 +442,22 @@ const MonthwiseCategoryReport: React.FC = () => {
                   </Box>
                 </TableCell>
                 {monthColumns.map((month) => {
-                  const amount = row.byMonth[month.key];
+                  const amount: number = row.byMonth[month.key];
+                  const color = amount === 0 ? 'text.primary' : (row.isExpenseCategory ? '#d32f2f' : '#2e7d32');
+                  
                   return (
                     <TableCell key={month.key} align="right">
                       {amount !== 0 && (
                         <Typography
                           variant="body2"
-                          sx={{
-                            color: amount < 0 ? '#d32f2f' : amount > 0 ? '#2e7d32' : 'text.primary',
+                          sx={{ 
+                            color,
+                            cursor: 'pointer',
+                            '&:hover': {
+                              textDecoration: 'underline',
+                            },
                           }}
+                          onClick={() => handleCategoryClick(row.id, row.name, month.key)}
                         >
                           {formatCurrency(amount)}
                         </Typography>
@@ -443,9 +478,14 @@ const MonthwiseCategoryReport: React.FC = () => {
                   <Typography
                     variant="body2"
                     sx={{
-                      color: row.total < 0 ? '#d32f2f' : row.total > 0 ? '#2e7d32' : 'text.primary',
+                      color: row.isExpenseCategory ? '#d32f2f' : '#2e7d32',
                       fontWeight: 'bold',
+                      cursor: 'pointer',
+                      '&:hover': {
+                        textDecoration: 'underline',
+                      },
                     }}
+                    onClick={() => handleCategoryClick(row.id, row.name)}
                   >
                     {formatCurrency(row.total)}
                   </Typography>
@@ -453,8 +493,7 @@ const MonthwiseCategoryReport: React.FC = () => {
               </TableRow>
             ))}
             
-            {activeTab === 2 && (
-              <>
+            <>
                 <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
                   <TableCell
                     sx={{
@@ -470,7 +509,7 @@ const MonthwiseCategoryReport: React.FC = () => {
                   {monthColumns.map((month) => (
                     <TableCell key={month.key} align="right">
                       <Typography variant="body2" fontWeight="bold" color="#d32f2f">
-                        {formatCurrency(-totals.byMonth[month.key]?.expense || 0)}
+                        {formatCurrency(totals.byMonth[month.key]?.expense || 0)}
                       </Typography>
                     </TableCell>
                   ))}
@@ -484,7 +523,7 @@ const MonthwiseCategoryReport: React.FC = () => {
                     }}
                   >
                     <Typography variant="body2" fontWeight="bold" color="#d32f2f">
-                      {formatCurrency(-totals.grandTotal.expense)}
+                      {formatCurrency(totals.grandTotal.expense)}
                     </Typography>
                   </TableCell>
                 </TableRow>
@@ -522,7 +561,6 @@ const MonthwiseCategoryReport: React.FC = () => {
                   </TableCell>
                 </TableRow>
               </>
-            )}
             <TableRow sx={{ backgroundColor: '#e0e0e0' }}>
               <TableCell
                 sx={{
@@ -535,13 +573,16 @@ const MonthwiseCategoryReport: React.FC = () => {
               >
                 Total
               </TableCell>
-              {monthColumns.map((month) => (
-                <TableCell key={month.key} align="right">
-                  <Typography variant="body2" fontWeight="bold">
-                    {formatCurrency(totals.byMonth[month.key]?.total || 0)}
-                  </Typography>
-                </TableCell>
-              ))}
+              {monthColumns.map((month) => {
+                const displayAmount = totals.byMonth[month.key]?.total || 0;
+                return (
+                  <TableCell key={month.key} align="right">
+                    <Typography variant="body2" fontWeight="bold">
+                      {formatCurrency(displayAmount)}
+                    </Typography>
+                  </TableCell>
+                );
+              })}
               <TableCell
                 align="right"
                 sx={{

@@ -44,6 +44,8 @@ interface CategoryReportFilters {
   endDate: string;
   accountIds: Option[];
   expandedCategories: string[];
+  month: string;
+  year: string;
 }
 
 // Get current financial year (April 1 to March 31 for India)
@@ -81,6 +83,8 @@ const defaultFilters: CategoryReportFilters = {
   endDate: getCurrentFinancialYear().end,
   accountIds: [],
   expandedCategories: [],
+  month: '',
+  year: '',
 };
 
 const CategoryReports: React.FC = () => {
@@ -114,6 +118,25 @@ const CategoryReports: React.FC = () => {
 
   const handleFilterChange = (field: keyof CategoryReportFilters, value: any) => {
     setFilters(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleMonthYearChange = (month: string, year: string) => {
+    setFilters(prev => ({ ...prev, month, year }));
+    
+    if (month && year) {
+      // Set date range to selected month
+      const yearNum = parseInt(year);
+      const monthNum = parseInt(month);
+      const startDate = `${year}-${month}-01`;
+      const lastDay = new Date(yearNum, monthNum, 0).getDate();
+      const endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+      
+      setFilters(prev => ({ ...prev, startDate, endDate, month, year }));
+    } else if (!month && !year) {
+      // Reset to financial year if both are cleared
+      const fy = getCurrentFinancialYear();
+      setFilters(prev => ({ ...prev, startDate: fy.start, endDate: fy.end, month: '', year: '' }));
+    }
   };
 
   const toggleCategoryExpansion = (categoryId: string) => {
@@ -387,6 +410,45 @@ const CategoryReports: React.FC = () => {
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={2}>
+              <TextField
+                label="Year"
+                type="number"
+                value={filters.year}
+                onChange={(e) => handleMonthYearChange(filters.month, e.target.value)}
+                fullWidth
+                size="small"
+                placeholder="YYYY"
+                inputProps={{ min: 2000, max: 2100 }}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} md={2}>
+              <TextField
+                label="Month"
+                select
+                value={filters.month}
+                onChange={(e) => handleMonthYearChange(e.target.value, filters.year)}
+                fullWidth
+                size="small"
+                SelectProps={{ native: true }}
+                InputLabelProps={{ shrink: true }}
+              >
+                <option value="">All</option>
+                <option value="01">January</option>
+                <option value="02">February</option>
+                <option value="03">March</option>
+                <option value="04">April</option>
+                <option value="05">May</option>
+                <option value="06">June</option>
+                <option value="07">July</option>
+                <option value="08">August</option>
+                <option value="09">September</option>
+                <option value="10">October</option>
+                <option value="11">November</option>
+                <option value="12">December</option>
+              </TextField>
+            </Grid>
             <Grid item xs={12} md={3}>
               <TextField
                 label="Start Date"
@@ -396,6 +458,7 @@ const CategoryReports: React.FC = () => {
                 fullWidth
                 size="small"
                 InputLabelProps={{ shrink: true }}
+                disabled={!!(filters.month && filters.year)}
               />
             </Grid>
             <Grid item xs={12} md={3}>
@@ -407,6 +470,7 @@ const CategoryReports: React.FC = () => {
                 fullWidth
                 size="small"
                 InputLabelProps={{ shrink: true }}
+                disabled={!!(filters.month && filters.year)}
               />
             </Grid>
             <Grid item xs={12} md={4}>
