@@ -32,7 +32,9 @@ class Account(Base):
     # PPF specific fields
     interest_rate = Column(Numeric(5, 2), nullable=True)  # Annual interest rate percentage
     
-    status = Column(String(20), default='active')
+    # Account status: active, inactive, or closed
+    # Closed accounts cannot have new transactions but remain visible for historical records
+    status = Column(String(20), default='active', nullable=False)
     opening_date = Column(Date, server_default=func.current_date())
     currency = Column(String(3), default='INR')
     

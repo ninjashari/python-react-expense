@@ -17,6 +17,7 @@ import {
   LinearProgress,
   Backdrop,
   Alert,
+  Chip,
 } from '@mui/material';
 import { Add, Edit, Delete, Refresh, Calculate, FileDownload, FileUpload } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -79,6 +80,7 @@ const Accounts: React.FC = () => {
       card_expiry_month: undefined,
       card_expiry_year: undefined,
       interest_rate: undefined,
+      status: 'active',
     },
   });
 
@@ -132,6 +134,7 @@ const Accounts: React.FC = () => {
         bill_generation_date: account.bill_generation_date,
         payment_due_date: account.payment_due_date,
         interest_rate: account.interest_rate,
+        status: account.status || 'active',
       });
     } else {
       setEditingAccount(null);
@@ -145,6 +148,7 @@ const Accounts: React.FC = () => {
         card_expiry_month: undefined,
         card_expiry_year: undefined,
         interest_rate: undefined,
+        status: 'active',
       });
     }
     setDialogOpen(true);
@@ -482,9 +486,27 @@ const Accounts: React.FC = () => {
                     <Typography variant="h6" gutterBottom>
                       {account.name}
                     </Typography>
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
-                      {formatAccountType(account.type)}
-                    </Typography>
+                    <Box display="flex" gap={1} alignItems="center" mb={1}>
+                      <Typography variant="body2" color="textSecondary">
+                        {formatAccountType(account.type)}
+                      </Typography>
+                      {account.status === 'closed' && (
+                        <Chip 
+                          label="Closed" 
+                          size="small" 
+                          color="error"
+                          variant="outlined"
+                        />
+                      )}
+                      {account.status === 'inactive' && (
+                        <Chip 
+                          label="Inactive" 
+                          size="small" 
+                          color="warning"
+                          variant="outlined"
+                        />
+                      )}
+                    </Box>
                     <Typography
                       variant="h5"
                       color={account.type === 'credit' ? getCreditBalanceColor(Number(account.balance || 0)) : (account.balance >= 0 ? 'success.main' : 'error.main')}
@@ -824,6 +846,27 @@ const Accounts: React.FC = () => {
                     helperText="Enter annual interest rate percentage (e.g., 7.1 for 7.1%)"
                     error={!!errors.interest_rate}
                   />
+                )}
+              />
+            )}
+
+            {watchAccountType === 'credit' && (
+              <Controller
+                name="status"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    select
+                    label="Account Status"
+                    fullWidth
+                    margin="normal"
+                    helperText="Set the account status (closed accounts cannot have new transactions)"
+                  >
+                    <MenuItem value="active">Active</MenuItem>
+                    <MenuItem value="inactive">Inactive</MenuItem>
+                    <MenuItem value="closed">Closed</MenuItem>
+                  </TextField>
                 )}
               />
             )}

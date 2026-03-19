@@ -1539,7 +1539,7 @@ const Transactions: React.FC = () => {
                             '& .MuiOutlinedInput-root': { minHeight: '24px' }
                           }}
                         >
-                          {accounts?.map((account) => (
+                          {accounts?.filter(a => a.status !== 'closed').map((account) => (
                             <MenuItem key={account.id} value={account.id} sx={{ fontSize: '0.75rem' }}>
                               {account.name}
                             </MenuItem>
@@ -1586,7 +1586,7 @@ const Transactions: React.FC = () => {
                               '& .MuiOutlinedInput-root': { minHeight: '20px' }
                             }}
                           >
-                            {accounts?.map((account) => (
+                            {accounts?.filter(a => a.status !== 'closed').map((account) => (
                               <MenuItem key={account.id} value={account.id} sx={{ fontSize: '0.65rem' }}>
                                 {account.name}
                               </MenuItem>
@@ -1932,7 +1932,7 @@ const Transactions: React.FC = () => {
                     setSelectedAccount(account);
                   }}
                 >
-                  {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
+                  {accounts?.filter(a => a.status !== 'closed').sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
                     <MenuItem key={account.id} value={account.id}>
                       {account.name}
                     </MenuItem>
@@ -1956,7 +1956,7 @@ const Transactions: React.FC = () => {
                     error={!!errors.to_account_id}
                     helperText={errors.to_account_id?.message}
                   >
-                    {accounts?.sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
+                    {accounts?.filter(a => a.status !== 'closed').sort((a, b) => a.name.localeCompare(b.name)).map((account) => (
                       <MenuItem key={account.id} value={account.id}>
                         {account.name}
                       </MenuItem>

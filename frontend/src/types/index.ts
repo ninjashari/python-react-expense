@@ -21,6 +21,9 @@ export interface Account {
   // PPF specific fields
   interest_rate?: number;  // Annual interest rate percentage
   
+  // Account status: 'active', 'inactive', or 'closed'
+  status: 'active' | 'inactive' | 'closed';
+  
   created_at: string;
   updated_at?: string;
 }
@@ -82,6 +85,9 @@ export interface CreateAccountDto {
   
   // PPF specific fields
   interest_rate?: number;
+  
+  // Account status: 'active', 'inactive', or 'closed' (defaults to 'active')
+  status?: 'active' | 'inactive' | 'closed';
 }
 
 export interface CreatePayeeDto {

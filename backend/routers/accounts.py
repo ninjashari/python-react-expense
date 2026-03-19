@@ -18,6 +18,9 @@ from routers.transactions import update_account_balance
 
 router = APIRouter()
 
+# Valid account status values
+VALID_STATUS_VALUES = {'active', 'inactive', 'closed'}
+
 @router.post("/", response_model=AccountResponse)
 def create_account(
     account: AccountCreate, 
@@ -25,11 +28,20 @@ def create_account(
     current_user: User = Depends(get_current_active_user)
 ):
     try:
+        # Validate status
+        if account.status and account.status not in VALID_STATUS_VALUES:
+            raise HTTPException(
+                status_code=422, 
+                detail=f"Invalid status value. Must be one of: {', '.join(VALID_STATUS_VALUES)}"
+            )
+        
         db_account = Account(**account.dict(), user_id=current_user.id)
         db.add(db_account)
         db.commit()
         db.refresh(db_account)
         return db_account
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail="Failed to create account")
@@ -72,7 +84,14 @@ def update_account(
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
         
+        # Validate status if being updated
         update_data = account_update.dict(exclude_unset=True)
+        if 'status' in update_data and update_data['status'] not in VALID_STATUS_VALUES:
+            raise HTTPException(
+                status_code=422, 
+                detail=f"Invalid status value. Must be one of: {', '.join(VALID_STATUS_VALUES)}"
+            )
+        
         for field, value in update_data.items():
             setattr(account, field, value)
         

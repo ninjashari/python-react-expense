@@ -26,6 +26,7 @@ class AccountBase(BaseModel):
     # PPF specific fields
     interest_rate: Optional[Decimal] = None  # Annual interest rate percentage
     
+    # Account status: 'active', 'inactive', or 'closed'
     status: str = 'active'
     currency: str = 'INR'
 

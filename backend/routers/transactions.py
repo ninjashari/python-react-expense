@@ -272,10 +272,24 @@ async def create_transaction(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
+    # Prevent transactions on closed accounts
+    if account.status == 'closed':
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot create transactions on a closed account: {account.name}"
+        )
+    
     if transaction.to_account_id:
         to_account = db.query(Account).filter(Account.id == transaction.to_account_id).first()
         if not to_account:
             raise HTTPException(status_code=404, detail="Destination account not found")
+        
+        # Prevent transfers to closed accounts
+        if to_account.status == 'closed':
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot transfer to a closed account: {to_account.name}"
+            )
         
         if transaction.type != "transfer":
             raise HTTPException(status_code=400, detail="to_account_id can only be used with transfer transactions")
@@ -1018,6 +1032,23 @@ async def update_transaction(
     ).first()
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    
+    # Check if account_id or to_account_id are being changed to closed accounts
+    if transaction_update.account_id:
+        new_account = db.query(Account).filter(Account.id == transaction_update.account_id).first()
+        if new_account and new_account.status == 'closed':
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot move transaction to a closed account: {new_account.name}"
+            )
+    
+    if transaction_update.to_account_id:
+        new_to_account = db.query(Account).filter(Account.id == transaction_update.to_account_id).first()
+        if new_to_account and new_to_account.status == 'closed':
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot transfer to a closed account: {new_to_account.name}"
+            )
     
     # Store original values for balance reversal and learning
     original_values = {
