@@ -158,18 +158,20 @@ const CategoryReports: React.FC = () => {
   };
 
   // Separate income and expense categories
-  const { incomeCategories, expenseCategories, totals } = useMemo(() => {
+  const { incomeCategories, expenseCategories, transferCategories, totals } = useMemo(() => {
     if (!categoryData) {
-      return { incomeCategories: [], expenseCategories: [], totals: { income: 0, expense: 0, net: 0, grand: 0 } };
+      return { incomeCategories: [], expenseCategories: [], transferCategories: [], totals: { income: 0, expense: 0, transfers: 0, net: 0, grand: 0 } };
     }
 
     const income = categoryData.filter((c: any) => c.income > 0);
     const expense = categoryData.filter((c: any) => c.expense > 0);
+    const transfers = categoryData.filter((c: any) => c.income === 0 && c.expense === 0);
 
     const totalIncome = income.reduce((sum: number, c: any) => sum + c.income, 0);
     const totalExpense = expense.reduce((sum: number, c: any) => sum + Math.abs(c.expense), 0);
+    const totalTransfers = transfers.reduce((sum: number, c: any) => sum + Math.abs(c.total_amount || 0), 0);
     const netAmount = totalIncome - totalExpense;
-    const grandTotal = totalIncome + totalExpense;
+    const grandTotal = totalIncome + totalExpense + totalTransfers;
 
     // Sort by amount descending (highest percentage first)
     income.sort((a: any, b: any) => b.income - a.income);
@@ -178,9 +180,11 @@ const CategoryReports: React.FC = () => {
     return {
       incomeCategories: income,
       expenseCategories: expense,
+      transferCategories: transfers,
       totals: {
         income: totalIncome,
         expense: totalExpense,
+        transfers: totalTransfers,
         net: netAmount,
         grand: grandTotal,
       },
@@ -209,6 +213,7 @@ const CategoryReports: React.FC = () => {
     lines.push('Summary');
     lines.push(`Total Income,${totals.income.toFixed(2)}`);
     lines.push(`Total Expenses,${totals.expense.toFixed(2)}`);
+    lines.push(`Total Transfers,${totals.transfers.toFixed(2)}`);
     lines.push(`Net Amount,${totals.net.toFixed(2)}`);
     lines.push('');
     
@@ -498,7 +503,7 @@ const CategoryReports: React.FC = () => {
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <Card sx={{ background: 'linear-gradient(135deg, #4caf50 0%, #81c784 100%)' }}>
             <CardContent>
               <Typography variant="body2" color="white" gutterBottom>
@@ -510,7 +515,7 @@ const CategoryReports: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <Card sx={{ background: 'linear-gradient(135deg, #f44336 0%, #e57373 100%)' }}>
             <CardContent>
               <Typography variant="body2" color="white" gutterBottom>
@@ -522,7 +527,19 @@ const CategoryReports: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
+          <Card sx={{ background: 'linear-gradient(135deg, #9c27b0 0%, #ce93d8 100%)' }}>
+            <CardContent>
+              <Typography variant="body2" color="white" gutterBottom>
+                Total Transfers
+              </Typography>
+              <Typography variant="h5" color="white" fontWeight="bold">
+                {formatCurrency(totals.transfers)}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={3}>
           <Card sx={{ background: `linear-gradient(135deg, ${totals.net >= 0 ? '#2196f3' : '#ff9800'} 0%, ${totals.net >= 0 ? '#64b5f6' : '#ffb74d'} 100%)` }}>
             <CardContent>
               <Typography variant="body2" color="white" gutterBottom>

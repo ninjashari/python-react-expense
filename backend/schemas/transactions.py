@@ -83,6 +83,7 @@ class PaginatedTransactionsResponse(BaseModel):
 class TransactionSummary(BaseModel):
     total_income: Decimal
     total_expense: Decimal
+    total_transfers: Decimal
     net_amount: Decimal
     transaction_count: int
 

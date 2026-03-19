@@ -726,6 +726,16 @@ const FilteredTransactions: React.FC = () => {
               </Grid>
               <Grid item xs={12} sm={6} md={3}>
                 <Box textAlign="center" p={2}>
+                  <Typography variant="h4" fontWeight="bold" sx={{ textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}>
+                    {formatCurrency(summary.total_transfers)}
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ opacity: 0.9, fontWeight: 500 }}>
+                    Total Transfers
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Box textAlign="center" p={2}>
                   <Typography 
                     variant="h4" 
                     fontWeight="bold"
@@ -738,16 +748,6 @@ const FilteredTransactions: React.FC = () => {
                   </Typography>
                   <Typography variant="subtitle1" sx={{ opacity: 0.9, fontWeight: 500 }}>
                     Net Amount
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box textAlign="center" p={2}>
-                  <Typography variant="h4" fontWeight="bold" sx={{ textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}>
-                    {summary.transaction_count}
-                  </Typography>
-                  <Typography variant="subtitle1" sx={{ opacity: 0.9, fontWeight: 500 }}>
-                    Transactions
                   </Typography>
                 </Box>
               </Grid>

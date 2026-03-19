@@ -682,12 +682,14 @@ def get_transaction_summary(
     # Calculate summary statistics
     income_sum = query.filter(Transaction.type == 'income').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
     expense_sum = query.filter(Transaction.type == 'expense').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
+    transfer_sum = query.filter(Transaction.type == 'transfer').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
     transaction_count = query.count()
     net_amount = income_sum - expense_sum
     
     return TransactionSummary(
         total_income=income_sum,
         total_expense=expense_sum,
+        total_transfers=transfer_sum,
         net_amount=net_amount,
         transaction_count=transaction_count
     )
