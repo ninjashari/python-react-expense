@@ -29,6 +29,7 @@ import {
   Lock,
   PieChart,
   CalendarMonth,
+  TrendingUp,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,6 +48,7 @@ const menuItems = [
   { text: 'Reports', icon: <Analytics />, path: '/reports' },
   { text: 'By Category', icon: <PieChart />, path: '/reports/by-category', indent: true },
   { text: 'Month-wise', icon: <CalendarMonth />, path: '/reports/monthwise', indent: true },
+  { text: 'Investments', icon: <TrendingUp />, path: '/investments' },
   { text: 'Learning', icon: <Psychology />, path: '/learning' },
   { text: 'Import', icon: <Upload />, path: '/import' },
   { text: 'Backup', icon: <Backup />, path: '/backup' },
