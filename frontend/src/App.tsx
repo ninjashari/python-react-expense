@@ -20,6 +20,7 @@ import Backup from './pages/Backup';
 import LearningDashboard from './pages/LearningDashboard';
 import CategoryReports from './pages/CategoryReports';
 import MonthwiseCategoryReport from './pages/MonthwiseCategoryReport';
+import Investments from './pages/Investments';
 import { useAppNotifications } from './hooks/useAppNotifications';
 
 const queryClient = new QueryClient({
@@ -77,6 +78,7 @@ const AppContent: React.FC = () => {
           <Route path="/categories" element={<Categories />} />
           <Route path="/import" element={<Import />} />
           <Route path="/backup" element={<Backup />} />
+          <Route path="/investments" element={<Investments />} />
           <Route path="/learning" element={<LearningDashboard />} />
         </Routes>
       </Layout>
