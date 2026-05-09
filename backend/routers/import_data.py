@@ -197,24 +197,18 @@ def process_transactions_data(
     
     for index, row in df.iterrows():
         try:
-            # Parse transaction data - handle DD/MM/YYYY format for ICICI files
+            # Parse transaction data - restrict to DD/MM/YYYY or DD-MM-YYYY format
             date_value = str(row[date_column]).strip()
             
-            # Check if this looks like DD/MM/YYYY format (ICICI style)
-            if '/' in date_value and len(date_value.split('/')) == 3:
+            # Try DD/MM/YYYY format first
+            try:
+                transaction_date = pd.to_datetime(date_value, format='%d/%m/%Y').date()
+            except (ValueError, TypeError):
+                # Try DD-MM-YYYY format
                 try:
-                    # Try parsing as DD/MM/YYYY first (ICICI format)
-                    transaction_date = pd.to_datetime(date_value, format='%d/%m/%Y', dayfirst=True).date()
+                    transaction_date = pd.to_datetime(date_value, format='%d-%m-%Y').date()
                 except (ValueError, TypeError):
-                    try:
-                        # Fallback to automatic parsing with dayfirst=True
-                        transaction_date = pd.to_datetime(date_value, dayfirst=True).date()
-                    except (ValueError, TypeError):
-                        # Last resort - pandas automatic parsing
-                        transaction_date = pd.to_datetime(row[date_column]).date()
-            else:
-                # For other formats, use automatic parsing
-                transaction_date = pd.to_datetime(row[date_column]).date()
+                    raise ValueError(f"Invalid date format '{date_value}'. Please use DD/MM/YYYY or DD-MM-YYYY format.")
             
             # Handle amount parsing for both single amount column and withdrawal/deposit columns
             if withdrawal_column and deposit_column:

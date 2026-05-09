@@ -118,14 +118,14 @@ JSON RESPONSE:"""
                 if item['transaction_type'] not in ['income', 'expense', 'transfer']:
                     item['transaction_type'] = 'expense'  # Default fallback
                 
-                # Validate and parse date
+                # Validate and parse date - restrict to DD/MM/YYYY or DD-MM-YYYY format
                 try:
                     datetime.strptime(item['date'], '%Y-%m-%d')
                 except ValueError:
-                    # Try to parse other common date formats, prioritizing DD/MM/YYYY for Indian bank statements
+                    # Try to parse DD/MM/YYYY and DD-MM-YYYY formats for Indian bank statements
                     date_str = str(item['date'])
-                    # Prioritize DD/MM/YYYY and DD-MM-YYYY formats first for Indian statements
-                    for fmt in ['%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y', '%Y/%m/%d', '%m-%d-%Y', '%Y-%m-%d']:
+                    # Restrict to DD/MM/YYYY and DD-MM-YYYY formats only
+                    for fmt in ['%d/%m/%Y', '%d-%m-%Y']:
                         try:
                             parsed_date = datetime.strptime(date_str, fmt)
                             item['date'] = parsed_date.strftime('%Y-%m-%d')
@@ -134,7 +134,7 @@ JSON RESPONSE:"""
                         except ValueError:
                             continue
                     else:
-                        print(f"DEBUG: Failed to parse date: '{date_str}'")
+                        print(f"DEBUG: Failed to parse date: '{date_str}'. Please use DD/MM/YYYY or DD-MM-YYYY format.")
                         continue  # Skip if no valid date format found
                 
                 # Validate amount

@@ -137,7 +137,7 @@ CRITICAL INSTRUCTIONS:
 4. Each transaction must have: date, amount, description, transaction_type
 5. transaction_type must be exactly one of: "income", "expense", "transfer"
 6. amount must be a positive number (no negative values, no currency symbols)
-7. date must be in YYYY-MM-DD format (convert from any format found)
+7. date must be in YYYY-MM-DD format (convert from DD/MM/YYYY or DD-MM-YYYY formats only)
 8. ONLY count actual transaction lines - skip headers, totals, and summary rows
 
 EXCEL-SPECIFIC PATTERNS TO RECOGNIZE:
@@ -145,7 +145,7 @@ EXCEL-SPECIFIC PATTERNS TO RECOGNIZE:
 - Column headers: Date, Description, Amount, Debit, Credit, Balance, Transaction Type, etc.
 - Data rows with pipe separators (|) between columns
 - Multiple sheets may contain transactions
-- Common Excel date formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, etc.
+- Common Excel date formats: DD/MM/YYYY or DD-MM-YYYY (other formats not supported)
 - Amount columns may be separate (Debit/Credit) or combined
 
 TRANSACTION TYPE RULES FOR EXCEL DATA:

@@ -98,7 +98,7 @@ const FileUploadZone: React.FC<FileUploadZoneProps> = ({
           </li>
           <li>
             <Typography variant="body2">
-              Use date format: YYYY-MM-DD, MM/DD/YYYY, or DD/MM/YYYY
+              Use date format: DD/MM/YYYY or DD-MM-YYYY
             </Typography>
           </li>
           <li>
