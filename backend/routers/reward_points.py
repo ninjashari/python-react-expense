@@ -1,0 +1,176 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
+from typing import List
+import uuid
+
+from database import get_db
+from models.reward_points import RewardPointRedemption
+from models.transactions import Transaction
+from models.accounts import Account
+from models.users import User
+from schemas.reward_points import (
+    RewardPointRedemptionCreate,
+    RewardPointRedemptionUpdate,
+    RewardPointRedemptionResponse,
+    RewardPointsSummaryResponse,
+    RewardPointsSummaryItem,
+)
+from utils.auth import get_current_active_user
+
+router = APIRouter()
+
+
+@router.get("/summary", response_model=RewardPointsSummaryResponse)
+def get_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get reward points summary per credit card account (earned vs redeemed)."""
+    # Aggregate points earned from transactions grouped by credit account
+    earned_rows = (
+        db.query(
+            Transaction.account_id,
+            func.coalesce(func.sum(Transaction.reward_points), 0).label("total_earned")
+        )
+        .join(Account, Account.id == Transaction.account_id)
+        .filter(
+            Transaction.user_id == current_user.id,
+            Account.type == 'credit',
+            Transaction.reward_points.isnot(None)
+        )
+        .group_by(Transaction.account_id)
+        .all()
+    )
+    earned_map = {str(r.account_id): int(r.total_earned) for r in earned_rows}
+
+    # Aggregate points redeemed grouped by account
+    redeemed_rows = (
+        db.query(
+            RewardPointRedemption.account_id,
+            func.coalesce(func.sum(RewardPointRedemption.points_used), 0).label("total_redeemed")
+        )
+        .filter(RewardPointRedemption.user_id == current_user.id)
+        .group_by(RewardPointRedemption.account_id)
+        .all()
+    )
+    redeemed_map = {str(r.account_id): int(r.total_redeemed) for r in redeemed_rows}
+
+    # All credit accounts for this user
+    credit_accounts = (
+        db.query(Account)
+        .filter(Account.user_id == current_user.id, Account.type == 'credit')
+        .order_by(Account.name)
+        .all()
+    )
+
+    items = []
+    for acc in credit_accounts:
+        acc_id = str(acc.id)
+        earned = earned_map.get(acc_id, 0)
+        redeemed = redeemed_map.get(acc_id, 0)
+        items.append(RewardPointsSummaryItem(
+            account_id=acc.id,
+            account_name=acc.name,
+            total_earned=earned,
+            total_redeemed=redeemed,
+            net_available=earned - redeemed,
+        ))
+
+    return RewardPointsSummaryResponse(items=items)
+
+
+@router.get("/", response_model=List[RewardPointRedemptionResponse])
+def get_redemptions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """List all reward point redemptions for the current user."""
+    return (
+        db.query(RewardPointRedemption)
+        .options(joinedload(RewardPointRedemption.account))
+        .filter(RewardPointRedemption.user_id == current_user.id)
+        .order_by(RewardPointRedemption.date.desc())
+        .all()
+    )
+
+
+@router.post("/", response_model=RewardPointRedemptionResponse, status_code=status.HTTP_201_CREATED)
+def create_redemption(
+    redemption: RewardPointRedemptionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Record a reward point redemption for a credit card account."""
+    # Validate the account belongs to user and is a credit card
+    account = db.query(Account).filter(
+        Account.id == redemption.account_id,
+        Account.user_id == current_user.id,
+        Account.type == 'credit'
+    ).first()
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credit card account not found"
+        )
+
+    db_obj = RewardPointRedemption(
+        **redemption.model_dump(),
+        user_id=current_user.id
+    )
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    # Reload with relationship
+    db.refresh(db_obj)
+    db_obj_with_account = (
+        db.query(RewardPointRedemption)
+        .options(joinedload(RewardPointRedemption.account))
+        .filter(RewardPointRedemption.id == db_obj.id)
+        .first()
+    )
+    return db_obj_with_account
+
+
+@router.put("/{redemption_id}", response_model=RewardPointRedemptionResponse)
+def update_redemption(
+    redemption_id: uuid.UUID,
+    updates: RewardPointRedemptionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update a reward point redemption."""
+    db_obj = db.query(RewardPointRedemption).filter(
+        RewardPointRedemption.id == redemption_id,
+        RewardPointRedemption.user_id == current_user.id
+    ).first()
+    if not db_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Redemption not found")
+
+    for field, value in updates.model_dump(exclude_unset=True).items():
+        setattr(db_obj, field, value)
+    db.commit()
+
+    return (
+        db.query(RewardPointRedemption)
+        .options(joinedload(RewardPointRedemption.account))
+        .filter(RewardPointRedemption.id == db_obj.id)
+        .first()
+    )
+
+
+@router.delete("/{redemption_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_redemption(
+    redemption_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Delete a reward point redemption."""
+    db_obj = db.query(RewardPointRedemption).filter(
+        RewardPointRedemption.id == redemption_id,
+        RewardPointRedemption.user_id == current_user.id
+    ).first()
+    if not db_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Redemption not found")
+    db.delete(db_obj)
+    db.commit()

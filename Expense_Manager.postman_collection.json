@@ -1,0 +1,991 @@
+{
+  "info": {
+    "name": "Expense Manager API",
+    "_postman_id": "expense-manager-api",
+    "description": "Complete API collection for Expense Manager backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8001", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "account_id", "value": "", "type": "string" },
+    { "key": "transaction_id", "value": "", "type": "string" },
+    { "key": "payee_id", "value": "", "type": "string" },
+    { "key": "category_id", "value": "", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\",\n  \"name\": \"John Doe\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('token', pm.response.json().access_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/auth/me"
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/auth/change-password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"password123\",\n  \"new_password\": \"newpassword456\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/auth/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Accounts",
+      "item": [
+        {
+          "name": "List Accounts",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/accounts/"
+          }
+        },
+        {
+          "name": "Create Account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('account_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/accounts/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"HDFC Savings\",\n  \"type\": \"savings\",\n  \"balance\": 10000.00,\n  \"opening_date\": \"2024-01-01\",\n  \"status\": \"active\",\n  \"currency\": \"INR\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Account",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/accounts/{{account_id}}"
+          }
+        },
+        {
+          "name": "Update Account",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/accounts/{{account_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"HDFC Savings Updated\",\n  \"status\": \"active\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Account",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/accounts/{{account_id}}"
+          }
+        },
+        {
+          "name": "Recalculate Balances",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/accounts/recalculate-balances"
+          }
+        },
+        {
+          "name": "Export Accounts",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/accounts/export"
+          }
+        },
+        {
+          "name": "Import Accounts",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/accounts/import",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transactions",
+      "item": [
+        {
+          "name": "List Transactions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactions/?page=1&size=50&sort_by=date&sort_order=desc",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactions", ""],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "size", "value": "50" },
+                { "key": "sort_by", "value": "date" },
+                { "key": "sort_order", "value": "desc" },
+                { "key": "account_ids", "value": "", "disabled": true },
+                { "key": "category_ids", "value": "", "disabled": true },
+                { "key": "payee_ids", "value": "", "disabled": true },
+                { "key": "transaction_type", "value": "expense", "disabled": true },
+                { "key": "start_date", "value": "2025-01-01", "disabled": true },
+                { "key": "end_date", "value": "2025-12-31", "disabled": true },
+                { "key": "description", "value": "", "disabled": true },
+                { "key": "exclude_category_ids", "value": "", "disabled": true },
+                { "key": "exclude_payee_ids", "value": "", "disabled": true },
+                { "key": "exclude_accounts", "value": "false", "disabled": true },
+                { "key": "exclude_types", "value": "false", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Transaction",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('transaction_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/transactions/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"2025-06-01\",\n  \"amount\": 500.00,\n  \"type\": \"expense\",\n  \"description\": \"Grocery shopping\",\n  \"account_id\": \"{{account_id}}\",\n  \"payee_id\": null,\n  \"category_id\": null,\n  \"to_account_id\": null,\n  \"notes\": \"\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Transaction",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/transactions/{{transaction_id}}"
+          }
+        },
+        {
+          "name": "Update Transaction",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/transactions/{{transaction_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated description\",\n  \"category_id\": null,\n  \"payee_id\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Transaction",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/transactions/{{transaction_id}}"
+          }
+        },
+        {
+          "name": "Transaction Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactions/summary?start_date=2025-01-01&end_date=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactions", "summary"],
+              "query": [
+                { "key": "start_date", "value": "2025-01-01" },
+                { "key": "end_date", "value": "2025-12-31" },
+                { "key": "account_ids", "value": "", "disabled": true },
+                { "key": "category_ids", "value": "", "disabled": true },
+                { "key": "payee_ids", "value": "", "disabled": true },
+                { "key": "transaction_type", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Bulk Update Transactions",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/transactions/bulk",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_ids\": [\"{{transaction_id}}\"],\n  \"updates\": {\n    \"category_id\": null,\n    \"payee_id\": null\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Export Transactions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactions/export?start_date=2025-01-01&end_date=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactions", "export"],
+              "query": [
+                { "key": "start_date", "value": "2025-01-01" },
+                { "key": "end_date", "value": "2025-12-31" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Recalculate Balances for Account",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/transactions/recalculate-balances/{{account_id}}"
+          }
+        },
+        {
+          "name": "Cleanup Descriptions",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/transactions/cleanup-descriptions"
+          }
+        },
+        {
+          "name": "Clear Fields",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/transactions/clear-fields",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"field\": \"description\",\n  \"transaction_ids\": []\n}"
+            }
+          }
+        },
+        {
+          "name": "Bulk Reassign",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/transactions/bulk-reassign",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from_payee_id\": null,\n  \"to_payee_id\": \"{{payee_id}}\",\n  \"from_category_id\": null,\n  \"to_category_id\": \"{{category_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reports - By Category",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactions/reports/by-category?start_date=2025-01-01&end_date=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactions", "reports", "by-category"],
+              "query": [
+                { "key": "start_date", "value": "2025-01-01" },
+                { "key": "end_date", "value": "2025-12-31" },
+                { "key": "transaction_type", "value": "expense", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reports - By Payee",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactions/reports/by-payee?start_date=2025-01-01&end_date=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactions", "reports", "by-payee"],
+              "query": [
+                { "key": "start_date", "value": "2025-01-01" },
+                { "key": "end_date", "value": "2025-12-31" },
+                { "key": "transaction_type", "value": "expense", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reports - By Account",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactions/reports/by-account?start_date=2025-01-01&end_date=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactions", "reports", "by-account"],
+              "query": [
+                { "key": "start_date", "value": "2025-01-01" },
+                { "key": "end_date", "value": "2025-12-31" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reports - Monthly Trend",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactions/reports/monthly-trend?months=12",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactions", "reports", "monthly-trend"],
+              "query": [
+                { "key": "months", "value": "12" },
+                { "key": "account_ids", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reports - Comprehensive Analysis",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/transactions/reports/comprehensive-analysis?start_date=2025-01-01&end_date=2025-12-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "transactions", "reports", "comprehensive-analysis"],
+              "query": [
+                { "key": "start_date", "value": "2025-01-01" },
+                { "key": "end_date", "value": "2025-12-31" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reports - Retrain Models",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/transactions/reports/retrain-models"
+          }
+        },
+        {
+          "name": "Reports - Prediction Insights",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/transactions/reports/prediction-insights"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payees",
+      "item": [
+        {
+          "name": "List Payees",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/payees/"
+          }
+        },
+        {
+          "name": "Create Payee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('payee_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/payees/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Amazon\",\n  \"color\": \"#FF9900\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Payee",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/payees/{{payee_id}}"
+          }
+        },
+        {
+          "name": "Update Payee",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/payees/{{payee_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Amazon India\",\n  \"color\": \"#FF9900\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Payee",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/payees/{{payee_id}}"
+          }
+        },
+        {
+          "name": "Delete Unused Payees",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/payees/unused"
+          }
+        },
+        {
+          "name": "Reassign Colors",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/payees/reassign-colors"
+          }
+        },
+        {
+          "name": "Export Payees",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/payees/export"
+          }
+        },
+        {
+          "name": "Import Payees",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/payees/import",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "List Categories",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/categories/"
+          }
+        },
+        {
+          "name": "Create Category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('category_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/categories/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Groceries\",\n  \"color\": \"#4CAF50\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Category",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/categories/{{category_id}}"
+          }
+        },
+        {
+          "name": "Update Category",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/categories/{{category_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Groceries & Supermarket\",\n  \"color\": \"#4CAF50\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Category",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/categories/{{category_id}}"
+          }
+        },
+        {
+          "name": "Delete Unused Categories",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/categories/unused"
+          }
+        },
+        {
+          "name": "Reassign Colors",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/categories/reassign-colors"
+          }
+        },
+        {
+          "name": "Export Categories",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/categories/export"
+          }
+        },
+        {
+          "name": "Import Categories",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/categories/import",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Import",
+      "item": [
+        {
+          "name": "Import CSV",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/import/csv",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" },
+                { "key": "account_id", "value": "{{account_id}}", "type": "text" },
+                { "key": "date_column", "value": "date", "type": "text" },
+                { "key": "amount_column", "value": "amount", "type": "text" },
+                { "key": "description_column", "value": "description", "type": "text" },
+                { "key": "default_transaction_type", "value": "expense", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Import Excel",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/import/excel",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" },
+                { "key": "account_id", "value": "{{account_id}}", "type": "text" },
+                { "key": "date_column", "value": "date", "type": "text" },
+                { "key": "amount_column", "value": "amount", "type": "text" },
+                { "key": "description_column", "value": "description", "type": "text" },
+                { "key": "withdrawal_column", "value": "", "type": "text" },
+                { "key": "deposit_column", "value": "", "type": "text" },
+                { "key": "default_transaction_type", "value": "expense", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Column Mapping",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/import/column-mapping/excel",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Import PDF (OCR)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/import/pdf-ocr",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" },
+                { "key": "account_id", "value": "{{account_id}}", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "PDF LLM - Status",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/import/pdf-llm/status"
+          }
+        },
+        {
+          "name": "PDF LLM - Preview",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/import/pdf-llm/preview",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "PDF LLM - Import",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/import/pdf-llm",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" },
+                { "key": "account_id", "value": "{{account_id}}", "type": "text" },
+                { "key": "llm_model", "value": "llama3.1", "type": "text" },
+                { "key": "preview_only", "value": "false", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "XLS LLM - Status",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/import/xls-llm/status"
+          }
+        },
+        {
+          "name": "XLS LLM - Preview",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/import/xls-llm/preview",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "XLS LLM - Import",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/import/xls-llm",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" },
+                { "key": "account_id", "value": "{{account_id}}", "type": "text" },
+                { "key": "llm_model", "value": "llama3.1", "type": "text" },
+                { "key": "preview_only", "value": "false", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Import Transactions Batch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/import/transactions/batch",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account_id\": \"{{account_id}}\",\n  \"transactions_data\": [\n    {\n      \"date\": \"2025-06-01\",\n      \"amount\": 500.00,\n      \"description\": \"Grocery\",\n      \"transaction_type\": \"expense\",\n      \"confidence\": 0.9\n    }\n  ]\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Learning",
+      "item": [
+        {
+          "name": "Get Smart Suggestions",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/learning/suggestions",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Swiggy food order\",\n  \"amount\": 350.00,\n  \"transaction_type\": \"expense\",\n  \"account_id\": \"{{account_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Record Selection",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/learning/record-selection",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_id\": \"{{transaction_id}}\",\n  \"description\": \"Swiggy food order\",\n  \"selected_payee_id\": \"{{payee_id}}\",\n  \"selected_category_id\": \"{{category_id}}\",\n  \"transaction_type\": \"expense\",\n  \"amount\": 350.00,\n  \"account_id\": \"{{account_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Patterns",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/learning/patterns"
+          }
+        },
+        {
+          "name": "Submit Feedback",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/learning/feedback",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_id\": \"{{transaction_id}}\",\n  \"correct_payee_id\": \"{{payee_id}}\",\n  \"correct_category_id\": \"{{category_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Statistics",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/learning/statistics"
+          }
+        },
+        {
+          "name": "Delete Pattern",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/learning/patterns/{{pattern_id}}"
+          }
+        },
+        {
+          "name": "Reset Patterns",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/learning/patterns/reset"
+          }
+        },
+        {
+          "name": "Analytics - Performance",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/learning/analytics/performance"
+          }
+        },
+        {
+          "name": "Analytics - Patterns",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/learning/analytics/patterns"
+          }
+        },
+        {
+          "name": "Analytics - Accuracy",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/learning/analytics/accuracy"
+          }
+        },
+        {
+          "name": "Auto Categorize",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/learning/auto-categorize",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_ids\": [\"{{transaction_id}}\"]\n}"
+            }
+          }
+        },
+        {
+          "name": "Auto Categorize Filtered",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/learning/auto-categorize-filtered",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start_date\": \"2025-01-01\",\n  \"end_date\": \"2025-12-31\",\n  \"account_ids\": [],\n  \"only_uncategorized\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Bulk Process",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/learning/bulk-process",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_ids\": [\"{{transaction_id}}\"],\n  \"confidence_threshold\": 0.7\n}"
+            }
+          }
+        },
+        {
+          "name": "Smart Import Preprocess",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/learning/smart-import-preprocess",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactions\": [\n    {\n      \"date\": \"2025-06-01\",\n      \"amount\": 500,\n      \"description\": \"Swiggy\",\n      \"transaction_type\": \"expense\"\n    }\n  ],\n  \"account_id\": \"{{account_id}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Predictions - Spending Patterns",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/learning/predictions/spending-patterns?months=6",
+              "host": ["{{base_url}}"],
+              "path": ["api", "learning", "predictions", "spending-patterns"],
+              "query": [{ "key": "months", "value": "6" }]
+            }
+          }
+        },
+        {
+          "name": "Predictions - Anomalies",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/learning/predictions/anomalies?months=3",
+              "host": ["{{base_url}}"],
+              "path": ["api", "learning", "predictions", "anomalies"],
+              "query": [{ "key": "months", "value": "3" }]
+            }
+          }
+        },
+        {
+          "name": "Recommendations - Budget",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/learning/recommendations/budget"
+          }
+        },
+        {
+          "name": "Trends - Forecast",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/learning/trends/forecast?months_ahead=3",
+              "host": ["{{base_url}}"],
+              "path": ["api", "learning", "trends", "forecast"],
+              "query": [{ "key": "months_ahead", "value": "3" }]
+            }
+          }
+        },
+        {
+          "name": "Train",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/learning/train"
+          }
+        },
+        {
+          "name": "Cleanup Selection History",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/learning/cleanup-selection-history"
+          }
+        },
+        {
+          "name": "Correction Patterns",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/learning/correction-patterns"
+          }
+        },
+        {
+          "name": "Correction Insights",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/learning/correction-insights"
+          }
+        }
+      ]
+    }
+  ]
+}
