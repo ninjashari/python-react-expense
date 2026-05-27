@@ -158,9 +158,9 @@ const CategoryReports: React.FC = () => {
   };
 
   // Separate income and expense categories
-  const { incomeCategories, expenseCategories, transferCategories, totals } = useMemo(() => {
+  const { incomeCategories, expenseCategories, totals } = useMemo(() => {
     if (!categoryData) {
-      return { incomeCategories: [], expenseCategories: [], transferCategories: [], totals: { income: 0, expense: 0, transfers: 0, net: 0, grand: 0 } };
+      return { incomeCategories: [], expenseCategories: [], totals: { income: 0, expense: 0, transfers: 0, net: 0, grand: 0 } };
     }
 
     const income = categoryData.filter((c: any) => c.income > 0);
@@ -180,7 +180,6 @@ const CategoryReports: React.FC = () => {
     return {
       incomeCategories: income,
       expenseCategories: expense,
-      transferCategories: transfers,
       totals: {
         income: totalIncome,
         expense: totalExpense,

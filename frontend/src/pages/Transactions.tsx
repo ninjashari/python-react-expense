@@ -243,7 +243,7 @@ const Transactions: React.FC = () => {
     if (transactionData && transactionData.total > 250 && filters.showAll) {
       setFilters(prev => ({ ...prev, showAll: false, page: 1 }));
     }
-  }, [transactionData?.total]);
+  }, [transactionData?.total, filters.showAll, setFilters]);
 
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
