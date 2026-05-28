@@ -58,6 +58,29 @@ app.include_router(import_data.router, prefix="/api/import", tags=["import"])
 app.include_router(learning.router, prefix="/api/learning", tags=["learning"])
 app.include_router(reward_points.router, prefix="/api/reward-points", tags=["reward-points"])
 
+@app.on_event("startup")
+async def startup_train_models():
+    """Train AI models for all users once at startup and cache them."""
+    from database import SessionLocal
+    from models.users import User
+    from services.ai_cache import get_cached_trainer
+    db = SessionLocal()
+    try:
+        users = db.query(User).all()
+        if users:
+            print(f"[Startup] Training AI models for {len(users)} user(s)...")
+            for user in users:
+                try:
+                    get_cached_trainer(db, user.id)
+                except Exception as e:
+                    print(f"[Startup] Warning: could not train model for user {user.id}: {e}")
+            print("[Startup] AI model training complete.")
+        else:
+            print("[Startup] No users found, skipping AI training.")
+    finally:
+        db.close()
+
+
 @app.get("/")
 def read_root():
     return {"message": "Expense Manager API"}

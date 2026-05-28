@@ -28,6 +28,7 @@ interface ColumnMappings {
   transactionType?: string;
   withdrawal?: string;  // For ICICI style debit/withdrawal column
   deposit?: string;     // For ICICI style credit/deposit column
+  rewardPoints?: string; // For credit card reward points column
 }
 
 interface ColumnMappingStepProps {
@@ -416,6 +417,49 @@ const ColumnMappingStep: React.FC<ColumnMappingStepProps> = ({
             </Box>
           )}
         </Grid>
+
+        {/* Reward Points Column — credit card accounts only */}
+        {selectedAccount?.type === 'credit' && (
+          <Grid item xs={12} md={4}>
+            <FormControl fullWidth>
+              <InputLabel>Reward Points Column (optional)</InputLabel>
+              <Select
+                value={columnMappings.rewardPoints || ''}
+                label="Reward Points Column (optional)"
+                onChange={(e) => handleMappingChange('rewardPoints', e.target.value)}
+              >
+                <MenuItem value="">None</MenuItem>
+                {columns.map((column) => (
+                  <MenuItem key={column} value={column}>
+                    {column}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {columnMappings.rewardPoints && (
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  Sample values:
+                </Typography>
+                {getColumnPreview(columnMappings.rewardPoints).map((value, index) => (
+                  <Chip
+                    key={index}
+                    label={value?.toString() || 'Empty'}
+                    size="small"
+                    color="primary"
+                    variant="outlined"
+                    sx={{ m: 0.5 }}
+                  />
+                ))}
+              </Box>
+            )}
+            <Box sx={{ mt: 1 }}>
+              <Alert severity="info" sx={{ fontSize: '0.75rem', py: 0.5 }}>
+                Reward points are only tracked for credit card accounts
+              </Alert>
+            </Box>
+          </Grid>
+        )}
 
         {/* Data Preview */}
         <Grid item xs={12}>

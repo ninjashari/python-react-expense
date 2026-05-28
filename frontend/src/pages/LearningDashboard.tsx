@@ -584,8 +584,9 @@ const LearningDashboard: React.FC = () => {
 
       {/* Training Results */}
       {trainingResult && (
-        <Alert 
+        <Alert
           severity={trainingResult.error ? 'error' : 'success'}
+          icon={trainingResult.error ? undefined : <ModelTraining />}
           onClose={() => setTrainingResult(null)}
           sx={{ mb: 2 }}
         >
@@ -597,13 +598,22 @@ const LearningDashboard: React.FC = () => {
                 {trainingResult.message}
               </Typography>
               <Typography variant="body2">
+                • Model type: {trainingResult.training_stats?.model_type || 'Rules+GradientBoosting'}
+              </Typography>
+              <Typography variant="body2">
                 • Transactions analyzed: {trainingResult.training_stats?.total_transactions || 0}
               </Typography>
               <Typography variant="body2">
-                • Payee patterns learned: {trainingResult.training_stats?.payee_patterns_learned || 0}
+                • Description rules built: {trainingResult.training_stats?.rules_built || 0}
               </Typography>
               <Typography variant="body2">
-                • Category patterns learned: {trainingResult.training_stats?.category_patterns_learned || 0}
+                • Payee→category links: {trainingResult.training_stats?.payee_chain_entries || 0}
+              </Typography>
+              <Typography variant="body2">
+                • Payee ML model: {trainingResult.training_stats?.payee_model_trained ? `trained (${trainingResult.training_stats?.payee_training_samples} samples)` : 'not trained (insufficient data)'}
+              </Typography>
+              <Typography variant="body2">
+                • Category ML model: {trainingResult.training_stats?.category_model_trained ? `trained (${trainingResult.training_stats?.category_training_samples} samples)` : 'not trained (insufficient data)'}
               </Typography>
             </Box>
           )}

@@ -22,6 +22,7 @@ import {
   AttachMoney,
   Description,
   Visibility,
+  EmojiEvents,
 } from '@mui/icons-material';
 import { Account } from '../types';
 
@@ -32,6 +33,7 @@ interface ColumnMappings {
   payee?: string;
   category?: string;
   transactionType?: string;
+  rewardPoints?: string;
 }
 
 interface ImportPreviewProps {
@@ -82,6 +84,8 @@ const ImportPreview: React.FC<ImportPreviewProps> = ({
         return <Category />;
       case 'transactionType':
         return <FileUpload />;
+      case 'rewardPoints':
+        return <EmojiEvents />;
       default:
         return <Description />;
     }
@@ -95,6 +99,8 @@ const ImportPreview: React.FC<ImportPreviewProps> = ({
         return 'Payee';
       case 'category':
         return 'Category';
+      case 'rewardPoints':
+        return 'Reward Points';
       default:
         return field.charAt(0).toUpperCase() + field.slice(1);
     }

@@ -25,6 +25,7 @@ from schemas.import_schemas import (
 from services.pdf_llm_processor import PDFLLMProcessor
 from services.xls_llm_processor import XLSLLMProcessor
 from services.ai_trainer import TransactionAITrainer
+from services.ai_cache import get_cached_trainer, invalidate_trainer
 from utils.auth import get_current_active_user
 from routers.transactions import update_account_balance
 
@@ -186,16 +187,13 @@ def process_transactions_data(
 ) -> tuple[int, List[str]]:
     """Process DataFrame rows and create transactions with AI categorization"""
     
-    # Initialize AI trainer and train on historical data
-    print(f"Training AI on user's historical transaction data...")
-    ai_trainer = TransactionAITrainer(db, current_user.id)
-    training_stats = ai_trainer.train_from_historical_data()
-    print(f"AI training completed: {training_stats}")
-    
+    # Use cached trained model — no training during import
+    ai_trainer = get_cached_trainer(db, current_user.id)
+
     transactions_created = 0
     errors = []
     ai_predictions_made = 0
-    
+
     for index, row in df.iterrows():
         try:
             # Parse transaction data - restrict to DD/MM/YYYY or DD-MM-YYYY format
@@ -297,7 +295,7 @@ def process_transactions_data(
             errors.append(f"Row {index + 1}: {str(e)}")
     
     print(f"AI made {ai_predictions_made} predictions for payees and categories")
-    return transactions_created, errors, ai_predictions_made, training_stats
+    return transactions_created, errors, ai_predictions_made
 
 @router.post("/csv")
 async def import_csv(
@@ -334,7 +332,7 @@ async def import_csv(
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
     # Process transactions using common utility function
-    transactions_created, errors, ai_predictions_made, training_stats = process_transactions_data(
+    transactions_created, errors, ai_predictions_made = process_transactions_data(
         df=df,
         db=db,
         current_user=current_user,
@@ -357,11 +355,20 @@ async def import_csv(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+    invalidate_trainer(current_user.id)
+
+    training_notice = None
+    if transactions_created >= 100:
+        training_notice = (
+            "You've imported 100+ transactions. Retrain the AI for better predictions: "
+            "go to the Learning Dashboard and click 'Train Model'."
+        )
+
     return {
         "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions",
         "transactions_created": transactions_created,
         "ai_predictions_made": ai_predictions_made,
-        "training_stats": training_stats,
+        "training_notice": training_notice,
         "errors": errors
     }
 
@@ -415,7 +422,7 @@ async def import_excel(
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
     # Process transactions using common utility function
-    transactions_created, errors, ai_predictions_made, training_stats = process_transactions_data(
+    transactions_created, errors, ai_predictions_made = process_transactions_data(
         df=df,
         db=db,
         current_user=current_user,
@@ -438,11 +445,20 @@ async def import_excel(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+    invalidate_trainer(current_user.id)
+
+    training_notice = None
+    if transactions_created >= 100:
+        training_notice = (
+            "You've imported 100+ transactions. Retrain the AI for better predictions: "
+            "go to the Learning Dashboard and click 'Train Model'."
+        )
+
     return {
         "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions",
         "transactions_created": transactions_created,
         "ai_predictions_made": ai_predictions_made,
-        "training_stats": training_stats,
+        "training_notice": training_notice,
         "errors": errors
     }
 
@@ -672,17 +688,14 @@ async def import_pdf_with_llm(
         if preview_only or result["status"] != "success":
             return PDFLLMImportResponse(**result)
         
-        # Initialize AI trainer and train on historical data
-        print(f"Training AI on user's historical transaction data...")
-        ai_trainer = TransactionAITrainer(db, current_user.id)
-        training_stats = ai_trainer.train_from_historical_data()
-        print(f"AI training completed: {training_stats}")
-        
+        # Use cached trained model — no training during import
+        ai_trainer = get_cached_trainer(db, current_user.id)
+
         # Import transactions to database
         transactions_created = 0
         errors = []
         ai_predictions_made = 0
-        
+
         for transaction_data in result["transactions"]:
             try:
                 # Convert LLM data to database format
@@ -737,15 +750,16 @@ async def import_pdf_with_llm(
         except Exception as e:
             db.rollback()
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-        
+
+        invalidate_trainer(current_user.id)
+
         # Update result with import statistics
         result["transactions_created"] = transactions_created
         result["import_errors"] = errors
         result["ai_predictions_made"] = ai_predictions_made
-        result["training_stats"] = training_stats
         result["message"] = f"Successfully imported {transactions_created} transactions from PDF using LLM with {ai_predictions_made} AI predictions"
         print(f"AI made {ai_predictions_made} predictions for payees and categories")
-        
+
         return PDFLLMImportResponse(**result)
         
     except HTTPException:
@@ -770,16 +784,13 @@ async def import_transactions_batch(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
-    # Initialize AI trainer and train on historical data
-    print(f"Training AI on user's historical transaction data...")
-    ai_trainer = TransactionAITrainer(db, current_user.id)
-    training_stats = ai_trainer.train_from_historical_data()
-    print(f"AI training completed: {training_stats}")
-    
+    # Use cached trained model — no training during import
+    ai_trainer = get_cached_trainer(db, current_user.id)
+
     transactions_created = 0
     errors = []
     ai_predictions_made = 0
-    
+
     try:
         print(f"Starting batch import of {len(request.transactions_data)} transactions")
         for i, transaction_data in enumerate(request.transactions_data):
@@ -847,15 +858,16 @@ async def import_transactions_batch(
         db.commit()
         print(f"Database commit successful")
         print(f"AI made {ai_predictions_made} predictions for payees and categories")
-        
+
+        invalidate_trainer(current_user.id)
+
         return {
             "transactions_created": transactions_created,
             "import_errors": errors,
             "ai_predictions_made": ai_predictions_made,
-            "training_stats": training_stats,
             "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -957,17 +969,14 @@ async def import_xls_with_llm(
         if result["status"] != "success":
             return XLSLLMImportResponse(**result)
         
-        # Initialize AI trainer and train on historical data
-        print(f"Training AI on user's historical transaction data...")
-        ai_trainer = TransactionAITrainer(db, current_user.id)
-        training_stats = ai_trainer.train_from_historical_data()
-        print(f"AI training completed: {training_stats}")
-        
+        # Use cached trained model — no training during import
+        ai_trainer = get_cached_trainer(db, current_user.id)
+
         # Import the extracted transactions with AI predictions
         transactions_created = 0
         errors = []
         ai_predictions_made = 0
-        
+
         try:
             print(f"Starting import of {len(result['transactions'])} transactions from XLS")
             for i, transaction_data in enumerate(result["transactions"]):
@@ -988,7 +997,7 @@ async def import_xls_with_llm(
                         transaction_obj.description,
                         transaction_obj.transaction_type,
                         transaction_obj.amount,
-                        str(request.account_id)
+                        str(account_id)
                     )
                     
                     if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
@@ -1038,16 +1047,17 @@ async def import_xls_with_llm(
             print(f"Committing {transactions_created} transactions to database")
             db.commit()
             print(f"Database commit successful")
-            
+
+            invalidate_trainer(current_user.id)
+
         except Exception as e:
             db.rollback()
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-        
+
         # Update result with import statistics
         result["transactions_created"] = transactions_created
         result["import_errors"] = errors
         result["ai_predictions_made"] = ai_predictions_made
-        result["training_stats"] = training_stats
         result["message"] = f"Successfully imported {transactions_created} transactions from XLS using LLM with {ai_predictions_made} AI predictions"
         print(f"AI made {ai_predictions_made} predictions for payees and categories")
         

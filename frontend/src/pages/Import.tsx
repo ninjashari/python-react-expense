@@ -54,6 +54,7 @@ interface ImportData {
     transactionType?: string;
     withdrawal?: string;  // For ICICI style debit/withdrawal column
     deposit?: string;     // For ICICI style credit/deposit column
+    rewardPoints?: string; // For credit card reward points column
   };
   account: Account | null;
   defaultTransactionType: string;
@@ -170,6 +171,7 @@ const Import: React.FC = () => {
             transactionType: mappingData.suggested_mappings.transaction_type || '',
             withdrawal: mappingData.suggested_mappings.withdrawal || '',
             deposit: mappingData.suggested_mappings.deposit || '',
+            rewardPoints: mappingData.suggested_mappings.reward_points || '',
           },
         }));
         
@@ -212,6 +214,7 @@ const Import: React.FC = () => {
         date: '',
         amount: '',
         description: '',
+        rewardPoints: '',
       },
       account: null,
       defaultTransactionType: 'expense',
@@ -351,6 +354,9 @@ const Import: React.FC = () => {
           if (importData.columnMappings.deposit) {
             formData.append('deposit_column', importData.columnMappings.deposit);
           }
+          if (importData.columnMappings.rewardPoints && importData.account?.type === 'credit') {
+            formData.append('reward_points_column', importData.columnMappings.rewardPoints);
+          }
 
           if (importData.fileType === 'csv') {
             const fileResult = await importApi.importCsv(formData);
@@ -449,10 +455,17 @@ const Import: React.FC = () => {
             onMappingChange={(mappings) => 
               setImportData(prev => ({ ...prev, columnMappings: mappings }))
             }
-            onAccountChange={(account) => 
-              setImportData(prev => ({ ...prev, account }))
+            onAccountChange={(account) =>
+              setImportData(prev => ({
+                ...prev,
+                account,
+                // Clear reward points mapping when switching away from credit accounts
+                columnMappings: account?.type !== 'credit'
+                  ? { ...prev.columnMappings, rewardPoints: '' }
+                  : prev.columnMappings,
+              }))
             }
-            onTransactionTypeChange={(type) => 
+            onTransactionTypeChange={(type) =>
               setImportData(prev => ({ ...prev, defaultTransactionType: type }))
             }
           />

@@ -1451,22 +1451,27 @@ async def manually_train_model(
     This will update the model used for payee and category suggestions.
     """
     try:
+        from services.ai_cache import set_cached_trainer
+
         # Initialize AI trainer
         ai_trainer = TransactionAITrainer(db, current_user.id)
-        
+
         # Train on historical data
         training_stats = ai_trainer.train_from_historical_data()
-        
+
+        # Update the cache with the freshly trained model
+        set_cached_trainer(current_user.id, ai_trainer)
+
         # Get training summary
         training_summary = ai_trainer.get_training_summary()
-        
+
         return {
             "message": "AI model training completed successfully",
             "training_stats": training_stats,
             "training_summary": training_summary,
             "status": "completed"
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to train model: {str(e)}")
 

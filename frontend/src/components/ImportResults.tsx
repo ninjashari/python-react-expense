@@ -20,6 +20,7 @@ import {
   Warning,
   Refresh,
   TrendingUp,
+  ModelTraining,
 } from '@mui/icons-material';
 
 interface ImportResultsProps {
@@ -27,6 +28,7 @@ interface ImportResultsProps {
     message: string;
     transactions_created: number;
     errors: string[];
+    training_notice?: string;
   } | null;
   onStartOver: () => void;
 }
@@ -86,6 +88,21 @@ const ImportResults: React.FC<ImportResultsProps> = ({
           {results.message}
         </Typography>
       </Box>
+
+      {results.training_notice && (
+        <Alert
+          severity="info"
+          icon={<ModelTraining />}
+          sx={{ mb: 3 }}
+          action={
+            <Button color="inherit" size="small" href="/learning">
+              Go to Learning Dashboard
+            </Button>
+          }
+        >
+          {results.training_notice}
+        </Alert>
+      )}
 
       <Grid container spacing={3}>
         {/* Summary Statistics */}
