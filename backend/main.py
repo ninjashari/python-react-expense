@@ -19,6 +19,8 @@ origins = [
     "http://127.0.0.1:3000",  # Alternative localhost
     "http://localhost:3001",  # Alternative React port
     "http://127.0.0.1:3001",  # Alternative localhost
+    "http://localhost:8000",  # Backend development server
+    "http://127.0.0.1:8000",  # Backend localhost alternative
 ]
 
 # Add production origins from environment variable
