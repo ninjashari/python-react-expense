@@ -1,15 +1,16 @@
 """
-AI Trainer — Rules + Gradient Boosting hybrid.
+AI Trainer — Rules + XGBoost (GPU-accelerated) hybrid.
 
 Prediction pipeline:
   1. Rule match  (exact normalised description → majority-vote payee)
-  2. sklearn GradientBoosting fallback for payee
+  2. XGBoost GPU fallback for payee
   3. Payee→Category chain (most common category for the predicted payee)
-  4. sklearn GradientBoosting fallback for category
+  4. XGBoost GPU fallback for category
 """
 
 import re
 import math
+import time
 import uuid
 from collections import defaultdict, Counter
 from typing import Dict, List, Optional
@@ -30,20 +31,53 @@ try:
         LabelEncoder, FunctionTransformer
     )
     from sklearn.compose import ColumnTransformer
-    from sklearn.ensemble import GradientBoostingClassifier
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
+
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    print("[AI] xgboost not installed — install with: pip install xgboost")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-RULE_MIN_CONFIDENCE  = 0.60   # majority fraction to trust a rule
-CHAIN_MIN_CONFIDENCE = 0.50   # majority fraction to trust a payee→category link
-ML_MIN_CONFIDENCE    = 0.45   # softmax probability to accept an ML prediction
-MIN_SAMPLES          = 10     # min labelled samples to train an ML model
+RULE_MIN_CONFIDENCE  = 0.60
+CHAIN_MIN_CONFIDENCE = 0.50
+ML_MIN_CONFIDENCE    = 0.45
+MIN_SAMPLES          = 10
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GPU detection (cached after first probe)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_xgb_device: Optional[str] = None
+
+
+def _detect_xgb_device() -> str:
+    """Return 'cuda' if an XGBoost-compatible GPU is available, else 'cpu'."""
+    global _xgb_device
+    if _xgb_device is not None:
+        return _xgb_device
+    if not XGBOOST_AVAILABLE:
+        _xgb_device = 'cpu'
+        return _xgb_device
+    try:
+        clf = xgb.XGBClassifier(
+            n_estimators=1, device='cuda', tree_method='hist', verbosity=0
+        )
+        clf.fit(np.array([[1.0, 2.0], [3.0, 4.0]]), np.array([0, 1]))
+        _xgb_device = 'cuda'
+        print("[AI] GPU probe OK — XGBoost will use CUDA acceleration")
+    except Exception as exc:
+        _xgb_device = 'cpu'
+        print(f"[AI] GPU probe failed ({exc.__class__.__name__}: {exc}) — falling back to CPU")
+    return _xgb_device
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -52,7 +86,7 @@ MIN_SAMPLES          = 10     # min labelled samples to train an ML model
 
 class TransactionAITrainer:
     """
-    Public API (unchanged from previous version):
+    Public API:
         train_from_historical_data() -> dict
         predict_payee_and_category(description, transaction_type, amount,
                                    account_id=None) -> dict
@@ -63,16 +97,12 @@ class TransactionAITrainer:
         self.db = db
         self.user_id = user_id
 
-        # Rule dict: norm_description -> {payee_id, payee_name, confidence, count}
         self.rule_dict: Dict[str, dict] = {}
-        # Payee->Category: str(payee_id) -> {category_id, category_name, confidence}
         self.payee_to_category: Dict[str, dict] = {}
-        # sklearn pipelines
         self.payee_pipeline    = None
         self.category_pipeline = None
         self.payee_label_enc     = LabelEncoder() if SKLEARN_AVAILABLE else None
         self.category_label_enc  = LabelEncoder() if SKLEARN_AVAILABLE else None
-        # Entity caches (loaded during training)
         self.existing_payees:     Dict = {}
         self.existing_categories: Dict = {}
         self.existing_accounts:   Dict = {}
@@ -82,53 +112,95 @@ class TransactionAITrainer:
     # ─────────────────────────────────────────────────────────────────────────
 
     def train_from_historical_data(self) -> Dict:
-        """Train rules + sklearn models from all labelled historical transactions."""
-        self._load_existing_entities()
+        """Train rules + XGBoost models from all labelled historical transactions."""
+        wall_start = time.perf_counter()
+        print(f"[AI] ── Training start for user {self.user_id} ──────────────────")
 
+        # ── Entity loading ───────────────────────────────────────────────────
+        t = time.perf_counter()
+        self._load_existing_entities()
+        print(f"[AI]   Entities loaded: {len(self.existing_payees)} payees, "
+              f"{len(self.existing_categories)} categories, "
+              f"{len(self.existing_accounts)} accounts  [{time.perf_counter()-t:.2f}s]")
+
+        # ── Transaction loading ──────────────────────────────────────────────
+        t = time.perf_counter()
         all_txns = self.db.query(Transaction).filter(
             Transaction.user_id == self.user_id,
             Transaction.description.isnot(None),
         ).all()
+        payee_txns = [tx for tx in all_txns if tx.payee_id is not None]
+        cat_txns   = [tx for tx in all_txns if tx.category_id is not None]
+        print(f"[AI]   Transactions: {len(all_txns)} total | "
+              f"{len(payee_txns)} with payee | "
+              f"{len(cat_txns)} with category  [{time.perf_counter()-t:.2f}s]")
 
-        payee_txns = [t for t in all_txns if t.payee_id is not None]
-        cat_txns   = [t for t in all_txns if t.category_id is not None]
-
-        # Phase 1 & 2 — rules and chain
+        # ── Phase 1: Rule dictionary ─────────────────────────────────────────
+        t = time.perf_counter()
         self._build_rule_dict(payee_txns)
+        print(f"[AI]   Rules built: {len(self.rule_dict)} description rules  [{time.perf_counter()-t:.2f}s]")
+
+        # ── Phase 2: Payee→Category chain ────────────────────────────────────
+        t = time.perf_counter()
         self._build_payee_to_category_chain(payee_txns)
+        print(f"[AI]   Payee→Category chain: {len(self.payee_to_category)} links  [{time.perf_counter()-t:.2f}s]")
 
         payee_trained = False
         cat_trained   = False
 
-        if SKLEARN_AVAILABLE:
+        if SKLEARN_AVAILABLE and XGBOOST_AVAILABLE:
+            device = _detect_xgb_device()
+            print(f"[AI]   XGBoost device: {device.upper()}")
+
+            # ── Phase 3: Payee ML model ──────────────────────────────────────
             if len(payee_txns) >= MIN_SAMPLES:
+                t = time.perf_counter()
+                print(f"[AI]   Payee model: building features for {len(payee_txns)} samples...")
                 payee_trained = self._train_pipeline(
                     payee_txns,
-                    label_fn=lambda t: str(t.payee_id),
+                    label_fn=lambda tx: str(tx.payee_id),
                     pipeline_attr='payee_pipeline',
                     enc_attr='payee_label_enc',
                     label='payee',
+                    device=device,
                 )
+                print(f"[AI]   Payee model: {'trained' if payee_trained else 'skipped (single class)'}  [{time.perf_counter()-t:.2f}s]")
+            else:
+                print(f"[AI]   Payee model: skipped (only {len(payee_txns)} labelled samples, need {MIN_SAMPLES})")
+
+            # ── Phase 4: Category ML model ───────────────────────────────────
             if len(cat_txns) >= MIN_SAMPLES:
+                t = time.perf_counter()
+                print(f"[AI]   Category model: building features for {len(cat_txns)} samples...")
                 cat_trained = self._train_pipeline(
                     cat_txns,
-                    label_fn=lambda t: str(t.category_id),
+                    label_fn=lambda tx: str(tx.category_id),
                     pipeline_attr='category_pipeline',
                     enc_attr='category_label_enc',
                     label='category',
+                    device=device,
                 )
+                print(f"[AI]   Category model: {'trained' if cat_trained else 'skipped (single class)'}  [{time.perf_counter()-t:.2f}s]")
+            else:
+                print(f"[AI]   Category model: skipped (only {len(cat_txns)} labelled samples, need {MIN_SAMPLES})")
+        elif not XGBOOST_AVAILABLE:
+            print("[AI]   ML models skipped — xgboost not installed")
+        else:
+            print("[AI]   ML models skipped — sklearn not installed")
 
+        total = time.perf_counter() - wall_start
         stats = {
-            'total_transactions':      len(all_txns),
-            'payee_training_samples':  len(payee_txns),
+            'total_transactions':        len(all_txns),
+            'payee_training_samples':    len(payee_txns),
             'category_training_samples': len(cat_txns),
-            'rules_built':             len(self.rule_dict),
-            'payee_chain_entries':     len(self.payee_to_category),
-            'payee_model_trained':     payee_trained,
-            'category_model_trained':  cat_trained,
-            'model_type':              'Rules+GradientBoosting',
+            'rules_built':               len(self.rule_dict),
+            'payee_chain_entries':       len(self.payee_to_category),
+            'payee_model_trained':       payee_trained,
+            'category_model_trained':    cat_trained,
+            'model_type':                'Rules+XGBoost',
+            'device':                    _xgb_device or 'n/a',
         }
-        print(f"[AI] Training complete: {stats}")
+        print(f"[AI] ── Training complete in {total:.2f}s  {stats} ──")
         return stats
 
     def predict_payee_and_category(
@@ -138,14 +210,6 @@ class TransactionAITrainer:
         amount:           float,
         account_id:       Optional[str] = None,
     ) -> Dict:
-        """
-        Returns:
-          {
-            'payee':    {id, name, confidence, match_type} | None,
-            'category': {id, name, confidence, match_type} | None,
-          }
-        match_type is one of: 'rule', 'ml', 'chain', None
-        """
         payee_result    = None
         category_result = None
 
@@ -170,7 +234,7 @@ class TransactionAITrainer:
                 features, self.existing_payees
             )
 
-        # ── 3. Payee → Category chain ─────────────────────────────────────────
+        # ── 3. Payee→Category chain ───────────────────────────────────────────
         if payee_result is not None:
             pid = payee_result['id']
             if pid in self.payee_to_category:
@@ -194,13 +258,14 @@ class TransactionAITrainer:
 
     def get_training_summary(self) -> Dict:
         return {
-            'rules_built':             len(self.rule_dict),
-            'payee_chain_entries':     len(self.payee_to_category),
-            'payee_model_trained':     self.payee_pipeline is not None,
-            'category_model_trained':  self.category_pipeline is not None,
-            'existing_payees_count':   len(self.existing_payees),
+            'rules_built':               len(self.rule_dict),
+            'payee_chain_entries':       len(self.payee_to_category),
+            'payee_model_trained':       self.payee_pipeline is not None,
+            'category_model_trained':    self.category_pipeline is not None,
+            'existing_payees_count':     len(self.existing_payees),
             'existing_categories_count': len(self.existing_categories),
-            'model_type':              'Rules+GradientBoosting',
+            'model_type':                'Rules+XGBoost',
+            'device':                    _xgb_device or 'n/a',
         }
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -211,11 +276,11 @@ class TransactionAITrainer:
         groups:      Dict[str, Counter] = defaultdict(Counter)
         payee_names: Dict[str, str]     = {}
 
-        for t in payee_txns:
-            norm = _normalize(t.description)
-            groups[norm][str(t.payee_id)] += 1
-            if t.payee_id in self.existing_payees:
-                payee_names[str(t.payee_id)] = self.existing_payees[t.payee_id].name
+        for tx in payee_txns:
+            norm = _normalize(tx.description)
+            groups[norm][str(tx.payee_id)] += 1
+            if tx.payee_id in self.existing_payees:
+                payee_names[str(tx.payee_id)] = self.existing_payees[tx.payee_id].name
 
         for norm, counts in groups.items():
             total = sum(counts.values())
@@ -233,12 +298,12 @@ class TransactionAITrainer:
         groups:    Dict[str, Counter] = defaultdict(Counter)
         cat_names: Dict[str, str]     = {}
 
-        for t in payee_txns:
-            if t.category_id is None:
+        for tx in payee_txns:
+            if tx.category_id is None:
                 continue
-            groups[str(t.payee_id)][str(t.category_id)] += 1
-            if t.category_id in self.existing_categories:
-                cat_names[str(t.category_id)] = self.existing_categories[t.category_id].name
+            groups[str(tx.payee_id)][str(tx.category_id)] += 1
+            if tx.category_id in self.existing_categories:
+                cat_names[str(tx.category_id)] = self.existing_categories[tx.category_id].name
 
         for pid, counts in groups.items():
             total = sum(counts.values())
@@ -252,27 +317,35 @@ class TransactionAITrainer:
                 }
 
     def _train_pipeline(
-        self, txns, label_fn, pipeline_attr, enc_attr, label: str
+        self, txns, label_fn, pipeline_attr, enc_attr, label: str, device: str = 'cpu'
     ) -> bool:
         try:
+            t = time.perf_counter()
             rows   = [self._build_feature_row(
-                          t.description, float(t.amount), t.type, str(t.account_id),
-                          getattr(t, 'date', None))
-                      for t in txns]
-            labels = [label_fn(t) for t in txns]
+                          tx.description, float(tx.amount), tx.type, str(tx.account_id),
+                          getattr(tx, 'date', None))
+                      for tx in txns]
+            labels = [label_fn(tx) for tx in txns]
+            print(f"[AI]     Feature rows built: {len(rows)}  [{time.perf_counter()-t:.2f}s]")
 
-            if len(set(labels)) < 2:
+            unique_labels = set(labels)
+            if len(unique_labels) < 2:
+                print(f"[AI]     Skipping {label} model — only 1 unique class")
                 return False
+            print(f"[AI]     Unique {label} classes: {len(unique_labels)}")
 
             enc = getattr(self, enc_attr)
             y   = enc.fit_transform(labels)
 
-            pipeline = _build_sklearn_pipeline()
+            t = time.perf_counter()
+            pipeline = _build_xgb_pipeline(device=device)
             pipeline.fit(rows, y)
+            print(f"[AI]     XGBoost fit ({device}): {len(rows)} samples × {len(unique_labels)} classes  [{time.perf_counter()-t:.2f}s]")
+
             setattr(self, pipeline_attr, pipeline)
             return True
         except Exception as e:
-            print(f"[AI] {label} model training failed: {e}")
+            print(f"[AI]     {label} model training failed: {e}")
             return False
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -297,25 +370,24 @@ class TransactionAITrainer:
             except Exception:
                 pass
 
-        # Date features — use transaction date when available
         import datetime as _dt
         if date is None:
             date = _dt.date.today()
-        dow = date.weekday()   # 0 Mon … 6 Sun
-        moy = date.month       # 1–12
+        dow = date.weekday()
+        moy = date.month
 
         return {
-            'description':     _normalize(description),
-            'amount':          amount,
-            'amount_log':      math.log10(amount + 1),
-            'amount_bucket':   _amount_bucket(amount),
+            'description':      _normalize(description),
+            'amount':           amount,
+            'amount_log':       math.log10(amount + 1),
+            'amount_bucket':    _amount_bucket(amount),
             'transaction_type': transaction_type or 'expense',
-            'account_type':    account.type if account else 'unknown',
-            'account_name':    account.name if account else 'unknown',
-            'day_sin':         math.sin(2 * math.pi * dow / 7),
-            'day_cos':         math.cos(2 * math.pi * dow / 7),
-            'month_sin':       math.sin(2 * math.pi * moy / 12),
-            'month_cos':       math.cos(2 * math.pi * moy / 12),
+            'account_type':     account.type if account else 'unknown',
+            'account_name':     account.name if account else 'unknown',
+            'day_sin':          math.sin(2 * math.pi * dow / 7),
+            'day_cos':          math.cos(2 * math.pi * dow / 7),
+            'month_sin':        math.sin(2 * math.pi * moy / 12),
+            'month_cos':        math.cos(2 * math.pi * moy / 12),
         }
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -349,9 +421,9 @@ class TransactionAITrainer:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _load_existing_entities(self):
-        payees      = self.db.query(Payee).filter(Payee.user_id == self.user_id).all()
-        categories  = self.db.query(Category).filter(Category.user_id == self.user_id).all()
-        accounts    = self.db.query(Account).filter(Account.user_id == self.user_id).all()
+        payees     = self.db.query(Payee).filter(Payee.user_id == self.user_id).all()
+        categories = self.db.query(Category).filter(Category.user_id == self.user_id).all()
+        accounts   = self.db.query(Account).filter(Account.user_id == self.user_id).all()
         self.existing_payees     = {p.id: p for p in payees}
         self.existing_categories = {c.id: c for c in categories}
         self.existing_accounts   = {a.id: a for a in accounts}
@@ -380,8 +452,8 @@ def _amount_bucket(amount: float) -> str:
         return '10000+'
 
 
-def _build_sklearn_pipeline():
-    """Return a fresh sklearn Pipeline for either payee or category prediction."""
+def _build_xgb_pipeline(device: str = 'cpu'):
+    """Return a fresh sklearn Pipeline using XGBoost as the classifier."""
     import pandas as pd
     from sklearn.pipeline import Pipeline
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -389,7 +461,6 @@ def _build_sklearn_pipeline():
         OrdinalEncoder, StandardScaler, OneHotEncoder, FunctionTransformer
     )
     from sklearn.compose import ColumnTransformer
-    from sklearn.ensemble import GradientBoostingClassifier
 
     def _to_df(rows):
         return pd.DataFrame(rows)
@@ -397,7 +468,7 @@ def _build_sklearn_pipeline():
     ct = ColumnTransformer(
         transformers=[
             ('desc',     TfidfVectorizer(ngram_range=(1, 3), max_features=300,
-                                         sublinear_tf=True),
+                                          sublinear_tf=True),
                          'description'),
             ('num',      StandardScaler(),
                          ['amount', 'amount_log']),
@@ -408,7 +479,7 @@ def _build_sklearn_pipeline():
             ('acc_type', OneHotEncoder(handle_unknown='ignore', sparse_output=False),
                          ['account_type']),
             ('acc_name', OrdinalEncoder(handle_unknown='use_encoded_value',
-                                        unknown_value=-1),
+                                         unknown_value=-1),
                          ['account_name']),
             ('dates',    'passthrough',
                          ['day_sin', 'day_cos', 'month_sin', 'month_cos']),
@@ -416,11 +487,19 @@ def _build_sklearn_pipeline():
         remainder='drop',
     )
 
+    clf = xgb.XGBClassifier(
+        n_estimators=100,
+        max_depth=4,
+        learning_rate=0.1,
+        device=device,
+        tree_method='hist',      # required for GPU; also faster on CPU
+        random_state=42,
+        eval_metric='mlogloss',
+        verbosity=0,
+    )
+
     return Pipeline([
         ('to_df',    FunctionTransformer(_to_df)),
         ('features', ct),
-        ('clf',      GradientBoostingClassifier(
-                         n_estimators=100, max_depth=4,
-                         learning_rate=0.1, random_state=42,
-                     )),
+        ('clf',      clf),
     ])

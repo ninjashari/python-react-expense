@@ -598,7 +598,7 @@ const LearningDashboard: React.FC = () => {
                 {trainingResult.message}
               </Typography>
               <Typography variant="body2">
-                • Model type: {trainingResult.training_stats?.model_type || 'Rules+GradientBoosting'}
+                • Model type: {trainingResult.training_stats?.model_type || 'Rules+XGBoost'}
               </Typography>
               <Typography variant="body2">
                 • Transactions analyzed: {trainingResult.training_stats?.total_transactions || 0}

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import Optional, List
 import uuid
@@ -25,7 +25,7 @@ from schemas.import_schemas import (
 from services.pdf_llm_processor import PDFLLMProcessor
 from services.xls_llm_processor import XLSLLMProcessor
 from services.ai_trainer import TransactionAITrainer
-from services.ai_cache import get_cached_trainer, invalidate_trainer
+from services.ai_cache import get_cached_trainer, retrain_in_background
 from utils.auth import get_current_active_user
 from routers.transactions import update_account_balance
 
@@ -309,6 +309,7 @@ async def import_csv(
     transaction_type_column: Optional[str] = Form(None),
     default_transaction_type: str = Form("expense"),
     reward_points_column: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -355,7 +356,8 @@ async def import_csv(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    invalidate_trainer(current_user.id)
+    if background_tasks is not None:
+        background_tasks.add_task(retrain_in_background, current_user.id)
 
     training_notice = None
     if transactions_created >= 100:
@@ -387,6 +389,7 @@ async def import_excel(
     deposit_column: Optional[str] = Form(None),
     default_transaction_type: str = Form("expense"),
     reward_points_column: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -445,7 +448,8 @@ async def import_excel(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    invalidate_trainer(current_user.id)
+    if background_tasks is not None:
+        background_tasks.add_task(retrain_in_background, current_user.id)
 
     training_notice = None
     if transactions_created >= 100:
@@ -662,6 +666,7 @@ async def import_pdf_with_llm(
     account_id: uuid.UUID = Form(...),
     llm_model: Optional[str] = Form("llama3.1"),
     preview_only: bool = Form(False),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ) -> PDFLLMImportResponse:
@@ -751,7 +756,8 @@ async def import_pdf_with_llm(
             db.rollback()
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-        invalidate_trainer(current_user.id)
+        if background_tasks is not None:
+            background_tasks.add_task(retrain_in_background, current_user.id)
 
         # Update result with import statistics
         result["transactions_created"] = transactions_created
@@ -771,6 +777,7 @@ async def import_pdf_with_llm(
 @router.post("/transactions/batch")
 async def import_transactions_batch(
     request: BatchImportRequest,
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -859,7 +866,8 @@ async def import_transactions_batch(
         print(f"Database commit successful")
         print(f"AI made {ai_predictions_made} predictions for payees and categories")
 
-        invalidate_trainer(current_user.id)
+        if background_tasks is not None:
+            background_tasks.add_task(retrain_in_background, current_user.id)
 
         return {
             "transactions_created": transactions_created,
@@ -933,6 +941,7 @@ async def import_xls_with_llm(
     account_id: uuid.UUID = Form(...),
     llm_model: Optional[str] = Form("llama3.1"),
     preview_only: bool = Form(False),
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ) -> XLSLLMImportResponse:
@@ -1048,7 +1057,8 @@ async def import_xls_with_llm(
             db.commit()
             print(f"Database commit successful")
 
-            invalidate_trainer(current_user.id)
+            if background_tasks is not None:
+                background_tasks.add_task(retrain_in_background, current_user.id)
 
         except Exception as e:
             db.rollback()
