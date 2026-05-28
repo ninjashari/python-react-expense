@@ -31,8 +31,8 @@ cd backend
 
 # Check if virtual environment exists
 if [ ! -d ".venv" ]; then
-    echo "❌ Error: Virtual environment not found in backend/venv"
-    echo "Please create one with: cd backend && python -m venv venv"
+    echo "❌ Error: Virtual environment not found in backend/.venv"
+    echo "Please create one with: cd backend && python -m venv .venv"
     exit 1
 fi
 
