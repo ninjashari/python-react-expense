@@ -66,6 +66,19 @@ export interface LearningStatistics {
   last_updated: string;
 }
 
+export interface ModelStatus {
+  is_trained: boolean;
+  model_type: string;
+  device: 'cuda' | 'cpu' | 'n/a';
+  rules_built: number;
+  payee_chain_entries: number;
+  payee_model_trained: boolean;
+  category_model_trained: boolean;
+  payee_training_samples: number;
+  category_training_samples: number;
+  total_transactions: number;
+}
+
 export interface PerformanceAnalytics {
   overall_metrics: {
     total_suggestions_made: number;
@@ -344,6 +357,10 @@ class LearningApiService {
    */
   async getLearningStatistics(): Promise<LearningStatistics> {
     return api.get('/learning/statistics').then(res => res.data);
+  }
+
+  async getModelStatus(): Promise<ModelStatus> {
+    return api.get('/learning/model-status').then(res => res.data);
   }
 
   /**

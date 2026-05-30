@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   learningApi, 
   SmartSuggestionRequest, 
@@ -394,5 +394,31 @@ export const useTrainModel = () => {
   return useMutation({
     mutationFn: () => learningApi.trainModel(),
     retry: 1,
+  });
+};
+
+/**
+ * Hook for current AI model status (rules, chains, ML models, device)
+ */
+export const useModelStatus = () => {
+  return useQuery({
+    queryKey: ['model-status'],
+    queryFn: () => learningApi.getModelStatus(),
+    staleTime: 60000,
+    retry: 1,
+  });
+};
+
+/**
+ * Hook for deleting a single learning pattern
+ */
+export const useDeletePattern = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (patternId: string) => learningApi.deleteLearningPattern(patternId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['user-patterns'] });
+    },
+    retry: 0,
   });
 };

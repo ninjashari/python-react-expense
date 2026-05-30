@@ -1451,7 +1451,7 @@ async def manually_train_model(
     This will update the model used for payee and category suggestions.
     """
     try:
-        from services.ai_cache import set_cached_trainer
+        from services.ai_cache import set_cached_trainer, set_last_training_stats
 
         # Initialize AI trainer
         ai_trainer = TransactionAITrainer(db, current_user.id)
@@ -1461,6 +1461,7 @@ async def manually_train_model(
 
         # Update the cache with the freshly trained model
         set_cached_trainer(current_user.id, ai_trainer)
+        set_last_training_stats(current_user.id, training_stats)
 
         # Get training summary
         training_summary = ai_trainer.get_training_summary()
@@ -1549,8 +1550,50 @@ async def get_correction_insights(
     Get insights from user correction patterns to understand and improve AI suggestion accuracy.
     """
     insights = TransactionLearningService.get_correction_insights(db, current_user.id)
-    
+
     return {
         "status": "success",
         "correction_insights": insights
     }
+
+
+@router.get("/model-status")
+async def get_model_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Return current cached AI trainer state for the user."""
+    from services.ai_cache import _trainer_cache, get_last_training_stats
+
+    user_key = str(current_user.id)
+    is_trained = user_key in _trainer_cache
+
+    if is_trained:
+        trainer = _trainer_cache[user_key]
+        summary = trainer.get_training_summary()
+        last_stats = get_last_training_stats(current_user.id)
+        return {
+            "is_trained": True,
+            "model_type": summary.get("model_type", "Rules+XGBoost"),
+            "device": summary.get("device", "n/a"),
+            "rules_built": summary.get("rules_built", 0),
+            "payee_chain_entries": summary.get("payee_chain_entries", 0),
+            "payee_model_trained": summary.get("payee_model_trained", False),
+            "category_model_trained": summary.get("category_model_trained", False),
+            "payee_training_samples": last_stats.get("payee_training_samples", 0),
+            "category_training_samples": last_stats.get("category_training_samples", 0),
+            "total_transactions": last_stats.get("total_transactions", 0),
+        }
+    else:
+        return {
+            "is_trained": False,
+            "model_type": "Rules+XGBoost",
+            "device": "n/a",
+            "rules_built": 0,
+            "payee_chain_entries": 0,
+            "payee_model_trained": False,
+            "category_model_trained": False,
+            "payee_training_samples": 0,
+            "category_training_samples": 0,
+            "total_transactions": 0,
+        }

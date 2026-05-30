@@ -10,6 +10,8 @@ if TYPE_CHECKING:
 
 # Module-level cache: user_id (str) -> trained TransactionAITrainer instance
 _trainer_cache: Dict[str, "TransactionAITrainer"] = {}
+# Stores the stats dict returned by train_from_historical_data() for each user
+_last_training_stats: Dict[str, dict] = {}
 
 
 def get_cached_trainer(db, user_id) -> "TransactionAITrainer":
@@ -22,7 +24,8 @@ def get_cached_trainer(db, user_id) -> "TransactionAITrainer":
     if key not in _trainer_cache:
         print(f"Training AI model for user {key}...")
         trainer = TransactionAITrainer(db, user_id)
-        trainer.train_from_historical_data()
+        stats = trainer.train_from_historical_data()
+        set_last_training_stats(user_id, stats)
         _trainer_cache[key] = trainer
         print(f"AI model cached for user {key}")
     return _trainer_cache[key]
@@ -31,6 +34,16 @@ def get_cached_trainer(db, user_id) -> "TransactionAITrainer":
 def set_cached_trainer(user_id, trainer: "TransactionAITrainer") -> None:
     """Store an already-trained trainer in the cache (e.g. after manual retraining)."""
     _trainer_cache[str(user_id)] = trainer
+
+
+def set_last_training_stats(user_id, stats: dict) -> None:
+    """Store the stats dict returned by train_from_historical_data() for later inspection."""
+    _last_training_stats[str(user_id)] = stats
+
+
+def get_last_training_stats(user_id) -> dict:
+    """Return the most recent training stats for the user, or {} if never trained."""
+    return _last_training_stats.get(str(user_id), {})
 
 
 def invalidate_trainer(user_id) -> None:
@@ -50,7 +63,8 @@ def retrain_in_background(user_id) -> None:
     try:
         print(f"[AI] Background retraining for user {user_id}...")
         trainer = TransactionAITrainer(db, user_id)
-        trainer.train_from_historical_data()
+        stats = trainer.train_from_historical_data()
+        set_last_training_stats(user_id, stats)
         set_cached_trainer(user_id, trainer)
         print(f"[AI] Background retraining complete for user {user_id}")
     except Exception as e:
