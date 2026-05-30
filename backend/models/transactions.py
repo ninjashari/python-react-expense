@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Date, DateTime, Numeric, Text, ForeignKey, Integer
+from sqlalchemy import Column, String, Date, DateTime, Numeric, Text, ForeignKey, Integer, Float
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -27,7 +27,7 @@ class Transaction(Base):
     date = Column(Date, nullable=False)
     balance_after_transaction = Column(Numeric(12, 2), nullable=True)  # Account balance after this transaction
     to_account_balance_after = Column(Numeric(12, 2), nullable=True)  # To-account balance after transfer (for transfers only)
-    reward_points = Column(Integer, nullable=True)  # Reward points earned on this transaction (credit card only)
+    reward_points = Column(Float, nullable=True)  # Reward points earned on this transaction (credit card only)
     created_at = Column(DateTime, server_default=func.current_timestamp())
     updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     

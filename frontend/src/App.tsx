@@ -21,6 +21,7 @@ import LearningDashboard from './pages/LearningDashboard';
 import CategoryReports from './pages/CategoryReports';
 import MonthwiseCategoryReport from './pages/MonthwiseCategoryReport';
 import RewardPoints from './pages/RewardPoints';
+import RewardPointsHistory from './pages/RewardPointsHistory';
 import { useAppNotifications } from './hooks/useAppNotifications';
 
 const queryClient = new QueryClient({
@@ -79,6 +80,7 @@ const AppContent: React.FC = () => {
           <Route path="/import" element={<Import />} />
           <Route path="/backup" element={<Backup />} />
           <Route path="/reward-points" element={<RewardPoints />} />
+          <Route path="/reward-points/history" element={<RewardPointsHistory />} />
           <Route path="/learning" element={<LearningDashboard />} />
         </Routes>
       </Layout>

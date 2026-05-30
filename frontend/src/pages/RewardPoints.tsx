@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -21,10 +22,11 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TableSortLabel,
   Paper,
   Chip,
 } from '@mui/material';
-import { Add, Edit, Delete, Loyalty } from '@mui/icons-material';
+import { Add, Edit, Delete, Loyalty, History } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { accountsApi, rewardPointsApi } from '../services/api';
@@ -37,9 +39,14 @@ import {
 import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
 
 const RewardPoints: React.FC = () => {
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRedemption, setEditingRedemption] = useState<RewardPointRedemption | null>(null);
+  const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'date', dir: 'desc' });
   const queryClient = useQueryClient();
+
+  const handleSort = (col: string) =>
+    setSort((prev) => ({ col, dir: prev.col === col && prev.dir === 'asc' ? 'desc' : 'asc' }));
 
   const { data: summaryData, isLoading: summaryLoading } = useQuery({
     queryKey: ['rewardPointsSummary'],
@@ -50,6 +57,16 @@ const RewardPoints: React.FC = () => {
     queryKey: ['rewardPointRedemptions'],
     queryFn: rewardPointsApi.getAll,
   });
+
+  const sortedRedemptions = useMemo(() => {
+    const mul = sort.dir === 'asc' ? 1 : -1;
+    return [...redemptions].sort((a, b) => {
+      if (sort.col === 'date')        return mul * (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+      if (sort.col === 'points_used') return mul * (a.points_used - b.points_used);
+      if (sort.col === 'account')     return mul * (a.account?.name ?? '').localeCompare(b.account?.name ?? '');
+      return 0;
+    });
+  }, [redemptions, sort]);
 
   const { data: allAccounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -131,14 +148,23 @@ const RewardPoints: React.FC = () => {
           <Loyalty color="primary" />
           <Typography variant="h5" fontWeight="bold">Reward Points</Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpenDialog()}
-          disabled={creditAccounts.length === 0}
-        >
-          Add Redemption
-        </Button>
+        <Box display="flex" gap={1}>
+          <Button
+            variant="outlined"
+            startIcon={<History />}
+            onClick={() => navigate('/reward-points/history')}
+          >
+            View History
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpenDialog()}
+            disabled={creditAccounts.length === 0}
+          >
+            Add Redemption
+          </Button>
+        </Box>
       </Box>
 
       {creditAccounts.length === 0 && (
@@ -218,15 +244,39 @@ const RewardPoints: React.FC = () => {
           <Table size="small">
             <TableHead>
               <TableRow sx={{ backgroundColor: 'action.hover' }}>
-                <TableCell><strong>Date</strong></TableCell>
-                <TableCell><strong>Account</strong></TableCell>
-                <TableCell align="right"><strong>Points Used</strong></TableCell>
+                <TableCell sortDirection={sort.col === 'date' ? sort.dir : false}>
+                  <TableSortLabel
+                    active={sort.col === 'date'}
+                    direction={sort.col === 'date' ? sort.dir : 'asc'}
+                    onClick={() => handleSort('date')}
+                  >
+                    <strong>Date</strong>
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={sort.col === 'account' ? sort.dir : false}>
+                  <TableSortLabel
+                    active={sort.col === 'account'}
+                    direction={sort.col === 'account' ? sort.dir : 'asc'}
+                    onClick={() => handleSort('account')}
+                  >
+                    <strong>Account</strong>
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right" sortDirection={sort.col === 'points_used' ? sort.dir : false}>
+                  <TableSortLabel
+                    active={sort.col === 'points_used'}
+                    direction={sort.col === 'points_used' ? sort.dir : 'asc'}
+                    onClick={() => handleSort('points_used')}
+                  >
+                    <strong>Points Used</strong>
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell><strong>Description</strong></TableCell>
                 <TableCell align="center"><strong>Actions</strong></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {redemptions.length === 0 ? (
+              {sortedRedemptions.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
                     <Typography color="text.secondary">
@@ -235,7 +285,7 @@ const RewardPoints: React.FC = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                redemptions.map((r) => (
+                sortedRedemptions.map((r) => (
                   <TableRow key={r.id} hover>
                     <TableCell>{r.date}</TableCell>
                     <TableCell>{r.account?.name ?? r.account_id}</TableCell>
@@ -324,7 +374,7 @@ const RewardPoints: React.FC = () => {
                 control={control}
                 rules={{
                   required: 'Points used is required',
-                  min: { value: 1, message: 'Must be at least 1' },
+                  min: { value: 0.01, message: 'Must be greater than 0' },
                 }}
                 render={({ field }) => (
                   <TextField
@@ -332,8 +382,8 @@ const RewardPoints: React.FC = () => {
                     label="Points Used"
                     type="number"
                     fullWidth
-                    inputProps={{ min: 1 }}
-                    onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                    inputProps={{ min: 0.01, step: 0.01 }}
+                    onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                     error={!!errors.points_used}
                     helperText={errors.points_used?.message}
                   />

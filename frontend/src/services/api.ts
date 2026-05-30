@@ -11,6 +11,7 @@ import {
   RewardPointRedemption,
   CreateRewardPointRedemptionDto,
   RewardPointsSummaryItem,
+  RewardPointHistoryItem,
 } from '../types';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api';
@@ -307,6 +308,11 @@ export const rewardPointsApi = {
 
   delete: (id: string): Promise<void> =>
     api.delete(`/reward-points/${id}`).then(res => res.data),
+
+  getHistory: (accountId?: string): Promise<RewardPointHistoryItem[]> =>
+    api.get('/reward-points/history', {
+      params: accountId ? { account_id: accountId } : undefined,
+    }).then(res => res.data),
 };
 
 export default api;

@@ -140,6 +140,17 @@ export interface RewardPointsSummaryItem {
   net_available: number;
 }
 
+export interface RewardPointHistoryItem {
+  date: string;
+  type: 'earned' | 'deducted' | 'redeemed';
+  points: number;
+  description?: string;
+  account_id: string;
+  account_name: string;
+  source_id: string;
+  balance: number;
+}
+
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;

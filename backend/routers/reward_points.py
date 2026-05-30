@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
-from typing import List
+from typing import List, Optional
 import uuid
 
 from database import get_db
@@ -15,6 +15,7 @@ from schemas.reward_points import (
     RewardPointRedemptionResponse,
     RewardPointsSummaryResponse,
     RewardPointsSummaryItem,
+    RewardPointHistoryItem,
 )
 from utils.auth import get_current_active_user
 
@@ -42,7 +43,7 @@ def get_summary(
         .group_by(Transaction.account_id)
         .all()
     )
-    earned_map = {str(r.account_id): int(r.total_earned) for r in earned_rows}
+    earned_map = {str(r.account_id): float(r.total_earned) for r in earned_rows}
 
     # Aggregate points redeemed grouped by account
     redeemed_rows = (
@@ -54,7 +55,7 @@ def get_summary(
         .group_by(RewardPointRedemption.account_id)
         .all()
     )
-    redeemed_map = {str(r.account_id): int(r.total_redeemed) for r in redeemed_rows}
+    redeemed_map = {str(r.account_id): float(r.total_redeemed) for r in redeemed_rows}
 
     # All credit accounts for this user
     credit_accounts = (
@@ -174,3 +175,102 @@ def delete_redemption(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Redemption not found")
     db.delete(db_obj)
     db.commit()
+
+
+@router.get("/history", response_model=List[RewardPointHistoryItem])
+def get_reward_points_history(
+    account_id: Optional[uuid.UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Unified chronological history of reward points earned, deducted (refunds),
+    and redeemed. Each row includes a per-account running balance after the event.
+    """
+    # Credit accounts for this user
+    credit_accounts_q = db.query(Account).filter(
+        Account.user_id == current_user.id,
+        Account.type == 'credit'
+    )
+    if account_id:
+        credit_accounts_q = credit_accounts_q.filter(Account.id == account_id)
+    credit_accounts = credit_accounts_q.all()
+    account_map = {str(acc.id): acc.name for acc in credit_accounts}
+    credit_ids = [uuid.UUID(i) for i in account_map]
+
+    # Collect raw events as plain dicts for balance calculation
+    raw: list[dict] = []
+
+    # Transactions with reward_points != 0 (positive = earned, negative = deducted/refund)
+    if credit_ids:
+        txns = (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == current_user.id,
+                Transaction.reward_points.isnot(None),
+                Transaction.reward_points != 0,
+                Transaction.account_id.in_(credit_ids)
+            )
+            .all()
+        )
+        for tx in txns:
+            pts = float(tx.reward_points)
+            raw.append({
+                'date': tx.date,
+                'type': 'earned' if pts > 0 else 'deducted',
+                'points': abs(pts),
+                'description': tx.description,
+                'account_id': str(tx.account_id),
+                'account_name': account_map.get(str(tx.account_id), ''),
+                'source_id': str(tx.id),
+                '_delta': pts,                   # signed, for balance calc
+            })
+
+    # Redemptions (always reduce balance)
+    redemptions_q = db.query(RewardPointRedemption).filter(
+        RewardPointRedemption.user_id == current_user.id
+    )
+    if account_id:
+        redemptions_q = redemptions_q.filter(RewardPointRedemption.account_id == account_id)
+    # Build a full account name map including any account not in the filtered set
+    all_credit_accounts = db.query(Account).filter(
+        Account.user_id == current_user.id,
+        Account.type == 'credit'
+    ).all()
+    full_account_map = {str(acc.id): acc.name for acc in all_credit_accounts}
+
+    for r in redemptions_q.all():
+        raw.append({
+            'date': r.date,
+            'type': 'redeemed',
+            'points': float(r.points_used),
+            'description': r.description,
+            'account_id': str(r.account_id),
+            'account_name': full_account_map.get(str(r.account_id), ''),
+            'source_id': str(r.id),
+            '_delta': -float(r.points_used),    # reduces balance
+        })
+
+    # Sort oldest → newest to compute per-account running balance
+    raw.sort(key=lambda x: x['date'])
+    account_balance: dict[str, float] = {}
+    for item in raw:
+        acc = item['account_id']
+        account_balance[acc] = account_balance.get(acc, 0.0) + item['_delta']
+        item['balance'] = round(account_balance[acc], 2)
+
+    # Reverse to newest-first for display; build Pydantic objects
+    raw.reverse()
+    return [
+        RewardPointHistoryItem(
+            date=item['date'],
+            type=item['type'],
+            points=item['points'],
+            description=item.get('description'),
+            account_id=item['account_id'],
+            account_name=item['account_name'],
+            source_id=item['source_id'],
+            balance=item['balance'],
+        )
+        for item in raw
+    ]

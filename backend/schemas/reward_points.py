@@ -16,7 +16,7 @@ class AccountSummary(BaseModel):
 class RewardPointRedemptionBase(BaseModel):
     account_id: uuid.UUID
     date: DateType
-    points_used: int
+    points_used: float
     description: Optional[str] = None
 
 
@@ -27,7 +27,7 @@ class RewardPointRedemptionCreate(RewardPointRedemptionBase):
 class RewardPointRedemptionUpdate(BaseModel):
     account_id: Optional[uuid.UUID] = None
     date: Optional[DateType] = None
-    points_used: Optional[int] = None
+    points_used: Optional[float] = None
     description: Optional[str] = None
 
 
@@ -45,10 +45,21 @@ class RewardPointRedemptionResponse(RewardPointRedemptionBase):
 class RewardPointsSummaryItem(BaseModel):
     account_id: uuid.UUID
     account_name: str
-    total_earned: int
-    total_redeemed: int
-    net_available: int
+    total_earned: float
+    total_redeemed: float
+    net_available: float
 
 
 class RewardPointsSummaryResponse(BaseModel):
     items: List[RewardPointsSummaryItem]
+
+
+class RewardPointHistoryItem(BaseModel):
+    date: DateType
+    type: str          # 'earned' | 'deducted' | 'redeemed'
+    points: float      # always positive; type indicates direction
+    description: Optional[str] = None
+    account_id: str
+    account_name: str
+    source_id: str     # transaction_id or redemption_id
+    balance: float     # per-account running balance after this event
