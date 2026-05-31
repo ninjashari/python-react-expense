@@ -21,7 +21,8 @@ import {
   Alert,
   Tooltip,
 } from '@mui/material';
-import { Add, Edit, Delete, Palette, CleaningServices, Check, Close, FileDownload, FileUpload } from '@mui/icons-material';
+import { Add, Edit, Delete, Palette, CleaningServices, Check, Close, FileDownload, FileUpload, Search } from '@mui/icons-material';
+import { InputAdornment } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { payeesApi } from '../services/api';
@@ -30,6 +31,7 @@ import { formatDateTime } from '../utils/formatters';
 import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
 
 const Payees: React.FC = () => {
+  const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPayee, setEditingPayee] = useState<Payee | null>(null);
   const [inlineEditingId, setInlineEditingId] = useState<string | null>(null);
@@ -463,6 +465,21 @@ const Payees: React.FC = () => {
         </Alert>
       )}
 
+      <TextField
+        size="small"
+        placeholder="Search payees…"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <Search fontSize="small" />
+            </InputAdornment>
+          ),
+        }}
+        sx={{ mb: 2, width: 300 }}
+      />
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -474,7 +491,20 @@ const Payees: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {payees?.sort((a, b) => a.name.localeCompare(b.name)).map((payee) => (
+            {payees
+              ?.filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .length === 0 && searchQuery !== '' ? (
+              <TableRow>
+                <TableCell colSpan={4} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                  No payees match "{searchQuery}"
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {payees
+              ?.filter((p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((payee) => (
               <TableRow key={payee.id}>
                 <TableCell>
                   {inlineEditingId === payee.id ? (

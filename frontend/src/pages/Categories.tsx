@@ -21,7 +21,8 @@ import {
   Alert,
   Tooltip,
 } from '@mui/material';
-import { Add, Edit, Delete, Palette, CleaningServices, Check, Close, FileDownload, FileUpload } from '@mui/icons-material';
+import { Add, Edit, Delete, Palette, CleaningServices, Check, Close, FileDownload, FileUpload, Search } from '@mui/icons-material';
+import { InputAdornment } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { categoriesApi } from '../services/api';
@@ -30,6 +31,7 @@ import { formatDateTime } from '../utils/formatters';
 import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
 
 const Categories: React.FC = () => {
+  const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [inlineEditingId, setInlineEditingId] = useState<string | null>(null);
@@ -457,6 +459,21 @@ const Categories: React.FC = () => {
         </Alert>
       )}
 
+      <TextField
+        size="small"
+        placeholder="Search categories…"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <Search fontSize="small" />
+            </InputAdornment>
+          ),
+        }}
+        sx={{ mb: 2, width: 300 }}
+      />
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -468,7 +485,20 @@ const Categories: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {categories?.sort((a, b) => a.name.localeCompare(b.name)).map((category) => (
+            {categories
+              ?.filter((c) => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .length === 0 && searchQuery !== '' ? (
+              <TableRow>
+                <TableCell colSpan={4} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                  No categories match "{searchQuery}"
+                </TableCell>
+              </TableRow>
+            ) : null}
+            {categories
+              ?.filter((c) => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((category) => (
               <TableRow key={category.id}>
                 <TableCell>
                   {inlineEditingId === category.id ? (
