@@ -166,7 +166,7 @@ export const transactionsApi = {
     description?: string;
     sort_by?: string;
     sort_order?: string;
-  }) => api.get('/transactions', { params }).then(res => res.data),
+  }, signal?: AbortSignal) => api.get('/transactions', { params, signal }).then(res => res.data),
   getSummary: (params?: {
     account_ids?: string;
     category_ids?: string;

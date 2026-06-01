@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func
 from typing import List, Optional
 import uuid
@@ -371,7 +371,7 @@ async def create_transaction(
 @router.get("/", response_model=PaginatedTransactionsResponse)
 def get_transactions(
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(50, ge=1, le=10000, description="Page size"),
+    size: int = Query(50, ge=1, le=1000, description="Page size"),
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
     exclude_category_ids: Optional[str] = Query(None, description="Comma-separated category IDs to exclude"),
@@ -388,12 +388,12 @@ def get_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    # Build base query
+    # Build base query — selectinload avoids cartesian-product joins on large result sets
     query = db.query(Transaction).options(
-        joinedload(Transaction.account),
-        joinedload(Transaction.to_account),
-        joinedload(Transaction.payee),
-        joinedload(Transaction.category)
+        selectinload(Transaction.account),
+        selectinload(Transaction.to_account),
+        selectinload(Transaction.payee),
+        selectinload(Transaction.category)
     )
     
     # Apply filters

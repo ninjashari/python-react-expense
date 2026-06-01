@@ -1,18 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 /**
- * Custom hook to persist filters in localStorage
- * @param key - The localStorage key to store filters under
- * @param defaultFilters - The default filter values
+ * Custom hook to persist filters in localStorage.
+ * setFilters and clearSavedFilters are memoized so they have stable references
+ * and do not cause useEffect re-runs in consumer components.
  */
 export function usePersistentFilters<T>(key: string, defaultFilters: T) {
-  // Initialize state with values from localStorage or defaults
   const [filters, setFiltersState] = useState<T>(() => {
     try {
       const savedFilters = localStorage.getItem(key);
       if (savedFilters) {
         const parsed = JSON.parse(savedFilters);
-        // Merge saved filters with defaults to ensure all required fields exist
         return { ...defaultFilters, ...parsed };
       }
     } catch (error) {
@@ -21,7 +19,7 @@ export function usePersistentFilters<T>(key: string, defaultFilters: T) {
     return defaultFilters;
   });
 
-  // Save filters to localStorage whenever they change
+  // Persist to localStorage on every change
   useEffect(() => {
     try {
       localStorage.setItem(key, JSON.stringify(filters));
@@ -30,29 +28,26 @@ export function usePersistentFilters<T>(key: string, defaultFilters: T) {
     }
   }, [filters, key]);
 
-  // Enhanced setFilters that also saves to localStorage
-  const setFilters = (updater: T | ((prev: T) => T)) => {
+  // Stable reference — won't change between renders
+  const setFilters = useCallback((updater: T | ((prev: T) => T)) => {
     setFiltersState(prevFilters => {
-      const newFilters = typeof updater === 'function' 
-        ? (updater as (prev: T) => T)(prevFilters) 
+      return typeof updater === 'function'
+        ? (updater as (prev: T) => T)(prevFilters)
         : updater;
-      return newFilters;
     });
-  };
+  }, []);
 
-  // Function to clear saved filters and reset to defaults
-  const clearSavedFilters = () => {
+  // Stable reference — won't change between renders
+  const clearSavedFilters = useCallback(() => {
     try {
       localStorage.removeItem(key);
       setFiltersState(defaultFilters);
     } catch (error) {
       console.warn(`Failed to clear saved filters for key "${key}":`, error);
     }
-  };
+  // defaultFilters is a plain object literal defined in the consumer — treat as stable
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
-  return {
-    filters,
-    setFilters,
-    clearSavedFilters
-  };
+  return { filters, setFilters, clearSavedFilters };
 }

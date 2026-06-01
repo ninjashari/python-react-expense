@@ -223,9 +223,9 @@ const Transactions: React.FC = () => {
 
   const { data: transactionData, isLoading: transactionsLoading } = useQuery<PaginatedResponse<Transaction>>({
     queryKey: ['transactions', filters],
-    queryFn: () => transactionsApi.getAll({ 
+    queryFn: ({ signal }) => transactionsApi.getAll({
       page: filters.showAll ? 1 : filters.page,
-      size: filters.showAll ? 10000 : filters.size, // Use large number for show all
+      size: filters.showAll ? 1000 : filters.size, // Cap show-all at 1000 (was 10000)
       start_date: filters.startDate,
       end_date: filters.endDate,
       account_ids: filters.accountId,
@@ -235,15 +235,17 @@ const Transactions: React.FC = () => {
       transaction_type: filters.transactionType,
       sort_by: filters.sortField,
       sort_order: filters.sortDirection,
-    }),
+    }, signal), // signal cancels the HTTP request when queryKey changes
   });
 
-  // Auto-disable showAll if total transactions > 250
+  // Auto-disable showAll if total transactions > 250.
+  // setFilters is excluded from deps — it's stable (memoized in usePersistentFilters).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   React.useEffect(() => {
     if (transactionData && transactionData.total > 250 && filters.showAll) {
       setFilters(prev => ({ ...prev, showAll: false, page: 1 }));
     }
-  }, [transactionData?.total, filters.showAll, setFilters]);
+  }, [transactionData?.total, filters.showAll]);
 
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
