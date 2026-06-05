@@ -3,8 +3,11 @@ import {
   Box,
   Chip,
   CircularProgress,
+  Menu,
+  MenuItem,
   Tooltip,
 } from '@mui/material';
+import { ArrowDropDown } from '@mui/icons-material';
 
 interface ToggleOption {
   value: string;
@@ -25,26 +28,35 @@ const InlineToggleEdit: React.FC<InlineToggleEditProps> = ({
   onSave,
   isSaving = false,
 }) => {
-  const [isToggling, setIsToggling] = useState(false);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [isSavingLocal, setIsSavingLocal] = useState(false);
 
+  const open = Boolean(anchorEl);
+  const saving = isSaving || isSavingLocal;
   const currentOption = options.find(opt => opt.value === value);
-  
-  const handleToggle = async () => {
-    if (isSaving || isToggling) return;
-    
-    setIsToggling(true);
-    
+
+  const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
+    if (saving) return;
+    event.stopPropagation();
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleSelect = async (event: React.MouseEvent, newValue: string) => {
+    event.stopPropagation();
+    setAnchorEl(null);
+    if (newValue === value) return;
+
+    setIsSavingLocal(true);
     try {
-      // Find current index and get next option (cycle through all options)
-      const currentIndex = options.findIndex(opt => opt.value === value);
-      const nextIndex = (currentIndex + 1) % options.length;
-      const nextValue = options[nextIndex].value;
-      
-      await onSave(nextValue);
+      await onSave(newValue);
     } catch (error) {
-      console.error('Failed to toggle value:', error);
+      console.error('Failed to change value:', error);
     } finally {
-      setIsToggling(false);
+      setIsSavingLocal(false);
     }
   };
 
@@ -55,17 +67,10 @@ const InlineToggleEdit: React.FC<InlineToggleEditProps> = ({
         alignItems: 'center',
         gap: 1,
         minHeight: 40,
-        cursor: isSaving || isToggling ? 'default' : 'pointer',
         padding: '4px 8px',
-        borderRadius: 1,
-        transition: 'background-color 0.2s',
-        '&:hover': {
-          backgroundColor: isSaving || isToggling ? 'transparent' : 'action.hover',
-        },
       }}
-      onClick={handleToggle}
     >
-      {isSaving || isToggling ? (
+      {saving ? (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CircularProgress size={16} />
           <Chip
@@ -76,19 +81,46 @@ const InlineToggleEdit: React.FC<InlineToggleEditProps> = ({
           />
         </Box>
       ) : (
-        <Tooltip title={`Click to cycle through: ${options.map(opt => opt.label).join(' → ')}`}>
-          <Chip
-            label={currentOption?.label || value}
-            size="small"
-            color={currentOption?.color || 'default'}
-            sx={{
-              transition: 'transform 0.1s',
-              '&:hover': {
-                transform: 'scale(1.05)',
-              },
-            }}
-          />
-        </Tooltip>
+        <>
+          <Tooltip title="Click to change type">
+            <Chip
+              label={currentOption?.label || value}
+              size="small"
+              color={currentOption?.color || 'default'}
+              onClick={handleOpen}
+              onDelete={handleOpen}
+              deleteIcon={<ArrowDropDown />}
+              sx={{
+                cursor: 'pointer',
+                transition: 'transform 0.1s',
+                '& .MuiChip-deleteIcon': { color: 'inherit', ml: '-2px' },
+                '&:hover': { transform: 'scale(1.05)' },
+              }}
+            />
+          </Tooltip>
+          <Menu
+            anchorEl={anchorEl}
+            open={open}
+            onClose={handleClose}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          >
+            {options.map((option) => (
+              <MenuItem
+                key={option.value}
+                selected={option.value === value}
+                onClick={(e) => handleSelect(e, option.value)}
+                sx={{ py: 0.75 }}
+              >
+                <Chip
+                  label={option.label}
+                  size="small"
+                  color={option.color || 'default'}
+                />
+              </MenuItem>
+            ))}
+          </Menu>
+        </>
       )}
     </Box>
   );
