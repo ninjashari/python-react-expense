@@ -3,9 +3,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import case
 from typing import List
 import uuid
+from datetime import datetime, timedelta
 
 from database import get_db
 from models.users import User
+from models.transactions import Transaction
+from models.payees import Payee
+from models.categories import Category
 from schemas.learning import (
     SmartSuggestionRequest,
     SmartSuggestionResponse,
@@ -16,19 +20,25 @@ from schemas.learning import (
 )
 from services.learning_service import TransactionLearningService
 from services.ai_trainer import TransactionAITrainer
+from services.ollama_service import get_llm_suggestions
+from services.ai_cache import record_selection_and_maybe_retrain
 from utils.auth import get_current_active_user
 
 router = APIRouter()
 
 
 @router.post("/suggestions", response_model=SmartSuggestionResponse)
-async def get_smart_suggestions(
+def get_smart_suggestions(
     request: SmartSuggestionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Get AI-powered suggestions for payee and category based on transaction description"""
-    
+    """Fast ML/pattern suggestions (instant path the dropdown waits on).
+
+    Declared `def` (not async) so FastAPI runs it in a threadpool — the
+    synchronous DB queries never block the event loop. The slow LLM lives in
+    a separate `/suggestions/llm` endpoint.
+    """
     suggestions = TransactionLearningService.get_suggestions_for_description(
         db=db,
         user_id=str(current_user.id),
@@ -36,36 +46,115 @@ async def get_smart_suggestions(
         amount=request.amount,
         account_type=request.account_type
     )
-    
+
     return SmartSuggestionResponse(
         payee_suggestions=[
             {
-                "id": s["id"],
-                "name": s["name"],
-                "type": s["type"],
-                "confidence": s["confidence"],
-                "reason": s["reason"],
-                "usage_count": s.get("usage_count")
+                "id":          s["id"],
+                "name":        s["name"],
+                "type":        s["type"],
+                "confidence":  s["confidence"],
+                "reason":      s["reason"],
+                "usage_count": s.get("usage_count"),
             }
             for s in suggestions["payee_suggestions"]
         ],
         category_suggestions=[
             {
-                "id": s["id"],
-                "name": s["name"],
-                "type": s["type"],
-                "confidence": s["confidence"],
-                "reason": s["reason"],
+                "id":          s["id"],
+                "name":        s["name"],
+                "type":        s["type"],
+                "confidence":  s["confidence"],
+                "reason":      s["reason"],
                 "usage_count": s.get("usage_count"),
-                "color": s.get("color")
+                "color":       s.get("color"),
             }
             for s in suggestions["category_suggestions"]
-        ]
+        ],
+        confidence_explanation="ML pattern matching",
+    )
+
+
+# Timeout for interactive LLM suggestions. llama3.1:8b needs ~3-10s depending
+# on context length. 25s gives headroom without hanging the browser indefinitely.
+LLM_INTERACTIVE_TIMEOUT = 25
+
+
+@router.post("/suggestions/llm", response_model=SmartSuggestionResponse)
+async def get_llm_smart_suggestions(
+    request: SmartSuggestionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """LLM suggestion overlay (async, best-effort).
+
+    Reads cached per-user context (built off the event loop) and awaits Ollama.
+    Returns empty suggestions if Ollama is unavailable — never raises.
+    """
+    from fastapi.concurrency import run_in_threadpool
+    from services.suggestion_context import get_context
+
+    # Heavy DB work runs in a threadpool; cached after the first build.
+    ctx = await run_in_threadpool(get_context, db, current_user.id)
+
+    llm_result = await get_llm_suggestions(
+        description=request.description,
+        amount=request.amount,
+        account_type=request.account_type,
+        known_payees=ctx["payees"],
+        known_categories=ctx["categories"],
+        history=ctx["history"],
+        timeout=LLM_INTERACTIVE_TIMEOUT,
+    )
+
+    if not llm_result:
+        return SmartSuggestionResponse(
+            payee_suggestions=[],
+            category_suggestions=[],
+            confidence_explanation="LLM unavailable",
+        )
+
+    payee_suggestions = []
+    category_suggestions = []
+
+    # Secondary guard: only forward IDs that are verifiably in the current context.
+    payee_ids = {p["id"] for p in ctx["payees"]}
+    cat_ids   = {c["id"] for c in ctx["categories"]}
+
+    if llm_result.get("payee_id") and llm_result["payee_id"] in payee_ids and llm_result.get("payee_name"):
+        payee_suggestions.append({
+            "id":          llm_result["payee_id"],
+            "name":        llm_result["payee_name"],
+            "type":        "ai_suggestion",
+            "confidence":  round(float(llm_result.get("payee_confidence", 0.8)), 2),
+            "reason":      "LLM suggestion based on transaction history",
+            "usage_count": None,
+        })
+
+    if llm_result.get("category_id") and llm_result["category_id"] in cat_ids and llm_result.get("category_name"):
+        color = next(
+            (c["color"] for c in ctx["categories"] if c["id"] == llm_result["category_id"]),
+            None
+        )
+        category_suggestions.append({
+            "id":          llm_result["category_id"],
+            "name":        llm_result["category_name"],
+            "type":        "ai_suggestion",
+            "confidence":  round(float(llm_result.get("category_confidence", 0.8)), 2),
+            "reason":      "LLM suggestion based on transaction history",
+            "usage_count": None,
+            "color":       color,
+        })
+
+    return SmartSuggestionResponse(
+        payee_suggestions=payee_suggestions,
+        category_suggestions=category_suggestions,
+        confidence_explanation="Local LLM (Ollama)",
     )
 
 
 @router.post("/record-selection")
-async def record_user_selection(
+def record_user_selection(
     request: UserSelectionRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -88,12 +177,13 @@ async def record_user_selection(
         suggestion_confidence=request.suggestion_confidence,
         selection_method=request.selection_method
     )
-    
+    background_tasks.add_task(record_selection_and_maybe_retrain, str(current_user.id))
+
     return {"status": "success", "message": "Selection recorded for learning"}
 
 
 @router.get("/patterns", response_model=List[UserTransactionPatternResponse])
-async def get_user_patterns(
+def get_user_patterns(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -118,7 +208,7 @@ async def get_user_patterns(
 
 
 @router.post("/feedback")
-async def record_learning_feedback(
+def record_learning_feedback(
     request: LearningFeedbackRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -138,7 +228,7 @@ async def record_learning_feedback(
 
 
 @router.get("/statistics", response_model=LearningStatisticsResponse)
-async def get_learning_statistics(
+def get_learning_statistics(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -175,7 +265,7 @@ async def get_learning_statistics(
 
 
 @router.delete("/patterns/{pattern_id}")
-async def delete_learning_pattern(
+def delete_learning_pattern(
     pattern_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -199,7 +289,7 @@ async def delete_learning_pattern(
 
 
 @router.post("/patterns/reset")
-async def reset_learning_patterns(
+def reset_learning_patterns(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -226,7 +316,7 @@ async def reset_learning_patterns(
 
 
 @router.get("/analytics/performance")
-async def get_learning_performance_analytics(
+def get_learning_performance_analytics(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -324,7 +414,7 @@ async def get_learning_performance_analytics(
 
 
 @router.get("/analytics/patterns")
-async def get_pattern_analytics(
+def get_pattern_analytics(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -414,7 +504,7 @@ async def get_pattern_analytics(
 
 
 @router.get("/analytics/accuracy")
-async def get_accuracy_analytics(
+def get_accuracy_analytics(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -481,7 +571,7 @@ async def get_accuracy_analytics(
 
 
 @router.post("/auto-categorize")
-async def auto_categorize_transactions(
+def auto_categorize_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -573,7 +663,7 @@ async def auto_categorize_transactions(
 
 
 @router.post("/auto-categorize-filtered")
-async def auto_categorize_filtered_transactions(
+def auto_categorize_filtered_transactions(
     filters: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -856,7 +946,7 @@ def _predict_with_enhanced_features(transaction, patterns, training_transactions
 
 
 @router.post("/bulk-process")
-async def bulk_process_transactions(
+def bulk_process_transactions(
     transaction_ids: List[str],
     action: str,  # "categorize", "duplicate_check", "validate"
     db: Session = Depends(get_db),
@@ -929,7 +1019,7 @@ async def bulk_process_transactions(
 
 
 @router.post("/smart-import-preprocess")
-async def smart_import_preprocess(
+def smart_import_preprocess(
     import_data: List[dict],
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -979,7 +1069,7 @@ async def smart_import_preprocess(
 
 
 @router.get("/predictions/spending-patterns")
-async def get_spending_pattern_predictions(
+def get_spending_pattern_predictions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1069,7 +1159,7 @@ async def get_spending_pattern_predictions(
 
 
 @router.get("/predictions/anomalies")
-async def detect_spending_anomalies(
+def detect_spending_anomalies(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1194,7 +1284,7 @@ async def detect_spending_anomalies(
 
 
 @router.get("/recommendations/budget")
-async def get_budget_recommendations(
+def get_budget_recommendations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1305,7 +1395,7 @@ async def get_budget_recommendations(
 
 
 @router.get("/trends/forecast")
-async def get_expense_trend_forecast(
+def get_expense_trend_forecast(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1442,7 +1532,7 @@ async def get_expense_trend_forecast(
     }
 
 @router.post("/train")
-async def manually_train_model(
+def manually_train_model(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1478,7 +1568,7 @@ async def manually_train_model(
 
 
 @router.post("/cleanup-selection-history")
-async def cleanup_selection_history(
+def cleanup_selection_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1500,7 +1590,7 @@ async def cleanup_selection_history(
 
 
 @router.get("/correction-patterns")
-async def get_correction_patterns(
+def get_correction_patterns(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1542,7 +1632,7 @@ async def get_correction_patterns(
 
 
 @router.get("/correction-insights")
-async def get_correction_insights(
+def get_correction_insights(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1558,7 +1648,7 @@ async def get_correction_insights(
 
 
 @router.get("/model-status")
-async def get_model_status(
+def get_model_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):

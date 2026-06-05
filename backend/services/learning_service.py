@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import re
 from collections import Counter
+from difflib import SequenceMatcher
 
 from models.learning import UserTransactionPattern, UserSelectionHistory, UserCorrectionPattern, LearningStatistics
 from models.transactions import Transaction
@@ -234,33 +235,44 @@ class TransactionLearningService:
     
     @staticmethod
     def _extract_keywords(description: str) -> List[str]:
-        """Extract meaningful keywords from transaction description"""
+        """Extract meaningful keywords from transaction description.
+
+        Enhanced: uses bigrams + unigrams, filters at 4+ chars, returns top 8.
+        """
         if not description:
             return []
-        
-        # Convert to lowercase and remove special characters
+
         clean_desc = re.sub(r'[^\w\s]', ' ', description.lower())
-        
-        # Split into words
         words = clean_desc.split()
-        
-        # Remove common stop words and short words
+
         stop_words = {
             'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
-            'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 
+            'from', 'up', 'about', 'into', 'through', 'during', 'before', 'after', 'above',
             'below', 'between', 'among', 'is', 'are', 'was', 'were', 'been', 'be', 'have',
             'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'could', 'can',
-            'may', 'might', 'must', 'shall', 'payment', 'purchase', 'transaction', 'charge'
+            'may', 'might', 'must', 'shall', 'payment', 'purchase', 'transaction', 'charge',
+            'upi', 'neft', 'imps', 'rtgs', 'ref', 'txn', 'amt',
         }
-        
-        # Filter meaningful keywords
-        keywords = [
-            word for word in words 
-            if len(word) >= 3 and word not in stop_words and not word.isdigit()
+
+        meaningful = [
+            w for w in words
+            if len(w) >= 4 and w not in stop_words and not w.isdigit()
         ]
-        
-        # Return top 5 most significant keywords
-        return keywords[:5]
+
+        # Add bigrams for compound phrases (e.g. "jio mobile")
+        bigrams = [
+            f"{meaningful[i]}_{meaningful[i+1]}"
+            for i in range(len(meaningful) - 1)
+        ]
+
+        return (meaningful + bigrams)[:8]
+
+    @staticmethod
+    def _fuzzy_match_score(desc_a: str, desc_b: str) -> float:
+        """Return SequenceMatcher ratio between two normalized descriptions."""
+        a = re.sub(r'[^\w\s]', ' ', desc_a.lower()).strip()
+        b = re.sub(r'[^\w\s]', ' ', desc_b.lower()).strip()
+        return SequenceMatcher(None, a, b).ratio()
     
     @staticmethod
     def learn_from_transaction_update(
@@ -351,42 +363,56 @@ class TransactionLearningService:
         if not keywords:
             return {"payee_suggestions": [], "category_suggestions": []}
         
-        # Find matching patterns using PostgreSQL array overlap operator
+        # Keyword overlap: PostgreSQL array overlap operator
         from sqlalchemy import text
-        patterns = db.query(UserTransactionPattern).filter(
+        keyword_patterns = db.query(UserTransactionPattern).filter(
             UserTransactionPattern.user_id == user_id,
             text("description_keywords && CAST(:keywords AS varchar[])").params(keywords=keywords)
         ).order_by(
             UserTransactionPattern.confidence_score.desc(),
             UserTransactionPattern.usage_frequency.desc()
-        ).limit(10).all()
-        
+        ).limit(15).all()
+
+        # Fuzzy fallback: load remaining patterns not already captured and score by similarity
+        keyword_pattern_ids = {p.id for p in keyword_patterns}
+        other_patterns = db.query(UserTransactionPattern).filter(
+            UserTransactionPattern.user_id == user_id,
+            ~UserTransactionPattern.id.in_(keyword_pattern_ids)
+        ).order_by(
+            UserTransactionPattern.confidence_score.desc()
+        ).limit(50).all()
+
+        fuzzy_patterns = []
+        for p in other_patterns:
+            # Reconstruct a pseudo-description from stored keywords for fuzzy comparison
+            stored_desc = ' '.join(p.description_keywords or [])
+            score = TransactionLearningService._fuzzy_match_score(description, stored_desc)
+            if score >= 0.65:
+                fuzzy_patterns.append((p, score))
+        fuzzy_patterns.sort(key=lambda x: x[1], reverse=True)
+
         payee_suggestions = []
         category_suggestions = []
-        
-        for pattern in patterns:
-            # Calculate relevance score
-            matching_keywords = set(keywords).intersection(set(pattern.description_keywords))
-            keyword_match_ratio = len(matching_keywords) / len(pattern.description_keywords)
-            
-            # Amount range check
-            amount_match = True
+
+        def _score_pattern(pattern, keyword_ratio, fuzzy_score):
+            """Compute final confidence using best of keyword or fuzzy signal."""
+            raw = pattern.confidence_score * max(keyword_ratio, fuzzy_score * 0.9)
             if amount and pattern.amount_min and pattern.amount_max:
-                amount_match = pattern.amount_min <= amount <= pattern.amount_max * 1.5  # Allow some flexibility
-            
-            # Account type check
-            account_match = True
+                if not (pattern.amount_min <= amount <= pattern.amount_max * 1.5):
+                    raw *= 0.7
             if account_type and pattern.account_types:
-                account_match = account_type in pattern.account_types
-            
-            # Calculate final confidence
-            final_confidence = pattern.confidence_score * keyword_match_ratio
-            if not amount_match:
-                final_confidence *= 0.7
-            if not account_match:
-                final_confidence *= 0.8
-            
-            # Add payee suggestion
+                if account_type not in pattern.account_types:
+                    raw *= 0.8
+            return raw
+
+        for pattern in keyword_patterns:
+            matching_keywords = set(keywords).intersection(set(pattern.description_keywords or []))
+            kw_ratio = len(matching_keywords) / max(len(pattern.description_keywords or [1]), 1)
+            stored_desc = ' '.join(pattern.description_keywords or [])
+            fz = TransactionLearningService._fuzzy_match_score(description, stored_desc)
+            final_confidence = _score_pattern(pattern, kw_ratio, fz)
+            reason = f"Matched keywords: {', '.join(matching_keywords)}" if matching_keywords else "Similar description"
+
             if pattern.payee_id and final_confidence > 0.2:
                 payee = db.query(Payee).filter(Payee.id == pattern.payee_id).first()
                 if payee:
@@ -395,11 +421,10 @@ class TransactionLearningService:
                         "name": payee.name,
                         "type": "ai_suggestion",
                         "confidence": round(final_confidence, 2),
-                        "reason": f"Based on keywords: {', '.join(matching_keywords)}",
+                        "reason": reason,
                         "usage_count": pattern.usage_frequency
                     })
-            
-            # Add category suggestion
+
             if pattern.category_id and final_confidence > 0.2:
                 category = db.query(Category).filter(Category.id == pattern.category_id).first()
                 if category:
@@ -408,7 +433,36 @@ class TransactionLearningService:
                         "name": category.name,
                         "type": "ai_suggestion",
                         "confidence": round(final_confidence, 2),
-                        "reason": f"Based on keywords: {', '.join(matching_keywords)}",
+                        "reason": reason,
+                        "usage_count": pattern.usage_frequency,
+                        "color": category.color
+                    })
+
+        for pattern, fz_score in fuzzy_patterns[:5]:
+            final_confidence = _score_pattern(pattern, 0, fz_score)
+            reason = "Similar description pattern"
+
+            if pattern.payee_id and final_confidence > 0.2:
+                payee = db.query(Payee).filter(Payee.id == pattern.payee_id).first()
+                if payee:
+                    payee_suggestions.append({
+                        "id": str(pattern.payee_id),
+                        "name": payee.name,
+                        "type": "ai_suggestion",
+                        "confidence": round(final_confidence, 2),
+                        "reason": reason,
+                        "usage_count": pattern.usage_frequency
+                    })
+
+            if pattern.category_id and final_confidence > 0.2:
+                category = db.query(Category).filter(Category.id == pattern.category_id).first()
+                if category:
+                    category_suggestions.append({
+                        "id": str(pattern.category_id),
+                        "name": category.name,
+                        "type": "ai_suggestion",
+                        "confidence": round(final_confidence, 2),
+                        "reason": reason,
                         "usage_count": pattern.usage_frequency,
                         "color": category.color
                     })

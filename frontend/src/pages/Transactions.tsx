@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -47,7 +47,8 @@ import InlineTextEdit from '../components/InlineTextEdit';
 import InlineDateEdit from '../components/InlineDateEdit';
 import InlineToggleEdit from '../components/InlineToggleEdit';
 import InlineSelectEdit from '../components/InlineSelectEdit';
-import { useEnhancedSuggestions, useLearningMetrics } from '../hooks/useLearning';
+import { useEnhancedSuggestions, useLlmSuggestions, useLearningMetrics } from '../hooks/useLearning';
+import { SuggestionItem } from '../services/learningApi';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
 
 // Resizable TableCell component
@@ -280,6 +281,44 @@ const Transactions: React.FC = () => {
     dialogOpen ? (payees || []) : [],
     dialogOpen ? (categories || []) : []
   );
+
+  // LLM overlay — slow, best-effort. Fired separately; never blocks the list.
+  const { data: llmSuggestions } = useLlmSuggestions(
+    dialogOpen ? formDescription : '',
+    dialogOpen ? formAmount : undefined,
+    dialogOpen ? selectedAccount?.id : undefined,
+    dialogOpen ? selectedAccount?.type : undefined,
+    dialogOpen
+  );
+
+  // Pin LLM suggestions to the top of an options list, de-duped by id.
+  const withLlmOverlay = useCallback((
+    base: any[],
+    llm?: SuggestionItem[]
+  ) => {
+    if (!llm || llm.length === 0) return base;
+    const llmIds = new Set(llm.map(s => s.id));
+    const rest = base.filter(o => !llmIds.has(o.id));
+    return [...llm, ...rest];
+  }, []);
+
+  const payeeOptions = useMemo(() => {
+    const base = formSuggestions?.payee_suggestions ||
+      (payees?.map(p => ({
+        id: p.id, name: p.name, type: 'existing' as const,
+        confidence: 0.5, reason: 'Existing payee', isExisting: true,
+      })) || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    return withLlmOverlay(base, llmSuggestions?.payee_suggestions);
+  }, [formSuggestions, payees, llmSuggestions, withLlmOverlay]);
+
+  const categoryOptions = useMemo(() => {
+    const base = formSuggestions?.category_suggestions ||
+      (categories?.map(c => ({
+        id: c.id, name: c.name, type: 'existing' as const,
+        confidence: 0.5, reason: 'Existing category', color: c.color, isExisting: true,
+      })) || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    return withLlmOverlay(base, llmSuggestions?.category_suggestions);
+  }, [formSuggestions, categories, llmSuggestions, withLlmOverlay]);
 
   const createMutation = useCreateWithConfirm(transactionsApi.create, {
     resourceName: 'Transaction',
@@ -2044,17 +2083,7 @@ const Transactions: React.FC = () => {
                 <SmartAutocomplete
                   value={payees?.find(p => p.id === field.value) || null}
                   onChange={(event, newValue) => field.onChange(newValue?.id || '')}
-                  options={
-                    formSuggestions?.payee_suggestions || 
-                    (payees?.map(p => ({
-                      id: p.id,
-                      name: p.name,
-                      type: 'existing' as const,
-                      confidence: 0.5,
-                      reason: 'Existing payee',
-                      isExisting: true,
-                    })) || []).slice().sort((a, b) => a.name.localeCompare(b.name)) // Debug: sort payees
-                  }
+                  options={payeeOptions}
                   getOptionLabel={(option) => option?.name || ''}
                   loading={suggestionsLoading}
                   placeholder="Select or search payee..."
@@ -2078,18 +2107,7 @@ const Transactions: React.FC = () => {
                 <SmartAutocomplete
                   value={categories?.find(c => c.id === field.value) || null}
                   onChange={(event, newValue) => field.onChange(newValue?.id || '')}
-                  options={
-                    formSuggestions?.category_suggestions || 
-                    (categories?.map(c => ({
-                      id: c.id,
-                      name: c.name,
-                      type: 'existing' as const,
-                      confidence: 0.5,
-                      reason: 'Existing category',
-                      color: c.color,
-                      isExisting: true,
-                    })) || []).slice().sort((a, b) => a.name.localeCompare(b.name)) // Debug: log and sort categories
-                  }
+                  options={categoryOptions}
                   getOptionLabel={(option) => option?.name || ''}
                   loading={suggestionsLoading}
                   placeholder="Select or search category..."

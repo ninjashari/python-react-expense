@@ -1,11 +1,23 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
-  learningApi, 
-  SmartSuggestionRequest, 
+import {
+  learningApi,
+  SmartSuggestionRequest,
   UserSelectionRequest,
   SuggestionItem
 } from '../services/learningApi';
+
+/**
+ * Debounce any fast-changing value so dependent queries don't fire per keystroke.
+ */
+export function useDebounce<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 /**
  * Hook for getting smart suggestions based on transaction description
@@ -34,16 +46,44 @@ export const useEnhancedSuggestions = (
   existingPayees: Array<{ id: string; name: string; color?: string }> = [],
   existingCategories: Array<{ id: string; name: string; color?: string }> = []
 ) => {
+  // Debounce so the fast ML endpoint isn't hit on every keystroke.
+  const debouncedDescription = useDebounce(description, 350);
   return useQuery({
-    queryKey: ['enhanced-suggestions', description, amount, accountId, existingPayees.length, existingCategories.length],
+    queryKey: ['enhanced-suggestions', debouncedDescription, amount, accountId, existingPayees.length, existingCategories.length],
     queryFn: () => learningApi.getEnhancedSuggestions(
-      { description, amount, account_id: accountId, account_type: accountType },
+      { description: debouncedDescription, amount, account_id: accountId, account_type: accountType },
       existingPayees,
       existingCategories
     ),
-    enabled: !!description && description.length >= 3,
+    enabled: !!debouncedDescription && debouncedDescription.length >= 4,
     staleTime: 30000,
     retry: 1,
+  });
+};
+
+/**
+ * LLM (Ollama) suggestion overlay — slow, best-effort. Heavily debounced and
+ * fired separately from the fast ML path so it never blocks the dropdown.
+ */
+export const useLlmSuggestions = (
+  description: string,
+  amount?: number,
+  accountId?: string,
+  accountType?: string,
+  enabled: boolean = true
+) => {
+  const debouncedDescription = useDebounce(description, 600);
+  return useQuery({
+    queryKey: ['llm-suggestions', debouncedDescription, amount, accountId, accountType],
+    queryFn: () => learningApi.getLlmSuggestions({
+      description: debouncedDescription,
+      amount,
+      account_id: accountId,
+      account_type: accountType,
+    }),
+    enabled: enabled && !!debouncedDescription && debouncedDescription.length >= 4,
+    staleTime: 60000,
+    retry: 0,
   });
 };
 

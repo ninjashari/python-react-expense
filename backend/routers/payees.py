@@ -10,6 +10,7 @@ from database import get_db
 from models.payees import Payee
 from models.users import User
 from models.transactions import Transaction
+from models.learning import UserTransactionPattern
 from schemas.payees import PayeeCreate, PayeeUpdate, PayeeResponse
 from utils.auth import get_current_active_user
 from utils.slug import create_slug
@@ -145,10 +146,17 @@ def delete_unused_payees(
                     "color": payee.color
                 })
         
+        # Null out learning-pattern FK references so the delete won't violate constraints
+        if unused_payees:
+            unused_ids = [p.id for p in unused_payees]
+            db.query(UserTransactionPattern).filter(
+                UserTransactionPattern.payee_id.in_(unused_ids)
+            ).update({"payee_id": None}, synchronize_session=False)
+
         # Delete unused payees
         for payee in unused_payees:
             db.delete(payee)
-        
+
         db.commit()
         
         return {

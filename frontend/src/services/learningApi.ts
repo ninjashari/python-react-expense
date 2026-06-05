@@ -332,6 +332,14 @@ class LearningApiService {
   }
 
   /**
+   * Get LLM (Ollama) suggestions — slow, best-effort overlay. Returns empty
+   * lists if the model is unavailable. Call separately from the fast ML path.
+   */
+  async getLlmSuggestions(request: SmartSuggestionRequest): Promise<SmartSuggestionResponse> {
+    return api.post('/learning/suggestions/llm', request).then(res => res.data);
+  }
+
+  /**
    * Record a user selection for learning purposes
    */
   async recordUserSelection(request: UserSelectionRequest): Promise<{ status: string; message: string }> {

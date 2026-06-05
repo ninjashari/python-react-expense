@@ -13,7 +13,7 @@ import {
   Error as ErrorIcon,
 } from '@mui/icons-material';
 import SmartAutocomplete from './SmartAutocomplete';
-import { useEnhancedSuggestions, useRecordSelection, useLearningMetrics } from '../hooks/useLearning';
+import { useEnhancedSuggestions, useLlmSuggestions, useRecordSelection, useLearningMetrics } from '../hooks/useLearning';
 import { SuggestionItem } from '../services/learningApi';
 
 interface SmartInlineEditProps {
@@ -78,10 +78,25 @@ const SmartInlineEdit: React.FC<SmartInlineEditProps> = ({
     (isEditing || (!currentValue && transactionDescription.length >= 5)) ? (fieldType === 'category' ? allOptions as Array<{ id: string; name: string; color?: string }> : []) : []
   );
   
-  // Get current suggestions for this field type
-  const currentSuggestions = fieldType === 'payee' 
+  // LLM overlay — only while actively editing this field (avoids background calls per row).
+  const { data: llmSuggestions } = useLlmSuggestions(
+    isEditing ? transactionDescription : '',
+    isEditing ? transactionAmount : undefined,
+    undefined,
+    isEditing ? accountType : undefined,
+    isEditing
+  );
+
+  // Get current suggestions for this field type, pinning LLM results on top.
+  const baseSuggestions = fieldType === 'payee'
     ? suggestions?.payee_suggestions || []
     : suggestions?.category_suggestions || [];
+  const llmForField = fieldType === 'payee'
+    ? llmSuggestions?.payee_suggestions || []
+    : llmSuggestions?.category_suggestions || [];
+  const currentSuggestions = llmForField.length > 0
+    ? [...llmForField, ...baseSuggestions.filter(s => !llmForField.some(l => l.id === s.id))]
+    : baseSuggestions;
   
   // Check if there are high-confidence AI suggestions
   const hasHighConfidenceSuggestion = currentSuggestions.some(

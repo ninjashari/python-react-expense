@@ -234,18 +234,20 @@ class TransactionAITrainer:
                 features, self.existing_payees
             )
 
-        # ── 3. Payee→Category chain ───────────────────────────────────────────
+        # ── 3. Payee→Category chain (top-3) ──────────────────────────────────
+        chain_results = []
         if payee_result is not None:
             pid = payee_result['id']
             if pid in self.payee_to_category:
-                chain = self.payee_to_category[pid]
-                if chain['confidence'] >= CHAIN_MIN_CONFIDENCE:
-                    category_result = {
+                for chain in self.payee_to_category[pid]:
+                    chain_results.append({
                         'id':         chain['category_id'],
                         'name':       chain['category_name'],
                         'confidence': chain['confidence'],
                         'match_type': 'chain',
-                    }
+                    })
+                if chain_results:
+                    category_result = chain_results[0]
 
         # ── 4. ML fallback for category ───────────────────────────────────────
         if category_result is None and self.category_pipeline is not None:
@@ -254,7 +256,11 @@ class TransactionAITrainer:
                 features, self.existing_categories
             )
 
-        return {'payee': payee_result, 'category': category_result}
+        return {
+            'payee': payee_result,
+            'category': category_result,
+            'category_chain': chain_results,  # all top-3 chain options
+        }
 
     def get_training_summary(self) -> Dict:
         return {
@@ -295,6 +301,7 @@ class TransactionAITrainer:
                 }
 
     def _build_payee_to_category_chain(self, payee_txns: List[Transaction]):
+        """Build payee→category mapping storing top-3 categories per payee."""
         groups:    Dict[str, Counter] = defaultdict(Counter)
         cat_names: Dict[str, str]     = {}
 
@@ -307,14 +314,17 @@ class TransactionAITrainer:
 
         for pid, counts in groups.items():
             total = sum(counts.values())
-            best_cid, best_count = counts.most_common(1)[0]
-            confidence = best_count / total
-            if confidence >= CHAIN_MIN_CONFIDENCE:
-                self.payee_to_category[pid] = {
-                    'category_id':   best_cid,
-                    'category_name': cat_names.get(best_cid, ''),
-                    'confidence':    confidence,
+            top3 = [
+                {
+                    'category_id':   cid,
+                    'category_name': cat_names.get(cid, ''),
+                    'confidence':    count / total,
                 }
+                for cid, count in counts.most_common(3)
+                if count / total >= CHAIN_MIN_CONFIDENCE
+            ]
+            if top3:
+                self.payee_to_category[pid] = top3
 
     def _train_pipeline(
         self, txns, label_fn, pipeline_attr, enc_attr, label: str, device: str = 'cpu'

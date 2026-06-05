@@ -12,6 +12,9 @@ if TYPE_CHECKING:
 _trainer_cache: Dict[str, "TransactionAITrainer"] = {}
 # Stores the stats dict returned by train_from_historical_data() for each user
 _last_training_stats: Dict[str, dict] = {}
+# Selection counter per user — triggers auto-retrain every AUTO_RETRAIN_EVERY selections
+_selection_counter: Dict[str, int] = {}
+AUTO_RETRAIN_EVERY = 20
 
 
 def get_cached_trainer(db, user_id) -> "TransactionAITrainer":
@@ -49,6 +52,25 @@ def get_last_training_stats(user_id) -> dict:
 def invalidate_trainer(user_id) -> None:
     """Remove a user's cached trainer so the next request re-trains from scratch."""
     _trainer_cache.pop(str(user_id), None)
+
+
+def record_selection_and_maybe_retrain(user_id) -> None:
+    """
+    Increment the selection counter for user_id.
+    Triggers background retraining every AUTO_RETRAIN_EVERY selections.
+    Call this from the record-selection endpoint (fire-and-forget via BackgroundTasks).
+    """
+    key = str(user_id)
+    # New labelled data — drop the cached LLM context so suggestions stay fresh.
+    try:
+        from services.suggestion_context import invalidate_context
+        invalidate_context(user_id)
+    except Exception:
+        pass
+    _selection_counter[key] = _selection_counter.get(key, 0) + 1
+    if _selection_counter[key] % AUTO_RETRAIN_EVERY == 0:
+        print(f"[AI] Auto-retrain triggered for user {key} after {_selection_counter[key]} selections")
+        retrain_in_background(user_id)
 
 
 def retrain_in_background(user_id) -> None:
