@@ -20,9 +20,27 @@ from datetime import date, datetime
 # Allow imports from backend/
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import difflib
+
 import openpyxl
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+FUZZY_THRESHOLD = 0.95  # minimum similarity ratio for fallback fuzzy match
+
+
+def fuzzy_match(excel_desc: str, candidates: list) -> object | None:
+    """Return the single candidate whose description best matches excel_desc at >= FUZZY_THRESHOLD, or None."""
+    excel_norm = excel_desc.lower().strip()
+    hits = []
+    for tx in candidates:
+        db_norm = (tx.description or "").lower().strip()
+        ratio = difflib.SequenceMatcher(None, excel_norm, db_norm).ratio()
+        if ratio >= FUZZY_THRESHOLD:
+            hits.append((ratio, tx))
+    if len(hits) == 1:
+        return hits[0][1], hits[0][0]
+    return None, None
 
 # Log file setup
 _log_file = None
@@ -153,7 +171,7 @@ def run(email: str, dry_run: bool):
             sys.exit(1)
 
         # -- Counters
-        total = matched = not_found = ambiguous = skipped = errors = 0
+        total = matched = not_found = ambiguous = skipped = errors = fuzzy_matched = 0
         new_created: list[tuple[str, str]] = []
 
         rows_since_commit = 0
@@ -192,7 +210,7 @@ def run(email: str, dry_run: bool):
                     skipped += 1
                     continue
 
-                # -- Find matching transaction(s)
+                # -- Phase 1: exact match (case-insensitive, trimmed)
                 matches = (
                     db.query(Transaction)
                     .filter(
@@ -204,6 +222,29 @@ def run(email: str, dry_run: bool):
                     )
                     .all()
                 )
+
+                fuzzy_used = False
+
+                if len(matches) == 0:
+                    # -- Phase 2: fuzzy fallback — same date+amount, pick best description match
+                    candidates = (
+                        db.query(Transaction)
+                        .filter(
+                            Transaction.user_id == user_id,
+                            Transaction.account_id == account_id,
+                            Transaction.date == tx_date,
+                            Transaction.amount == tx_amount,
+                        )
+                        .all()
+                    )
+                    tx_fuzzy, ratio = fuzzy_match(tx_desc, candidates)
+                    if tx_fuzzy:
+                        matches = [tx_fuzzy]
+                        fuzzy_used = True
+                        _log(
+                            f"[ROW {row_idx}] FUZZY_MATCH (ratio={ratio:.3f}) | {tx_date} | {tx_amount} "
+                            f"| excel={tx_desc[:60]!r} | db={tx_fuzzy.description[:60]!r}"
+                        )
 
                 if len(matches) == 0:
                     not_found += 1
@@ -226,8 +267,11 @@ def run(email: str, dry_run: bool):
                     tx.payee_id = payee.id if payee else None
 
                 matched += 1
+                if fuzzy_used:
+                    fuzzy_matched += 1
                 rows_since_commit += 1
-                _log(f"[ROW {row_idx}] MATCHED | {tx_date} | {tx_amount} | {tx_desc[:80]!r} | cat={cat_name!r} payee={payee_name!r}")
+                tag = "MATCHED_FUZZY" if fuzzy_used else "MATCHED"
+                _log(f"[ROW {row_idx}] {tag} | {tx_date} | {tx_amount} | {tx_desc[:80]!r} | cat={cat_name!r} payee={payee_name!r}")
 
                 if not dry_run and rows_since_commit >= BATCH_SIZE:
                     db.commit()
@@ -253,7 +297,7 @@ def run(email: str, dry_run: bool):
         print(f"{'DRY RUN — no changes written' if dry_run else 'DONE'}")
         print("=" * 50)
         print(f"Total rows processed   : {total}")
-        print(f"Matched & updated      : {matched}")
+        print(f"Matched & updated      : {matched}  (of which fuzzy: {fuzzy_matched})")
         print(f"Not found              : {not_found}")
         print(f"Ambiguous (skipped)    : {ambiguous}")
         print(f"Skipped (no data/err)  : {skipped}")
