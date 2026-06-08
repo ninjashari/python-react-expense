@@ -215,3 +215,4 @@ node_modules/
 .claude/
 
 PSQL_BKP/
+expense-categorizer.skill

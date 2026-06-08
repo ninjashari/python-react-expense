@@ -48,7 +48,11 @@ def update_account_balance(db: Session, account_id: uuid.UUID, amount: float, tr
         # For regular accounts: balance represents money available
         if transaction_type == "income":
             account.balance += amount_decimal * multiplier
-        elif transaction_type == "expense":
+        elif transaction_type in ("expense", "transfer"):
+            # Transfers are always called here for the SOURCE account (the account
+            # whose statement is being imported), so they reduce the balance just
+            # like an expense.  The destination account is handled separately when
+            # its own statement is imported.
             account.balance -= amount_decimal * multiplier
     
     db.commit()

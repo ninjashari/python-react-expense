@@ -38,7 +38,11 @@ fi
 
 # Activate virtual environment and start backend
 (
-    source .venv/bin/activate
+    if [ -f .venv/Scripts/activate ]; then
+        source .venv/Scripts/activate   # Windows (Git Bash)
+    else
+        source .venv/bin/activate        # macOS / Linux
+    fi
     echo "✅ Backend virtual environment activated"
     echo "🌐 Starting FastAPI server on http://localhost:8000"
     python -m uvicorn main:app --reload --port 8000
