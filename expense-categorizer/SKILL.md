@@ -92,8 +92,10 @@ Skip silently when user picks Skip. Don't recap each applied change — keep mom
 When a custom payee name doesn't exist in the DB, create it with this tmp script:
 
 ```python
-import psycopg2, uuid, re
-c = psycopg2.connect('postgresql://expense_user:nezuko@localhost:5432/expenses')
+import os, psycopg2, uuid, re
+from dotenv import load_dotenv
+load_dotenv(os.path.join("backend", ".env"))
+c = psycopg2.connect(os.environ["DATABASE_URL"])
 cur = c.cursor()
 cur.execute("SELECT user_id FROM transactions LIMIT 1")
 user_id = cur.fetchone()[0]

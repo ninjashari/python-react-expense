@@ -8,11 +8,15 @@ Usage:
   python claude_categorizer.py history <transaction_id>
 """
 
-import sys, json, re, argparse, uuid
+import os, sys, json, re, argparse, uuid
 import psycopg2
 from difflib import SequenceMatcher
+from dotenv import load_dotenv
 
-DB_URL = "postgresql://postgres:password@localhost:5432/expenses_db"
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend", ".env"))
+DB_URL = os.getenv("DATABASE_URL")
+if not DB_URL:
+    raise RuntimeError("DATABASE_URL is not set; configure it in backend/.env")
 
 def conn():
     return psycopg2.connect(DB_URL)
@@ -172,7 +176,7 @@ def cmd_accounts():
         for row in load_accounts(cur):
             print(json.dumps({"id": str(row[0]), "name": row[1], "type": row[2]}))
 
-def cmd_suggest(account_filter=None, start_date=None, overwrite=False, limit=30):
+def cmd_suggest(account_filter=None, start_date=None, end_date=None, overwrite=False, limit=30):
     with conn() as c:
         cur = c.cursor()
         categories   = load_categories(cur)
@@ -204,6 +208,10 @@ def cmd_suggest(account_filter=None, start_date=None, overwrite=False, limit=30)
         if start_date:
             sql += " AND t.date >= %s"
             params.append(start_date)
+
+        if end_date:
+            sql += " AND t.date <= %s"
+            params.append(end_date)
 
         sql += " ORDER BY t.date DESC LIMIT %s"
         params.append(limit)
@@ -325,6 +333,7 @@ def main():
     p_sug = sub.add_parser("suggest")
     p_sug.add_argument("--account", default=None)
     p_sug.add_argument("--start-date", default=None)
+    p_sug.add_argument("--end-date", default=None)
     p_sug.add_argument("--overwrite", action="store_true",
                        help="Include transactions that already have category/payee")
     p_sug.add_argument("--limit", type=int, default=30)
@@ -342,6 +351,7 @@ def main():
     args = parser.parse_args()
     if args.cmd == "suggest":
         cmd_suggest(args.account, getattr(args, "start_date", None),
+                    getattr(args, "end_date", None),
                     args.overwrite, args.limit)
     elif args.cmd == "apply":
         cmd_apply(args.transaction_id, args.category, args.payee)

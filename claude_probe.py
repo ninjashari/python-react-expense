@@ -1,6 +1,13 @@
+import os
 import psycopg2, json
+from dotenv import load_dotenv
 
-conn = psycopg2.connect('postgresql://postgres:password@localhost:5432/expenses_db')
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend", ".env"))
+DB_URL = os.getenv("DATABASE_URL")
+if not DB_URL:
+    raise RuntimeError("DATABASE_URL is not set; configure it in backend/.env")
+
+conn = psycopg2.connect(DB_URL)
 cur = conn.cursor()
 
 # Uncategorized transactions
