@@ -98,8 +98,9 @@ const Import: React.FC = () => {
   const [trainingLogs, setTrainingLogs] = useState<Array<{timestamp: string; level: string; message: string}>>([]);
   const [isTraining, setIsTraining] = useState(false);
   const trainingLogsInterval = React.useRef<NodeJS.Timeout | null>(null);
-  // Track whether we've seen at least one log line — prevents premature close
-  const seenLogsRef = React.useRef(false);
+  // Becomes true once we observe training actually running in this session —
+  // guards against stale logs from a previous run closing the modal early
+  const sawTrainingRef = React.useRef(false);
 
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
@@ -110,26 +111,27 @@ const Import: React.FC = () => {
   const fetchTrainingLogs = React.useCallback(async () => {
     try {
       const logsData = await learningApi.getTrainingLogs();
-      setTrainingLogs(logsData.logs);
+      const backendTraining = logsData.is_training;
 
-      if (logsData.logs.length > 0) {
-        seenLogsRef.current = true;
+      if (backendTraining) {
+        sawTrainingRef.current = true;
+        setTrainingLogs(logsData.logs);
+        setIsTraining(true);
+        return;
       }
 
-      const backendTraining = logsData.is_training;
-      setIsTraining(backendTraining);
-
-      // Only auto-close after we have seen logs AND training is done
-      if (!backendTraining && seenLogsRef.current) {
+      // Training finished (or hasn't started yet)
+      if (sawTrainingRef.current) {
+        // We watched it run and it's done now — show final logs, then close
+        setTrainingLogs(logsData.logs);
+        setIsTraining(false);
         if (trainingLogsInterval.current) {
           clearInterval(trainingLogsInterval.current);
           trainingLogsInterval.current = null;
         }
-        setTimeout(() => {
-          setTrainingLogsModalOpen(false);
-          seenLogsRef.current = false;
-        }, 2500);
+        setTimeout(() => setTrainingLogsModalOpen(false), 2500);
       }
+      // else: not started yet — keep "Waiting for training logs..." and keep polling
     } catch (error) {
       console.error('Error fetching training logs:', error);
     }
@@ -139,7 +141,7 @@ const Import: React.FC = () => {
   React.useEffect(() => {
     if (!trainingLogsModalOpen) return;
 
-    seenLogsRef.current = false;
+    sawTrainingRef.current = false;
 
     // Poll immediately, then every 500ms
     fetchTrainingLogs();
@@ -370,6 +372,11 @@ const Import: React.FC = () => {
     if (!importData.files || importData.files.length === 0 || !importData.account) return;
 
     setIsProcessing(true);
+    // Open the logs modal now — if the server needs to train the AI model,
+    // it happens during this request and logs stream in while we wait.
+    setTrainingLogs([]);
+    setIsTraining(true);
+    setTrainingLogsModalOpen(true);
     try {
       let results: any;
 
@@ -436,13 +443,9 @@ const Import: React.FC = () => {
 
       setImportResults(results);
       setActiveStep(3);
-
-      // Open training logs modal — background retraining starts on the server now
-      setTrainingLogs([]);
-      setIsTraining(true);
-      setTrainingLogsModalOpen(true);
     } catch (error) {
       console.error('Import error:', error);
+      setTrainingLogsModalOpen(false);
     } finally {
       setIsProcessing(false);
     }

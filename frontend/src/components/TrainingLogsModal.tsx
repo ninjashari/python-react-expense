@@ -98,7 +98,7 @@ const TrainingLogsModal: React.FC<TrainingLogsModalProps> = ({
   };
 
   return (
-    <Dialog open={open} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
         <Box display="flex" alignItems="center" gap={2}>
           {isTraining && <CircularProgress size={24} />}
@@ -142,8 +142,8 @@ const TrainingLogsModal: React.FC<TrainingLogsModalProps> = ({
         </LogContainer>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={isTraining}>
-          {isTraining ? 'Training in Progress...' : 'Close'}
+        <Button onClick={onClose}>
+          {isTraining ? 'Continue in Background' : 'Close'}
         </Button>
       </DialogActions>
     </Dialog>
