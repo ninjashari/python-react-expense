@@ -608,6 +608,17 @@ class LearningApiService {
   async trainModel(): Promise<any> {
     return api.post('/learning/train').then(res => res.data);
   }
+
+  /**
+   * Get training logs captured during model training
+   */
+  async getTrainingLogs(): Promise<{
+    logs: Array<{ timestamp: string; level: string; message: string; elapsed_seconds: number }>;
+    is_training: boolean;
+    total_logs: number;
+  }> {
+    return api.get('/learning/training-logs').then(res => res.data);
+  }
 }
 
 export const learningApi = new LearningApiService();

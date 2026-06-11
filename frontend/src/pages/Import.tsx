@@ -34,6 +34,8 @@ import PDFProcessingProgress, { createPDFProcessingSteps } from '../components/P
 import TransactionReviewStep from '../components/TransactionReviewStep';
 import ImportPreview from '../components/ImportPreview';
 import ImportResults from '../components/ImportResults';
+import TrainingLogsModal from '../components/TrainingLogsModal';
+import { learningApi } from '../services/learningApi';
 
 const getSteps = (isLlm: boolean) => 
   isLlm 
@@ -85,16 +87,71 @@ const Import: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [importResults, setImportResults] = useState<any>(null);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
-  
+
   // PDF LLM specific state
   const [processingSteps, setProcessingSteps] = useState(createPDFProcessingSteps());
   const [currentProcessingStep, setCurrentProcessingStep] = useState(0);
   const [isLLMProcessing, setIsLLMProcessing] = useState(false);
 
+  // Training logs modal state
+  const [trainingLogsModalOpen, setTrainingLogsModalOpen] = useState(false);
+  const [trainingLogs, setTrainingLogs] = useState<Array<{timestamp: string; level: string; message: string}>>([]);
+  const [isTraining, setIsTraining] = useState(false);
+  const trainingLogsInterval = React.useRef<NodeJS.Timeout | null>(null);
+  // Track whether we've seen at least one log line — prevents premature close
+  const seenLogsRef = React.useRef(false);
+
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
     queryFn: accountsApi.getAll,
   });
+
+  // Fetch training logs periodically
+  const fetchTrainingLogs = React.useCallback(async () => {
+    try {
+      const logsData = await learningApi.getTrainingLogs();
+      setTrainingLogs(logsData.logs);
+
+      if (logsData.logs.length > 0) {
+        seenLogsRef.current = true;
+      }
+
+      const backendTraining = logsData.is_training;
+      setIsTraining(backendTraining);
+
+      // Only auto-close after we have seen logs AND training is done
+      if (!backendTraining && seenLogsRef.current) {
+        if (trainingLogsInterval.current) {
+          clearInterval(trainingLogsInterval.current);
+          trainingLogsInterval.current = null;
+        }
+        setTimeout(() => {
+          setTrainingLogsModalOpen(false);
+          seenLogsRef.current = false;
+        }, 2500);
+      }
+    } catch (error) {
+      console.error('Error fetching training logs:', error);
+    }
+  }, []);
+
+  // Setup polling for training logs
+  React.useEffect(() => {
+    if (!trainingLogsModalOpen) return;
+
+    seenLogsRef.current = false;
+
+    // Poll immediately, then every 500ms
+    fetchTrainingLogs();
+    trainingLogsInterval.current = setInterval(fetchTrainingLogs, 500);
+
+    return () => {
+      if (trainingLogsInterval.current) {
+        clearInterval(trainingLogsInterval.current);
+        trainingLogsInterval.current = null;
+      }
+    };
+  }, [trainingLogsModalOpen, fetchTrainingLogs]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (!acceptedFiles || acceptedFiles.length === 0) return;
@@ -379,6 +436,11 @@ const Import: React.FC = () => {
 
       setImportResults(results);
       setActiveStep(3);
+
+      // Open training logs modal — background retraining starts on the server now
+      setTrainingLogs([]);
+      setIsTraining(true);
+      setTrainingLogsModalOpen(true);
     } catch (error) {
       console.error('Import error:', error);
     } finally {
@@ -687,6 +749,14 @@ const Import: React.FC = () => {
           <Button onClick={() => setPreviewDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Training Logs Modal */}
+      <TrainingLogsModal
+        open={trainingLogsModalOpen}
+        isTraining={isTraining}
+        logs={trainingLogs}
+        onClose={() => setTrainingLogsModalOpen(false)}
+      />
     </Box>
   );
 };

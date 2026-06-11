@@ -1542,12 +1542,15 @@ def manually_train_model(
     """
     try:
         from services.ai_cache import set_cached_trainer, set_last_training_stats
+        from services.training_logger import start_training, make_log_fn, end_training
 
-        # Initialize AI trainer
-        ai_trainer = TransactionAITrainer(db, current_user.id)
-
-        # Train on historical data
-        training_stats = ai_trainer.train_from_historical_data()
+        start_training(current_user.id)
+        try:
+            log_fn = make_log_fn(current_user.id)
+            ai_trainer = TransactionAITrainer(db, current_user.id, log_fn=log_fn)
+            training_stats = ai_trainer.train_from_historical_data()
+        finally:
+            end_training(current_user.id)
 
         # Update the cache with the freshly trained model
         set_cached_trainer(current_user.id, ai_trainer)
@@ -1687,3 +1690,20 @@ def get_model_status(
             "category_training_samples": 0,
             "total_transactions": 0,
         }
+
+
+@router.get("/training-logs")
+def get_training_logs(
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get captured training logs for the current user."""
+    from services.training_logger import get_training_logs, has_active_training
+
+    logs = get_training_logs(current_user.id)
+    is_training = has_active_training(current_user.id)
+
+    return {
+        "logs": logs,
+        "is_training": is_training,
+        "total_logs": len(logs)
+    }

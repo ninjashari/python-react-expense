@@ -93,9 +93,10 @@ class TransactionAITrainer:
         get_training_summary() -> dict
     """
 
-    def __init__(self, db: Session, user_id):
+    def __init__(self, db: Session, user_id, log_fn=None):
         self.db = db
         self.user_id = user_id
+        self._log_fn = log_fn  # optional real-time logger
 
         self.rule_dict: Dict[str, dict] = {}
         self.payee_to_category: Dict[str, dict] = {}
@@ -111,17 +112,24 @@ class TransactionAITrainer:
     # Public API
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _log(self, message: str) -> None:
+        """Emit a log line — to the real-time store if a log_fn is set, else print."""
+        if self._log_fn:
+            self._log_fn(message)
+        else:
+            print(message)
+
     def train_from_historical_data(self) -> Dict:
         """Train rules + XGBoost models from all labelled historical transactions."""
         wall_start = time.perf_counter()
-        print(f"[AI] ── Training start for user {self.user_id} ──────────────────")
+        self._log(f"[AI] ── Training start for user {self.user_id} ──────────────────")
 
         # ── Entity loading ───────────────────────────────────────────────────
         t = time.perf_counter()
         self._load_existing_entities()
-        print(f"[AI]   Entities loaded: {len(self.existing_payees)} payees, "
-              f"{len(self.existing_categories)} categories, "
-              f"{len(self.existing_accounts)} accounts  [{time.perf_counter()-t:.2f}s]")
+        self._log(f"[AI]   Entities loaded: {len(self.existing_payees)} payees, "
+                  f"{len(self.existing_categories)} categories, "
+                  f"{len(self.existing_accounts)} accounts  [{time.perf_counter()-t:.2f}s]")
 
         # ── Transaction loading ──────────────────────────────────────────────
         t = time.perf_counter()
@@ -131,31 +139,31 @@ class TransactionAITrainer:
         ).all()
         payee_txns = [tx for tx in all_txns if tx.payee_id is not None]
         cat_txns   = [tx for tx in all_txns if tx.category_id is not None]
-        print(f"[AI]   Transactions: {len(all_txns)} total | "
-              f"{len(payee_txns)} with payee | "
-              f"{len(cat_txns)} with category  [{time.perf_counter()-t:.2f}s]")
+        self._log(f"[AI]   Transactions: {len(all_txns)} total | "
+                  f"{len(payee_txns)} with payee | "
+                  f"{len(cat_txns)} with category  [{time.perf_counter()-t:.2f}s]")
 
         # ── Phase 1: Rule dictionary ─────────────────────────────────────────
         t = time.perf_counter()
         self._build_rule_dict(payee_txns)
-        print(f"[AI]   Rules built: {len(self.rule_dict)} description rules  [{time.perf_counter()-t:.2f}s]")
+        self._log(f"[AI]   Rules built: {len(self.rule_dict)} description rules  [{time.perf_counter()-t:.2f}s]")
 
         # ── Phase 2: Payee→Category chain ────────────────────────────────────
         t = time.perf_counter()
         self._build_payee_to_category_chain(payee_txns)
-        print(f"[AI]   Payee→Category chain: {len(self.payee_to_category)} links  [{time.perf_counter()-t:.2f}s]")
+        self._log(f"[AI]   Payee→Category chain: {len(self.payee_to_category)} links  [{time.perf_counter()-t:.2f}s]")
 
         payee_trained = False
         cat_trained   = False
 
         if SKLEARN_AVAILABLE and XGBOOST_AVAILABLE:
             device = _detect_xgb_device()
-            print(f"[AI]   XGBoost device: {device.upper()}")
+            self._log(f"[AI]   XGBoost device: {device.upper()}")
 
             # ── Phase 3: Payee ML model ──────────────────────────────────────
             if len(payee_txns) >= MIN_SAMPLES:
                 t = time.perf_counter()
-                print(f"[AI]   Payee model: building features for {len(payee_txns)} samples...")
+                self._log(f"[AI]   Payee model: building features for {len(payee_txns)} samples...")
                 payee_trained = self._train_pipeline(
                     payee_txns,
                     label_fn=lambda tx: str(tx.payee_id),
@@ -164,14 +172,14 @@ class TransactionAITrainer:
                     label='payee',
                     device=device,
                 )
-                print(f"[AI]   Payee model: {'trained' if payee_trained else 'skipped (single class)'}  [{time.perf_counter()-t:.2f}s]")
+                self._log(f"[AI]   Payee model: {'trained' if payee_trained else 'skipped (single class)'}  [{time.perf_counter()-t:.2f}s]")
             else:
-                print(f"[AI]   Payee model: skipped (only {len(payee_txns)} labelled samples, need {MIN_SAMPLES})")
+                self._log(f"[AI]   Payee model: skipped (only {len(payee_txns)} labelled samples, need {MIN_SAMPLES})")
 
             # ── Phase 4: Category ML model ───────────────────────────────────
             if len(cat_txns) >= MIN_SAMPLES:
                 t = time.perf_counter()
-                print(f"[AI]   Category model: building features for {len(cat_txns)} samples...")
+                self._log(f"[AI]   Category model: building features for {len(cat_txns)} samples...")
                 cat_trained = self._train_pipeline(
                     cat_txns,
                     label_fn=lambda tx: str(tx.category_id),
@@ -180,13 +188,13 @@ class TransactionAITrainer:
                     label='category',
                     device=device,
                 )
-                print(f"[AI]   Category model: {'trained' if cat_trained else 'skipped (single class)'}  [{time.perf_counter()-t:.2f}s]")
+                self._log(f"[AI]   Category model: {'trained' if cat_trained else 'skipped (single class)'}  [{time.perf_counter()-t:.2f}s]")
             else:
-                print(f"[AI]   Category model: skipped (only {len(cat_txns)} labelled samples, need {MIN_SAMPLES})")
+                self._log(f"[AI]   Category model: skipped (only {len(cat_txns)} labelled samples, need {MIN_SAMPLES})")
         elif not XGBOOST_AVAILABLE:
-            print("[AI]   ML models skipped — xgboost not installed")
+            self._log("[AI]   ML models skipped — xgboost not installed")
         else:
-            print("[AI]   ML models skipped — sklearn not installed")
+            self._log("[AI]   ML models skipped — sklearn not installed")
 
         total = time.perf_counter() - wall_start
         stats = {
@@ -200,7 +208,7 @@ class TransactionAITrainer:
             'model_type':                'Rules+XGBoost',
             'device':                    _xgb_device or 'n/a',
         }
-        print(f"[AI] ── Training complete in {total:.2f}s  {stats} ──")
+        self._log(f"[AI] ── Training complete in {total:.2f}s ──")
         return stats
 
     def predict_payee_and_category(
@@ -336,13 +344,13 @@ class TransactionAITrainer:
                           getattr(tx, 'date', None))
                       for tx in txns]
             labels = [label_fn(tx) for tx in txns]
-            print(f"[AI]     Feature rows built: {len(rows)}  [{time.perf_counter()-t:.2f}s]")
+            self._log(f"[AI]     Feature rows built: {len(rows)}  [{time.perf_counter()-t:.2f}s]")
 
             unique_labels = set(labels)
             if len(unique_labels) < 2:
-                print(f"[AI]     Skipping {label} model — only 1 unique class")
+                self._log(f"[AI]     Skipping {label} model — only 1 unique class")
                 return False
-            print(f"[AI]     Unique {label} classes: {len(unique_labels)}")
+            self._log(f"[AI]     Unique {label} classes: {len(unique_labels)}")
 
             enc = getattr(self, enc_attr)
             y   = enc.fit_transform(labels)
@@ -350,12 +358,12 @@ class TransactionAITrainer:
             t = time.perf_counter()
             pipeline = _build_xgb_pipeline(device=device)
             pipeline.fit(rows, y)
-            print(f"[AI]     XGBoost fit ({device}): {len(rows)} samples × {len(unique_labels)} classes  [{time.perf_counter()-t:.2f}s]")
+            self._log(f"[AI]     XGBoost fit ({device}): {len(rows)} samples × {len(unique_labels)} classes  [{time.perf_counter()-t:.2f}s]")
 
             setattr(self, pipeline_attr, pipeline)
             return True
         except Exception as e:
-            print(f"[AI]     {label} model training failed: {e}")
+            self._log(f"[AI]     {label} model training failed: {e}")
             return False
 
     # ─────────────────────────────────────────────────────────────────────────

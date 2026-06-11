@@ -25,12 +25,10 @@ def get_cached_trainer(db, user_id) -> "TransactionAITrainer":
     from services.ai_trainer import TransactionAITrainer
     key = str(user_id)
     if key not in _trainer_cache:
-        print(f"Training AI model for user {key}...")
         trainer = TransactionAITrainer(db, user_id)
         stats = trainer.train_from_historical_data()
         set_last_training_stats(user_id, stats)
         _trainer_cache[key] = trainer
-        print(f"AI model cached for user {key}")
     return _trainer_cache[key]
 
 
@@ -61,7 +59,6 @@ def record_selection_and_maybe_retrain(user_id) -> None:
     Call this from the record-selection endpoint (fire-and-forget via BackgroundTasks).
     """
     key = str(user_id)
-    # New labelled data — drop the cached LLM context so suggestions stay fresh.
     try:
         from services.suggestion_context import invalidate_context
         invalidate_context(user_id)
@@ -69,27 +66,29 @@ def record_selection_and_maybe_retrain(user_id) -> None:
         pass
     _selection_counter[key] = _selection_counter.get(key, 0) + 1
     if _selection_counter[key] % AUTO_RETRAIN_EVERY == 0:
-        print(f"[AI] Auto-retrain triggered for user {key} after {_selection_counter[key]} selections")
         retrain_in_background(user_id)
 
 
 def retrain_in_background(user_id) -> None:
     """
     Retrain a user's model and hot-swap it into the cache.
-    The old cached model remains live during training — predictions stay fast.
+    Logs are written in real time to training_logger so the UI can poll them.
     Designed to be called via FastAPI BackgroundTasks after an import commit.
     """
     from database import SessionLocal
     from services.ai_trainer import TransactionAITrainer
+    from services.training_logger import start_training, make_log_fn, end_training
+
     db = SessionLocal()
     try:
-        print(f"[AI] Background retraining for user {user_id}...")
-        trainer = TransactionAITrainer(db, user_id)
+        start_training(user_id)
+        log_fn = make_log_fn(user_id)
+        trainer = TransactionAITrainer(db, user_id, log_fn=log_fn)
         stats = trainer.train_from_historical_data()
         set_last_training_stats(user_id, stats)
         set_cached_trainer(user_id, trainer)
-        print(f"[AI] Background retraining complete for user {user_id}")
     except Exception as e:
         print(f"[AI] Background retraining failed for user {user_id}: {e}")
     finally:
+        end_training(user_id)
         db.close()

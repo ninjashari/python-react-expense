@@ -76,10 +76,10 @@ The FastAPI backend for the Expense Manager application, providing a robust REST
 
 6. **Run the development server:**
    ```bash
-   python -m uvicorn main:app --reload --port 8000
+   python -m uvicorn main:app --reload --port 8001
    ```
 
-The API will be available at `http://localhost:8000` with documentation at `http://localhost:8000/docs`.
+The API will be available at `http://localhost:8001` with documentation at `http://localhost:8001/docs`.
 
 ## ⚙️ Configuration
 
@@ -88,8 +88,8 @@ The API will be available at `http://localhost:8000` with documentation at `http
 Create a `.env` file in the backend directory:
 
 ```bash
-# Database Configuration
-DATABASE_URL=postgresql://username:password@localhost:5432/expense_manager
+# Database Configuration (required)
+DATABASE_URL=postgresql://expense_user:your_password@localhost:5432/expense_manager
 
 # JWT Configuration
 SECRET_KEY=your-super-secret-key-here
@@ -130,9 +130,9 @@ LOG_LEVEL=INFO
 ### Interactive Documentation
 
 Once running, visit:
-- **Swagger UI:** `http://localhost:8000/docs`
-- **ReDoc:** `http://localhost:8000/redoc`
-- **OpenAPI JSON:** `http://localhost:8000/openapi.json`
+- **Swagger UI:** `http://localhost:8001/docs`
+- **ReDoc:** `http://localhost:8001/redoc`
+- **OpenAPI JSON:** `http://localhost:8001/openapi.json`
 
 ### Authentication
 
@@ -140,13 +140,13 @@ All endpoints (except `/auth/register` and `/auth/login`) require JWT authentica
 
 ```bash
 # Login to get token
-curl -X POST "http://localhost:8000/auth/login" \
+curl -X POST "http://localhost:8001/auth/login" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=user@example.com&password=password"
 
 # Use token in subsequent requests
 curl -H "Authorization: Bearer <your-jwt-token>" \
-  "http://localhost:8000/accounts/"
+  "http://localhost:8001/accounts/"
 ```
 
 ### Main Endpoints
@@ -345,10 +345,10 @@ class PDFLLMProcessor:
 
 ```bash
 # With auto-reload
-python -m uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8001
 
 # With specific host
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8001
 
 # With debug logging
 python -m uvicorn main:app --reload --log-level debug
@@ -439,7 +439,7 @@ def test_create_account():
 
 2. **Run with Gunicorn:**
    ```bash
-   gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+   gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8001
    ```
 
 3. **Environment variables for production:**
@@ -462,7 +462,7 @@ RUN pip install -r requirements.txt
 COPY . .
 EXPOSE 8000
 
-CMD ["gunicorn", "main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8001"]
 ```
 
 ### Health Checks
@@ -471,10 +471,10 @@ The API includes health check endpoints:
 
 ```bash
 # Basic health check
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Database connectivity check
-curl http://localhost:8000/health/db
+curl http://localhost:8001/health/db
 ```
 
 ### Performance Monitoring
