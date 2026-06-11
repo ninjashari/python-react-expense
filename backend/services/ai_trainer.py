@@ -439,12 +439,25 @@ class TransactionAITrainer:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _load_existing_entities(self):
+        """Snapshot entities into plain objects.
+
+        The trainer outlives the DB session it was trained with (it's cached
+        across requests), so holding live ORM instances would raise
+        "Instance is not bound to a Session" on attribute access later.
+        """
+        from types import SimpleNamespace
         payees     = self.db.query(Payee).filter(Payee.user_id == self.user_id).all()
         categories = self.db.query(Category).filter(Category.user_id == self.user_id).all()
         accounts   = self.db.query(Account).filter(Account.user_id == self.user_id).all()
-        self.existing_payees     = {p.id: p for p in payees}
-        self.existing_categories = {c.id: c for c in categories}
-        self.existing_accounts   = {a.id: a for a in accounts}
+        self.existing_payees = {
+            p.id: SimpleNamespace(id=p.id, name=p.name) for p in payees
+        }
+        self.existing_categories = {
+            c.id: SimpleNamespace(id=c.id, name=c.name) for c in categories
+        }
+        self.existing_accounts = {
+            a.id: SimpleNamespace(id=a.id, name=a.name, type=a.type) for a in accounts
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

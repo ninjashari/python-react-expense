@@ -101,22 +101,41 @@ const Import: React.FC = () => {
   // Becomes true once we observe training actually running in this session —
   // guards against stale logs from a previous run closing the modal early
   const sawTrainingRef = React.useRef(false);
+  const pollStartRef = React.useRef(0);
+
+  // Give up if training never starts within this window after the modal opens
+  const TRAINING_WAIT_TIMEOUT_MS = 60 * 1000;
+  // Absolute cap on polling, even if the backend flag gets stuck
+  const TRAINING_MAX_POLL_MS = 10 * 60 * 1000;
 
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
     queryFn: accountsApi.getAll,
   });
 
+  const stopTrainingLogsPolling = React.useCallback(() => {
+    if (trainingLogsInterval.current) {
+      clearInterval(trainingLogsInterval.current);
+      trainingLogsInterval.current = null;
+    }
+  }, []);
+
   // Fetch training logs periodically
   const fetchTrainingLogs = React.useCallback(async () => {
     try {
       const logsData = await learningApi.getTrainingLogs();
       const backendTraining = logsData.is_training;
+      const elapsed = Date.now() - pollStartRef.current;
 
       if (backendTraining) {
         sawTrainingRef.current = true;
         setTrainingLogs(logsData.logs);
         setIsTraining(true);
+        // Safety net: never poll longer than the absolute cap
+        if (elapsed > TRAINING_MAX_POLL_MS) {
+          stopTrainingLogsPolling();
+          setIsTraining(false);
+        }
         return;
       }
 
@@ -125,35 +144,35 @@ const Import: React.FC = () => {
         // We watched it run and it's done now — show final logs, then close
         setTrainingLogs(logsData.logs);
         setIsTraining(false);
-        if (trainingLogsInterval.current) {
-          clearInterval(trainingLogsInterval.current);
-          trainingLogsInterval.current = null;
-        }
+        stopTrainingLogsPolling();
         setTimeout(() => setTrainingLogsModalOpen(false), 2500);
+      } else if (elapsed > TRAINING_WAIT_TIMEOUT_MS) {
+        // Training never started (e.g. retrain skipped server-side) — stop waiting
+        stopTrainingLogsPolling();
+        setIsTraining(false);
+        setTrainingLogsModalOpen(false);
       }
       // else: not started yet — keep "Waiting for training logs..." and keep polling
     } catch (error) {
       console.error('Error fetching training logs:', error);
     }
-  }, []);
+  }, [stopTrainingLogsPolling, TRAINING_WAIT_TIMEOUT_MS, TRAINING_MAX_POLL_MS]);
 
   // Setup polling for training logs
   React.useEffect(() => {
     if (!trainingLogsModalOpen) return;
 
     sawTrainingRef.current = false;
+    pollStartRef.current = Date.now();
 
     // Poll immediately, then every 500ms
     fetchTrainingLogs();
     trainingLogsInterval.current = setInterval(fetchTrainingLogs, 500);
 
     return () => {
-      if (trainingLogsInterval.current) {
-        clearInterval(trainingLogsInterval.current);
-        trainingLogsInterval.current = null;
-      }
+      stopTrainingLogsPolling();
     };
-  }, [trainingLogsModalOpen, fetchTrainingLogs]);
+  }, [trainingLogsModalOpen, fetchTrainingLogs, stopTrainingLogsPolling]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (!acceptedFiles || acceptedFiles.length === 0) return;

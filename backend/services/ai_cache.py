@@ -15,9 +15,11 @@ _last_training_stats: Dict[str, dict] = {}
 # Selection counter per user — triggers auto-retrain every AUTO_RETRAIN_EVERY selections
 _selection_counter: Dict[str, int] = {}
 AUTO_RETRAIN_EVERY = 20
-# One-shot flags: a cache-miss training just ran inside an import request, so the
-# import's own post-commit retrain would be redundant — skip it once.
-_skip_next_retrain: set = set()
+# user_id -> timestamp of a cache-miss training that ran inside an import request.
+# The import's own post-commit retrain is redundant and gets skipped — but only
+# within this window, so a failed import can't permanently swallow future retrains.
+_skip_next_retrain: Dict[str, float] = {}
+SKIP_RETRAIN_WINDOW_SECONDS = 120
 
 
 def get_cached_trainer(db, user_id) -> "TransactionAITrainer":
@@ -38,7 +40,8 @@ def get_cached_trainer(db, user_id) -> "TransactionAITrainer":
             end_training(user_id)
         set_last_training_stats(user_id, stats)
         _trainer_cache[key] = trainer
-        _skip_next_retrain.add(key)
+        import time
+        _skip_next_retrain[key] = time.monotonic()
     return _trainer_cache[key]
 
 
@@ -89,9 +92,10 @@ def retrain_in_background(user_id) -> None:
     from services.ai_trainer import TransactionAITrainer
     from services.training_logger import start_training, make_log_fn, end_training
 
+    import time
     key = str(user_id)
-    if key in _skip_next_retrain:
-        _skip_next_retrain.discard(key)
+    trained_at = _skip_next_retrain.pop(key, None)
+    if trained_at is not None and (time.monotonic() - trained_at) < SKIP_RETRAIN_WINDOW_SECONDS:
         print(f"[AI] Skipping post-import retrain for user {key} — model was just trained during the import")
         return
 
