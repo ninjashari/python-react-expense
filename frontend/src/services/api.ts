@@ -10,6 +10,8 @@ import {
   CreateTransactionDto,
   RewardPointRedemption,
   CreateRewardPointRedemptionDto,
+  RewardPointBonus,
+  CreateRewardPointBonusDto,
   RewardPointsSummaryItem,
   RewardPointHistoryItem,
 } from '../types';
@@ -313,6 +315,18 @@ export const rewardPointsApi = {
     api.get('/reward-points/history', {
       params: accountId ? { account_id: accountId } : undefined,
     }).then(res => res.data),
+
+  getAllBonuses: (): Promise<RewardPointBonus[]> =>
+    api.get('/reward-points/bonuses').then(res => res.data),
+
+  createBonus: (data: CreateRewardPointBonusDto): Promise<RewardPointBonus> =>
+    api.post('/reward-points/bonuses', data).then(res => res.data),
+
+  updateBonus: (id: string, data: Partial<CreateRewardPointBonusDto>): Promise<RewardPointBonus> =>
+    api.put(`/reward-points/bonuses/${id}`, data).then(res => res.data),
+
+  deleteBonus: (id: string): Promise<void> =>
+    api.delete(`/reward-points/bonuses/${id}`).then(res => res.data),
 };
 
 export default api;

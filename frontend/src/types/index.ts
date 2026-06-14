@@ -113,6 +113,26 @@ export interface CreateTransactionDto {
   reward_points?: number;
 }
 
+export interface RewardPointBonus {
+  id: string;
+  user_id: string;
+  account_id: string;
+  date: string;
+  points: number;
+  description?: string;
+  source_file?: string;
+  created_at: string;
+  updated_at?: string;
+  account?: Pick<Account, 'id' | 'name' | 'type'>;
+}
+
+export interface CreateRewardPointBonusDto {
+  account_id: string;
+  date: string;
+  points: number;
+  description?: string;
+}
+
 export interface RewardPointRedemption {
   id: string;
   user_id: string;
@@ -136,13 +156,14 @@ export interface RewardPointsSummaryItem {
   account_id: string;
   account_name: string;
   total_earned: number;
+  total_bonus: number;
   total_redeemed: number;
   net_available: number;
 }
 
 export interface RewardPointHistoryItem {
   date: string;
-  type: 'earned' | 'deducted' | 'redeemed';
+  type: 'earned' | 'deducted' | 'redeemed' | 'bonus';
   points: number;
   description?: string;
   account_id: string;

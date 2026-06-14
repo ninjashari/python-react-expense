@@ -21,3 +21,21 @@ class RewardPointRedemption(Base):
     # Relationships
     user = relationship("User")
     account = relationship("Account")
+
+
+class RewardPointBonus(Base):
+    __tablename__ = "reward_point_bonuses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    points = Column(Float, nullable=False)
+    description = Column(Text, nullable=True)
+    source_file = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.current_timestamp(), onupdate=func.current_timestamp(), nullable=False)
+
+    # Relationships
+    user = relationship("User")
+    account = relationship("Account")

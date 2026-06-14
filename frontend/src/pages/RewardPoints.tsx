@@ -26,7 +26,7 @@ import {
   Paper,
   Chip,
 } from '@mui/material';
-import { Add, Edit, Delete, Loyalty, History } from '@mui/icons-material';
+import { Add, Edit, Delete, Loyalty, History, Star } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { accountsApi, rewardPointsApi } from '../services/api';
@@ -34,6 +34,8 @@ import {
   Account,
   RewardPointRedemption,
   CreateRewardPointRedemptionDto,
+  RewardPointBonus,
+  CreateRewardPointBonusDto,
   RewardPointsSummaryItem,
 } from '../types';
 import { useCreateWithConfirm, useUpdateWithConfirm, useDeleteWithConfirm } from '../hooks/useApiWithConfirm';
@@ -42,7 +44,10 @@ const RewardPoints: React.FC = () => {
   const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRedemption, setEditingRedemption] = useState<RewardPointRedemption | null>(null);
+  const [bonusDialogOpen, setBonusDialogOpen] = useState(false);
+  const [editingBonus, setEditingBonus] = useState<RewardPointBonus | null>(null);
   const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'date', dir: 'desc' });
+  const [bonusSort, setBonusSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'date', dir: 'desc' });
   const queryClient = useQueryClient();
 
   const handleSort = (col: string) =>
@@ -58,6 +63,11 @@ const RewardPoints: React.FC = () => {
     queryFn: rewardPointsApi.getAll,
   });
 
+  const { data: bonuses = [], isLoading: bonusesLoading } = useQuery({
+    queryKey: ['rewardPointBonuses'],
+    queryFn: rewardPointsApi.getAllBonuses,
+  });
+
   const sortedRedemptions = useMemo(() => {
     const mul = sort.dir === 'asc' ? 1 : -1;
     return [...redemptions].sort((a, b) => {
@@ -67,6 +77,16 @@ const RewardPoints: React.FC = () => {
       return 0;
     });
   }, [redemptions, sort]);
+
+  const sortedBonuses = useMemo(() => {
+    const mul = bonusSort.dir === 'asc' ? 1 : -1;
+    return [...(bonuses as RewardPointBonus[])].sort((a, b) => {
+      if (bonusSort.col === 'date')    return mul * (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+      if (bonusSort.col === 'points')  return mul * (a.points - b.points);
+      if (bonusSort.col === 'account') return mul * (a.account?.name ?? '').localeCompare(b.account?.name ?? '');
+      return 0;
+    });
+  }, [bonuses, bonusSort]);
 
   const { data: allAccounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -84,8 +104,22 @@ const RewardPoints: React.FC = () => {
     },
   });
 
+  const { control: bonusControl, handleSubmit: handleBonusSubmit, reset: resetBonus, formState: { errors: bonusErrors } } = useForm<CreateRewardPointBonusDto>({
+    defaultValues: {
+      account_id: '',
+      date: new Date().toISOString().split('T')[0],
+      points: 0,
+      description: '',
+    },
+  });
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['rewardPointRedemptions'] });
+    queryClient.invalidateQueries({ queryKey: ['rewardPointsSummary'] });
+  };
+
+  const invalidateBonus = () => {
+    queryClient.invalidateQueries({ queryKey: ['rewardPointBonuses'] });
     queryClient.invalidateQueries({ queryKey: ['rewardPointsSummary'] });
   };
 
@@ -103,6 +137,22 @@ const RewardPoints: React.FC = () => {
   const deleteMutation = useDeleteWithConfirm(
     (id: string) => rewardPointsApi.delete(id),
     { resourceName: 'Redemption', onSuccess: invalidate }
+  );
+
+  const createBonusMutation = useCreateWithConfirm(
+    (data: CreateRewardPointBonusDto) => rewardPointsApi.createBonus(data),
+    { resourceName: 'Bonus', onSuccess: () => { invalidateBonus(); setBonusDialogOpen(false); } }
+  );
+
+  const updateBonusMutation = useUpdateWithConfirm(
+    ({ id, data }: { id: string; data: Partial<CreateRewardPointBonusDto> }) =>
+      rewardPointsApi.updateBonus(id, data),
+    { resourceName: 'Bonus', onSuccess: () => { invalidateBonus(); setBonusDialogOpen(false); } }
+  );
+
+  const deleteBonusMutation = useDeleteWithConfirm(
+    (id: string) => rewardPointsApi.deleteBonus(id),
+    { resourceName: 'Bonus', onSuccess: invalidateBonus }
   );
 
   const handleOpenDialog = (redemption?: RewardPointRedemption) => {
@@ -139,6 +189,40 @@ const RewardPoints: React.FC = () => {
     }
   };
 
+  const handleOpenBonusDialog = (bonus?: RewardPointBonus) => {
+    if (bonus) {
+      setEditingBonus(bonus);
+      resetBonus({
+        account_id: bonus.account_id,
+        date: bonus.date,
+        points: bonus.points,
+        description: bonus.description ?? '',
+      });
+    } else {
+      setEditingBonus(null);
+      resetBonus({
+        account_id: creditAccounts[0]?.id ?? '',
+        date: new Date().toISOString().split('T')[0],
+        points: 0,
+        description: '',
+      });
+    }
+    setBonusDialogOpen(true);
+  };
+
+  const handleCloseBonusDialog = () => {
+    setBonusDialogOpen(false);
+    setEditingBonus(null);
+  };
+
+  const onBonusSubmit = (data: CreateRewardPointBonusDto) => {
+    if (editingBonus) {
+      updateBonusMutation.mutate({ id: editingBonus.id, data });
+    } else {
+      createBonusMutation.mutate(data);
+    }
+  };
+
   const summary: RewardPointsSummaryItem[] = summaryData?.items ?? [];
 
   return (
@@ -155,6 +239,15 @@ const RewardPoints: React.FC = () => {
             onClick={() => navigate('/reward-points/history')}
           >
             View History
+          </Button>
+          <Button
+            variant="outlined"
+            color="info"
+            startIcon={<Star />}
+            onClick={() => handleOpenBonusDialog()}
+            disabled={creditAccounts.length === 0}
+          >
+            Add Bonus
           </Button>
           <Button
             variant="contained"
@@ -190,6 +283,15 @@ const RewardPoints: React.FC = () => {
                     <Chip
                       label={item.total_earned.toLocaleString()}
                       color="success"
+                      size="small"
+                      variant="outlined"
+                    />
+                  </Box>
+                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                    <Typography variant="body2" color="text.secondary">Bonus</Typography>
+                    <Chip
+                      label={item.total_bonus.toLocaleString()}
+                      color="info"
                       size="small"
                       variant="outlined"
                     />
@@ -323,6 +425,94 @@ const RewardPoints: React.FC = () => {
         </TableContainer>
       )}
 
+      {/* Bonus Points Table */}
+      <Typography variant="h6" fontWeight="bold" mt={4} mb={2}>Bonus Points History</Typography>
+      {bonusesLoading ? (
+        <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>
+      ) : (
+        <TableContainer component={Paper} elevation={1}>
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ backgroundColor: 'action.hover' }}>
+                <TableCell sortDirection={bonusSort.col === 'date' ? bonusSort.dir : false}>
+                  <TableSortLabel
+                    active={bonusSort.col === 'date'}
+                    direction={bonusSort.col === 'date' ? bonusSort.dir : 'asc'}
+                    onClick={() => setBonusSort(prev => ({ col: 'date', dir: prev.col === 'date' && prev.dir === 'asc' ? 'desc' : 'asc' }))}
+                  >
+                    <strong>Date</strong>
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell sortDirection={bonusSort.col === 'account' ? bonusSort.dir : false}>
+                  <TableSortLabel
+                    active={bonusSort.col === 'account'}
+                    direction={bonusSort.col === 'account' ? bonusSort.dir : 'asc'}
+                    onClick={() => setBonusSort(prev => ({ col: 'account', dir: prev.col === 'account' && prev.dir === 'asc' ? 'desc' : 'asc' }))}
+                  >
+                    <strong>Account</strong>
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell align="right" sortDirection={bonusSort.col === 'points' ? bonusSort.dir : false}>
+                  <TableSortLabel
+                    active={bonusSort.col === 'points'}
+                    direction={bonusSort.col === 'points' ? bonusSort.dir : 'asc'}
+                    onClick={() => setBonusSort(prev => ({ col: 'points', dir: prev.col === 'points' && prev.dir === 'asc' ? 'desc' : 'asc' }))}
+                  >
+                    <strong>Points</strong>
+                  </TableSortLabel>
+                </TableCell>
+                <TableCell><strong>Description</strong></TableCell>
+                <TableCell><strong>Source</strong></TableCell>
+                <TableCell align="center"><strong>Actions</strong></TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {sortedBonuses.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                    <Typography color="text.secondary">
+                      No bonus points recorded yet. Click "Add Bonus" to add one.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                sortedBonuses.map((b) => (
+                  <TableRow key={b.id} hover>
+                    <TableCell>{b.date}</TableCell>
+                    <TableCell>{b.account?.name ?? b.account_id}</TableCell>
+                    <TableCell align="right">
+                      <Chip
+                        label={b.points.toLocaleString()}
+                        color="info"
+                        size="small"
+                        variant="outlined"
+                      />
+                    </TableCell>
+                    <TableCell>{b.description ?? '-'}</TableCell>
+                    <TableCell sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+                      {b.source_file ?? 'manual'}
+                    </TableCell>
+                    <TableCell align="center">
+                      <IconButton size="small" onClick={() => handleOpenBonusDialog(b)} title="Edit">
+                        <Edit fontSize="small" />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => deleteBonusMutation.mutate(b.id)}
+                        title="Delete"
+                      >
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle>
@@ -416,6 +606,104 @@ const RewardPoints: React.FC = () => {
               {createMutation.isPending || updateMutation.isPending ? (
                 <CircularProgress size={20} />
               ) : editingRedemption ? 'Update' : 'Add'}
+            </Button>
+          </DialogActions>
+        </form>
+      </Dialog>
+      {/* Add / Edit Bonus Dialog */}
+      <Dialog open={bonusDialogOpen} onClose={handleCloseBonusDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          {editingBonus ? 'Edit Bonus Points' : 'Add Bonus Points'}
+        </DialogTitle>
+        <form onSubmit={handleBonusSubmit(onBonusSubmit)}>
+          <DialogContent>
+            <Box display="flex" flexDirection="column" gap={2} pt={1}>
+
+              <Controller
+                name="account_id"
+                control={bonusControl}
+                rules={{ required: 'Account is required' }}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    select
+                    label="Credit Card Account"
+                    fullWidth
+                    error={!!bonusErrors.account_id}
+                    helperText={bonusErrors.account_id?.message}
+                  >
+                    {creditAccounts.map((acc) => (
+                      <MenuItem key={acc.id} value={acc.id}>{acc.name}</MenuItem>
+                    ))}
+                  </TextField>
+                )}
+              />
+
+              <Controller
+                name="date"
+                control={bonusControl}
+                rules={{ required: 'Date is required' }}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Date"
+                    type="date"
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                    error={!!bonusErrors.date}
+                    helperText={bonusErrors.date?.message}
+                  />
+                )}
+              />
+
+              <Controller
+                name="points"
+                control={bonusControl}
+                rules={{
+                  required: 'Points is required',
+                  min: { value: 0.01, message: 'Must be greater than 0' },
+                }}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Bonus Points"
+                    type="number"
+                    fullWidth
+                    inputProps={{ min: 0.01, step: 0.01 }}
+                    onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                    error={!!bonusErrors.points}
+                    helperText={bonusErrors.points?.message}
+                  />
+                )}
+              />
+
+              <Controller
+                name="description"
+                control={bonusControl}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    label="Description (optional)"
+                    fullWidth
+                    multiline
+                    rows={2}
+                    placeholder="e.g. DNP Quarterly Milestone New SMS50k"
+                  />
+                )}
+              />
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleCloseBonusDialog}>Cancel</Button>
+            <Button
+              type="submit"
+              variant="contained"
+              color="info"
+              disabled={createBonusMutation.isPending || updateBonusMutation.isPending}
+            >
+              {createBonusMutation.isPending || updateBonusMutation.isPending ? (
+                <CircularProgress size={20} />
+              ) : editingBonus ? 'Update' : 'Add'}
             </Button>
           </DialogActions>
         </form>

@@ -10,6 +10,7 @@ python-jose[cryptography]
 bcrypt
 pandas
 openpyxl
+xlrd
 scikit-learn
 numpy
 pypdf

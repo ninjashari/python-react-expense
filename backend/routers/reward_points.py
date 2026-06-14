@@ -5,7 +5,7 @@ from typing import List, Optional
 import uuid
 
 from database import get_db
-from models.reward_points import RewardPointRedemption
+from models.reward_points import RewardPointRedemption, RewardPointBonus
 from models.transactions import Transaction
 from models.accounts import Account
 from models.users import User
@@ -13,6 +13,9 @@ from schemas.reward_points import (
     RewardPointRedemptionCreate,
     RewardPointRedemptionUpdate,
     RewardPointRedemptionResponse,
+    RewardPointBonusCreate,
+    RewardPointBonusUpdate,
+    RewardPointBonusResponse,
     RewardPointsSummaryResponse,
     RewardPointsSummaryItem,
     RewardPointHistoryItem,
@@ -45,6 +48,18 @@ def get_summary(
     )
     earned_map = {str(r.account_id): float(r.total_earned) for r in earned_rows}
 
+    # Aggregate bonus points grouped by account
+    bonus_rows = (
+        db.query(
+            RewardPointBonus.account_id,
+            func.coalesce(func.sum(RewardPointBonus.points), 0).label("total_bonus")
+        )
+        .filter(RewardPointBonus.user_id == current_user.id)
+        .group_by(RewardPointBonus.account_id)
+        .all()
+    )
+    bonus_map = {str(r.account_id): float(r.total_bonus) for r in bonus_rows}
+
     # Aggregate points redeemed grouped by account
     redeemed_rows = (
         db.query(
@@ -69,13 +84,15 @@ def get_summary(
     for acc in credit_accounts:
         acc_id = str(acc.id)
         earned = earned_map.get(acc_id, 0)
+        bonus = bonus_map.get(acc_id, 0)
         redeemed = redeemed_map.get(acc_id, 0)
         items.append(RewardPointsSummaryItem(
             account_id=acc.id,
             account_name=acc.name,
             total_earned=earned,
+            total_bonus=bonus,
             total_redeemed=redeemed,
-            net_available=earned - redeemed,
+            net_available=earned + bonus - redeemed,
         ))
 
     return RewardPointsSummaryResponse(items=items)
@@ -226,18 +243,39 @@ def get_reward_points_history(
                 '_delta': pts,                   # signed, for balance calc
             })
 
+    # Build a full account name map (needed for redemptions/bonuses that may span accounts
+    # not in the optional account_id filter)
+    all_credit_accounts = db.query(Account).filter(
+        Account.user_id == current_user.id,
+        Account.type == 'credit'
+    ).all()
+    full_account_map = {str(acc.id): acc.name for acc in all_credit_accounts}
+
+    # Bonus points (always increase balance)
+    bonuses_q = db.query(RewardPointBonus).filter(
+        RewardPointBonus.user_id == current_user.id
+    )
+    if account_id:
+        bonuses_q = bonuses_q.filter(RewardPointBonus.account_id == account_id)
+    for b in bonuses_q.all():
+        pts = float(b.points)
+        raw.append({
+            'date': b.date,
+            'type': 'bonus',
+            'points': pts,
+            'description': b.description,
+            'account_id': str(b.account_id),
+            'account_name': full_account_map.get(str(b.account_id), ''),
+            'source_id': str(b.id),
+            '_delta': pts,
+        })
+
     # Redemptions (always reduce balance)
     redemptions_q = db.query(RewardPointRedemption).filter(
         RewardPointRedemption.user_id == current_user.id
     )
     if account_id:
         redemptions_q = redemptions_q.filter(RewardPointRedemption.account_id == account_id)
-    # Build a full account name map including any account not in the filtered set
-    all_credit_accounts = db.query(Account).filter(
-        Account.user_id == current_user.id,
-        Account.type == 'credit'
-    ).all()
-    full_account_map = {str(acc.id): acc.name for acc in all_credit_accounts}
 
     for r in redemptions_q.all():
         raw.append({
@@ -274,3 +312,91 @@ def get_reward_points_history(
         )
         for item in raw
     ]
+
+
+# ── Bonus Points CRUD ─────────────────────────────────────────────────────────
+
+@router.get("/bonuses", response_model=List[RewardPointBonusResponse])
+def get_bonuses(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """List all bonus/milestone reward point entries for the current user."""
+    return (
+        db.query(RewardPointBonus)
+        .options(joinedload(RewardPointBonus.account))
+        .filter(RewardPointBonus.user_id == current_user.id)
+        .order_by(RewardPointBonus.date.desc())
+        .all()
+    )
+
+
+@router.post("/bonuses", response_model=RewardPointBonusResponse, status_code=status.HTTP_201_CREATED)
+def create_bonus(
+    bonus: RewardPointBonusCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Record a bonus/milestone reward point credit for a credit card account."""
+    account = db.query(Account).filter(
+        Account.id == bonus.account_id,
+        Account.user_id == current_user.id,
+        Account.type == 'credit'
+    ).first()
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credit card account not found")
+
+    db_obj = RewardPointBonus(**bonus.model_dump(), user_id=current_user.id)
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    return (
+        db.query(RewardPointBonus)
+        .options(joinedload(RewardPointBonus.account))
+        .filter(RewardPointBonus.id == db_obj.id)
+        .first()
+    )
+
+
+@router.put("/bonuses/{bonus_id}", response_model=RewardPointBonusResponse)
+def update_bonus(
+    bonus_id: uuid.UUID,
+    updates: RewardPointBonusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update a bonus reward point entry."""
+    db_obj = db.query(RewardPointBonus).filter(
+        RewardPointBonus.id == bonus_id,
+        RewardPointBonus.user_id == current_user.id
+    ).first()
+    if not db_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bonus entry not found")
+
+    for field, value in updates.model_dump(exclude_unset=True).items():
+        setattr(db_obj, field, value)
+    db.commit()
+
+    return (
+        db.query(RewardPointBonus)
+        .options(joinedload(RewardPointBonus.account))
+        .filter(RewardPointBonus.id == db_obj.id)
+        .first()
+    )
+
+
+@router.delete("/bonuses/{bonus_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_bonus(
+    bonus_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Delete a bonus reward point entry."""
+    db_obj = db.query(RewardPointBonus).filter(
+        RewardPointBonus.id == bonus_id,
+        RewardPointBonus.user_id == current_user.id
+    ).first()
+    if not db_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bonus entry not found")
+    db.delete(db_obj)
+    db.commit()

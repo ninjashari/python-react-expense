@@ -34,13 +34,14 @@ import {
   Remove,
   ViewList,
   CalendarMonth,
+  Star,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { accountsApi, rewardPointsApi } from '../services/api';
 import { RewardPointHistoryItem } from '../types';
 import { usePageTitle } from '../hooks/usePageTitle';
 
-type TypeFilter = 'all' | 'earned' | 'deducted' | 'redeemed';
+type TypeFilter = 'all' | 'earned' | 'deducted' | 'redeemed' | 'bonus';
 type SortDir = 'asc' | 'desc';
 interface SortConfig { col: string; dir: SortDir }
 
@@ -61,14 +62,20 @@ const monthLabel = (key: string) => {
   });
 };
 
-const typeColor = (type: string) =>
-  type === 'earned' ? 'success.main' : type === 'deducted' ? 'warning.main' : 'error.main';
+const typeColor = (type: string) => {
+  if (type === 'earned') return 'success.main';
+  if (type === 'deducted') return 'warning.main';
+  if (type === 'bonus') return 'info.main';
+  return 'error.main';
+};
 
 const TypeChip: React.FC<{ type: string }> = ({ type }) => {
   if (type === 'earned')
     return <Chip size="small" icon={<TrendingUp fontSize="small" />} label="Earned" color="success" variant="outlined" />;
   if (type === 'deducted')
     return <Chip size="small" icon={<Remove fontSize="small" />} label="Deducted" color="warning" variant="outlined" />;
+  if (type === 'bonus')
+    return <Chip size="small" icon={<Star fontSize="small" />} label="Bonus" color="info" variant="outlined" />;
   return <Chip size="small" icon={<TrendingDown fontSize="small" />} label="Redeemed" color="error" variant="outlined" />;
 };
 
@@ -99,7 +106,7 @@ const HistoryRows: React.FC<{
         <TableCell>{item.account_name}</TableCell>
         <TableCell align="center"><TypeChip type={item.type} /></TableCell>
         <TableCell align="right" sx={{ fontWeight: 600, color: typeColor(item.type) }}>
-          {item.type === 'earned' ? '+' : '-'}{formatPoints(item.points)}
+          {(item.type === 'earned' || item.type === 'bonus') ? '+' : '-'}{formatPoints(item.points)}
         </TableCell>
         <TableCell sx={{ color: 'text.secondary', maxWidth: 260 }}>
           {item.description ?? '—'}
@@ -222,6 +229,7 @@ const RewardPointsHistory: React.FC = () => {
             <Select value={typeFilter} label="Type" onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}>
               <MenuItem value="all">All</MenuItem>
               <MenuItem value="earned">Earned</MenuItem>
+              <MenuItem value="bonus">Bonus</MenuItem>
               <MenuItem value="deducted">Deducted</MenuItem>
               <MenuItem value="redeemed">Redeemed</MenuItem>
             </Select>
@@ -260,11 +268,12 @@ const RewardPointsHistory: React.FC = () => {
         <Grid container spacing={2} sx={{ mb: 2 }}>
           {[
             { label: 'Total Earned',   val: filtered.filter(i => i.type === 'earned').reduce((s, i) => s + i.points, 0),   color: 'success.main', sign: '+' },
+            { label: 'Total Bonus',    val: filtered.filter(i => i.type === 'bonus').reduce((s, i) => s + i.points, 0),    color: 'info.main',    sign: '+' },
             { label: 'Total Deducted', val: filtered.filter(i => i.type === 'deducted').reduce((s, i) => s + i.points, 0), color: 'warning.main', sign: '-' },
             { label: 'Total Redeemed', val: filtered.filter(i => i.type === 'redeemed').reduce((s, i) => s + i.points, 0), color: 'error.main',   sign: '-' },
             { label: 'Events',         val: filtered.length, color: 'text.primary', sign: '' },
           ].map(({ label, val, color, sign }) => (
-            <Grid item xs={6} sm={3} key={label}>
+            <Grid item xs={6} sm={2.4} key={label}>
               <Card>
                 <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
                   <Typography variant="caption" color="text.secondary">{label}</Typography>
@@ -318,9 +327,10 @@ const RewardPointsHistory: React.FC = () => {
                 monthKeys.map((key, idx) => {
                   const items = sortItems(byMonth[key], sort);
                   const earned   = items.filter(i => i.type === 'earned').reduce((s, i) => s + i.points, 0);
+                  const bonus    = items.filter(i => i.type === 'bonus').reduce((s, i) => s + i.points, 0);
                   const deducted = items.filter(i => i.type === 'deducted').reduce((s, i) => s + i.points, 0);
                   const redeemed = items.filter(i => i.type === 'redeemed').reduce((s, i) => s + i.points, 0);
-                  const net = earned - deducted - redeemed;
+                  const net = earned + bonus - deducted - redeemed;
 
                   return (
                     <Box key={key}>
@@ -335,6 +345,9 @@ const RewardPointsHistory: React.FC = () => {
                         </Typography>
                         {earned > 0 && (
                           <Chip size="small" label={`+${formatPoints(earned)} earned`} color="success" variant="outlined" />
+                        )}
+                        {bonus > 0 && (
+                          <Chip size="small" label={`+${formatPoints(bonus)} bonus`} color="info" variant="outlined" />
                         )}
                         {deducted > 0 && (
                           <Chip size="small" label={`−${formatPoints(deducted)} deducted`} color="warning" variant="outlined" />

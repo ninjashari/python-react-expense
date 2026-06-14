@@ -42,10 +42,41 @@ class RewardPointRedemptionResponse(RewardPointRedemptionBase):
         from_attributes = True
 
 
+class RewardPointBonusBase(BaseModel):
+    account_id: uuid.UUID
+    date: DateType
+    points: float
+    description: Optional[str] = None
+
+
+class RewardPointBonusCreate(RewardPointBonusBase):
+    pass
+
+
+class RewardPointBonusUpdate(BaseModel):
+    account_id: Optional[uuid.UUID] = None
+    date: Optional[DateType] = None
+    points: Optional[float] = None
+    description: Optional[str] = None
+
+
+class RewardPointBonusResponse(RewardPointBonusBase):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    source_file: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    account: Optional[AccountSummary] = None
+
+    class Config:
+        from_attributes = True
+
+
 class RewardPointsSummaryItem(BaseModel):
     account_id: uuid.UUID
     account_name: str
     total_earned: float
+    total_bonus: float
     total_redeemed: float
     net_available: float
 
