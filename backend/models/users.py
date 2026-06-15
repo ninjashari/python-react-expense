@@ -1,6 +1,5 @@
 from sqlalchemy import Column, String, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 import uuid
@@ -15,6 +14,3 @@ class User(Base):
     is_admin = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime, server_default=func.current_timestamp())
     updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
-    
-    # Learning relationships
-    transaction_patterns = relationship("UserTransactionPattern", back_populates="user")

@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import func
+from sqlalchemy import func, text
 from typing import List, Optional
 import uuid
 import math
@@ -13,7 +13,6 @@ from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
 from models.users import User
-from models.learning import UserSelectionHistory
 from schemas.transactions import (
     TransactionCreate, 
     TransactionUpdate, 
@@ -23,8 +22,6 @@ from schemas.transactions import (
     TransactionBulkUpdate
 )
 from utils.auth import get_current_active_user
-from services.learning_service import TransactionLearningService
-
 router = APIRouter()
 
 def update_account_balance(db: Session, account_id: uuid.UUID, amount: float, transaction_type: str, is_reversal: bool = False):
@@ -266,8 +263,7 @@ def get_account_balance_at_date(db: Session, account_id: str, target_date: str) 
 
 @router.post("/", response_model=TransactionResponse)
 async def create_transaction(
-    transaction: TransactionCreate, 
-    background_tasks: BackgroundTasks,
+    transaction: TransactionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -338,37 +334,6 @@ async def create_transaction(
         update_account_balance(db, transaction.account_id, transaction.amount, "expense")
         # Credit to destination account
         update_account_balance(db, transaction.to_account_id, transaction.amount, "income")
-    
-    # 🧠 LEARNING TRIGGER for new transactions - Run asynchronously  
-    if transaction.payee_id:
-        background_tasks.add_task(
-            TransactionLearningService.record_user_selection,
-            db=db,
-            user_id=str(current_user.id),
-            transaction_id=str(db_transaction.id),
-            field_type='payee',
-            selected_value_id=str(transaction.payee_id),
-            selected_value_name="",  # Will be looked up in service
-            transaction_description=transaction.description,
-            transaction_amount=float(transaction.amount),
-            account_type=account.type,
-            selection_method='form_create'
-        )
-    
-    if transaction.category_id:
-        background_tasks.add_task(
-            TransactionLearningService.record_user_selection,
-            db=db,
-            user_id=str(current_user.id),
-            transaction_id=str(db_transaction.id),
-            field_type='category',
-            selected_value_id=str(transaction.category_id),
-            selected_value_name="",  # Will be looked up in service
-            transaction_description=transaction.description,
-            transaction_amount=float(transaction.amount),
-            account_type=account.type,
-            selection_method='form_create'
-        )
     
     return db_transaction
 
@@ -715,7 +680,6 @@ def get_transaction_summary(
 @router.put("/bulk", response_model=List[TransactionResponse])
 async def bulk_update_transactions(
     bulk_update: TransactionBulkUpdate,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -809,21 +773,6 @@ async def bulk_update_transactions(
             
             updated_transactions.append(transaction)
             
-            # 🧠 LEARNING TRIGGER - Run asynchronously
-            new_values = bulk_update.updates.dict(exclude_unset=True)
-            background_tasks.add_task(
-                TransactionLearningService.learn_from_transaction_update,
-                db=db,
-                user_id=str(current_user.id),
-                transaction_id=str(transaction_id),
-                old_values=original_values,
-                new_values=new_values,
-                update_context={
-                    'account_type': transaction.account.type,
-                    'update_method': 'bulk_edit',
-                    'timestamp': datetime.now()
-                }
-            )
         
         # Collect all affected accounts and dates for bulk recalculation
         all_affected_account_ids = set()
@@ -1019,9 +968,8 @@ def get_transaction(
 
 @router.put("/{transaction_id}", response_model=TransactionResponse)
 async def update_transaction(
-    transaction_id: uuid.UUID, 
-    transaction_update: TransactionUpdate, 
-    background_tasks: BackgroundTasks,
+    transaction_id: uuid.UUID,
+    transaction_update: TransactionUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1141,22 +1089,6 @@ async def update_transaction(
     
     db.commit()
     
-    # 🧠 LEARNING TRIGGER - Run asynchronously
-    new_values = transaction_update.dict(exclude_unset=True)
-    background_tasks.add_task(
-        TransactionLearningService.learn_from_transaction_update,
-        db=db,
-        user_id=str(current_user.id),
-        transaction_id=str(transaction_id),
-        old_values=original_values,
-        new_values=new_values,
-        update_context={
-            'account_type': transaction.account.type,
-            'update_method': 'inline_edit',  # vs 'form_edit'
-            'timestamp': datetime.now()
-        }
-    )
-    
     return transaction
 
 @router.post("/recalculate-balances/{account_id}")
@@ -1266,11 +1198,7 @@ def delete_transaction(
         if transaction.to_account_id:
             update_account_balance(db, transaction.to_account_id, transaction.amount, "income", is_reversal=True)
     
-    # Delete related learning history records to avoid foreign key constraint violation
-    db.query(UserSelectionHistory).filter(
-        UserSelectionHistory.transaction_id == transaction_id
-    ).delete(synchronize_session=False)
-    
+    db.execute(text("DELETE FROM user_selection_history WHERE transaction_id = :tid"), {"tid": str(transaction_id)})
     db.delete(transaction)
     db.commit()
     return {"message": "Transaction deleted successfully"}
@@ -1383,132 +1311,15 @@ async def bulk_reassign_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """
-    Bulk reassign payee and category for selected transactions using current AI learning model.
-    This will overwrite existing assignments with the latest AI suggestions.
-    """
-    from services.learning_service import TransactionLearningService
-    from models.payees import Payee
-    from models.categories import Category
-    
-    if not transaction_ids:
-        raise HTTPException(status_code=400, detail="No transaction IDs provided")
-    
-    # Get the transactions to reassign
-    transactions = db.query(Transaction).filter(
-        Transaction.id.in_(transaction_ids),
-        Transaction.user_id == current_user.id
-    ).all()
-    
-    if not transactions:
-        raise HTTPException(status_code=404, detail="No valid transactions found")
-    
-    reassignments = []
-    payee_updates = 0
-    category_updates = 0
-    errors = []
-    
-    for transaction in transactions:
-        try:
-            # Get AI suggestions for this transaction
-            try:
-                suggestions = TransactionLearningService.get_suggestions_for_description(
-                    db=db,
-                    user_id=current_user.id,
-                    description=transaction.description,
-                    amount=float(transaction.amount) if transaction.amount else 0.0,
-                    account_type=transaction.account.type if transaction.account else None
-                )
-            except Exception as suggestion_error:
-                suggestions = {}
-            
-            original_payee = transaction.payee.name if transaction.payee else None
-            original_category = transaction.category.name if transaction.category else None
-            
-            changes = {
-                "transaction_id": str(transaction.id),
-                "description": transaction.description,
-                "original_payee": original_payee,
-                "original_category": original_category,
-                "new_payee": None,
-                "new_category": None,
-                "payee_confidence": None,
-                "category_confidence": None
-            }
-            
-            # Apply payee suggestion with highest confidence
-            if suggestions.get("payee_suggestions"):
-                best_payee = max(suggestions["payee_suggestions"], key=lambda x: x.get("confidence", 0))
-                if best_payee.get("confidence", 0) >= 0.5:
-                    payee = db.query(Payee).filter(Payee.id == best_payee["id"]).first()
-                    if payee:
-                        transaction.payee_id = payee.id
-                        changes["new_payee"] = payee.name
-                        changes["payee_confidence"] = best_payee.get("confidence")
-                        payee_updates += 1
-                        
-                        # Record this as a learning selection
-                        TransactionLearningService.record_user_selection(
-                            db=db,
-                            user_id=current_user.id,
-                            transaction_id=str(transaction.id),
-                            field_type="payee",
-                            selected_value_id=str(payee.id),
-                            selected_value_name=payee.name,
-                            transaction_description=transaction.description,
-                            transaction_amount=float(transaction.amount) if transaction.amount else 0.0,
-                            account_type=transaction.account.type if transaction.account else None,
-                            was_suggested=True,
-                            suggestion_confidence=best_payee.get("confidence"),
-                            selection_method="bulk_reassign"
-                        )
-            
-            # Apply category suggestion with highest confidence
-            if suggestions.get("category_suggestions"):
-                best_category = max(suggestions["category_suggestions"], key=lambda x: x.get("confidence", 0))
-                if best_category.get("confidence", 0) >= 0.5:
-                    category = db.query(Category).filter(Category.id == best_category["id"]).first()
-                    if category:
-                        transaction.category_id = category.id
-                        changes["new_category"] = category.name
-                        changes["category_confidence"] = best_category.get("confidence")
-                        category_updates += 1
-                        
-                        # Record this as a learning selection
-                        TransactionLearningService.record_user_selection(
-                            db=db,
-                            user_id=current_user.id,
-                            transaction_id=str(transaction.id),
-                            field_type="category",
-                            selected_value_id=str(category.id),
-                            selected_value_name=category.name,
-                            transaction_description=transaction.description,
-                            transaction_amount=float(transaction.amount) if transaction.amount else 0.0,
-                            account_type=transaction.account.type if transaction.account else None,
-                            was_suggested=True,
-                            suggestion_confidence=best_category.get("confidence"),
-                            selection_method="bulk_reassign"
-                        )
-            
-            reassignments.append(changes)
-            
-        except Exception as e:
-            errors.append({
-                "transaction_id": str(transaction.id),
-                "error": str(e)
-            })
-    
-    # Commit all changes
-    db.commit()
-    
+    """Bulk reassign endpoint — AI learning has been removed."""
     return {
-        "message": f"Bulk reassignment completed successfully",
-        "total_transactions": len(transactions),
-        "payee_updates": payee_updates,
-        "category_updates": category_updates,
-        "reassignments": reassignments,
-        "errors": errors,
-        "success_rate": f"{((len(transactions) - len(errors)) / len(transactions) * 100):.1f}%" if transactions else "0%"
+        "message": "Bulk AI reassignment is not available (AI learning disabled)",
+        "total_transactions": len(transaction_ids),
+        "payee_updates": 0,
+        "category_updates": 0,
+        "reassignments": [],
+        "errors": [],
+        "success_rate": "0%"
     }
 
 

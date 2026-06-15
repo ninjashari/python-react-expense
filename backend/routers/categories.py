@@ -10,7 +10,6 @@ from database import get_db
 from models.categories import Category
 from models.users import User
 from models.transactions import Transaction
-from models.learning import UserTransactionPattern
 from schemas.categories import CategoryCreate, CategoryUpdate, CategoryResponse
 from utils.auth import get_current_active_user
 from utils.color_generator import assign_unique_colors_bulk, generate_unique_color
@@ -121,13 +120,6 @@ def delete_unused_categories(
                     "color": category.color
                 })
         
-        # Null out learning-pattern FK references so the delete won't violate constraints
-        if unused_categories:
-            unused_ids = [c.id for c in unused_categories]
-            db.query(UserTransactionPattern).filter(
-                UserTransactionPattern.category_id.in_(unused_ids)
-            ).update({"category_id": None}, synchronize_session=False)
-
         # Delete unused categories
         for category in unused_categories:
             db.delete(category)
