@@ -261,6 +261,10 @@ const Transactions: React.FC = () => {
     queryFn: () => categoriesApi.getAll(),
   });
 
+  const [formDescription, setFormDescription] = useState('');
+  const [formAmount, setFormAmount] = useState<number | undefined>();
+  const [selectedAccount, setSelectedAccount] = useState<any>(null);
+
   const payeeOptions = useMemo(() =>
     (payees || []).map(p => ({ id: p.id, name: p.name })).sort((a, b) => a.name.localeCompare(b.name)),
   [payees]);
