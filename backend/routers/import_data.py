@@ -6,27 +6,32 @@ import pandas as pd
 import io
 from datetime import datetime
 from decimal import Decimal
+import os
 import pypdf
-import pytesseract
-from PIL import Image
 import openpyxl
 from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
 from models.users import User
 from schemas.transactions import TransactionCreate
-from schemas.import_schemas import (
-    PDFLLMImportRequest, PDFLLMImportResponse, 
-    PDFLLMPreviewResponse, PDFLLMSystemStatusResponse,
-    XLSLLMImportRequest, XLSLLMImportResponse,
-    XLSLLMPreviewResponse, XLSLLMSystemStatusResponse,
-    LLMTransactionData, BatchImportRequest
-)
-from services.pdf_llm_processor import PDFLLMProcessor
-from services.xls_llm_processor import XLSLLMProcessor
-from services.ai_trainer import TransactionAITrainer
-from services.ai_cache import get_cached_trainer, retrain_in_background
 from utils.auth import get_current_active_user
+
+ML_ENABLED = os.getenv("ML_ENABLED", "false").lower() == "true"
+
+if ML_ENABLED:
+    import pytesseract
+    from PIL import Image
+    from schemas.import_schemas import (
+        PDFLLMImportRequest, PDFLLMImportResponse,
+        PDFLLMPreviewResponse, PDFLLMSystemStatusResponse,
+        XLSLLMImportRequest, XLSLLMImportResponse,
+        XLSLLMPreviewResponse, XLSLLMSystemStatusResponse,
+        LLMTransactionData, BatchImportRequest
+    )
+    from services.pdf_llm_processor import PDFLLMProcessor
+    from services.xls_llm_processor import XLSLLMProcessor
+    from services.ai_trainer import TransactionAITrainer
+    from services.ai_cache import get_cached_trainer, retrain_in_background
 from routers.transactions import update_account_balance
 
 router = APIRouter()
@@ -43,7 +48,9 @@ def extract_text_from_pdf(file_content: bytes) -> str:
         raise HTTPException(status_code=400, detail=f"Error reading PDF: {str(e)}")
 
 def extract_text_from_image(file_content: bytes) -> str:
-    """Extract text from image using OCR"""
+    """Extract text from image using OCR (requires ML_ENABLED=true)"""
+    if not ML_ENABLED:
+        raise HTTPException(status_code=503, detail="OCR is disabled. Set ML_ENABLED=true to enable.")
     try:
         image = Image.open(io.BytesIO(file_content))
         text = pytesseract.image_to_string(image)
@@ -185,10 +192,9 @@ def process_transactions_data(
     default_transaction_type: str = "expense",
     reward_points_column: Optional[str] = None
 ) -> tuple[int, List[str]]:
-    """Process DataFrame rows and create transactions with AI categorization"""
-    
-    # Use cached trained model — no training during import
-    ai_trainer = get_cached_trainer(db, current_user.id)
+    """Process DataFrame rows and create transactions"""
+
+    ai_trainer = get_cached_trainer(db, current_user.id) if ML_ENABLED else None
 
     transactions_created = 0
     errors = []
@@ -250,26 +256,19 @@ def process_transactions_data(
             if transaction_type not in ['income', 'expense', 'transfer']:
                 transaction_type = 'expense'  # Default fallback
             
-            # Use AI to predict payee and category from existing entities only
             payee_id = None
             category_id = None
-            
-            ai_prediction = ai_trainer.predict_payee_and_category(
-                description,
-                transaction_type,
-                amount,
-                str(account_id)
-            )
-            
-            if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
-                payee_id = ai_prediction['payee']['id']
-                print(f"AI predicted payee: {ai_prediction['payee']['name']} (confidence: {ai_prediction['payee']['confidence']:.2f})")
-                ai_predictions_made += 1
-            
-            if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
-                category_id = ai_prediction['category']['id']
-                print(f"AI predicted category: {ai_prediction['category']['name']} (confidence: {ai_prediction['category']['confidence']:.2f})")
-                ai_predictions_made += 1
+
+            if ai_trainer is not None:
+                ai_prediction = ai_trainer.predict_payee_and_category(
+                    description, transaction_type, amount, str(account_id)
+                )
+                if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
+                    payee_id = ai_prediction['payee']['id']
+                    ai_predictions_made += 1
+                if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
+                    category_id = ai_prediction['category']['id']
+                    ai_predictions_made += 1
             
             # Create transaction
             transaction_data = TransactionCreate(
