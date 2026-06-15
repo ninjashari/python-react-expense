@@ -228,12 +228,6 @@ export const transactionsApi = {
   }): Promise<any> => api.get('/transactions/reports/monthly-trend', { params }).then(res => res.data),
   getComprehensiveAnalysis: (): Promise<any> =>
     api.get('/transactions/reports/comprehensive-analysis').then(res => res.data),
-  retrainModels: (): Promise<any> =>
-    api.post('/transactions/reports/retrain-models').then(res => res.data),
-  getPredictionInsights: (months_ahead?: number): Promise<any> =>
-    api.get('/transactions/reports/prediction-insights', {
-      params: { months_ahead: months_ahead || 3 }
-    }).then(res => res.data),
 };
 
 

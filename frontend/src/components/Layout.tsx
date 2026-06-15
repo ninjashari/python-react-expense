@@ -28,7 +28,6 @@ import {
   Backup,
   Logout,
   Analytics,
-  Psychology,
   Lock,
   PieChart,
   CalendarMonth,
@@ -79,7 +78,6 @@ const buildNavGroups = (isAdmin: boolean): NavGroup[] => [
     label: 'Insights',
     items: [
       { text: 'Reward Points', icon: <Loyalty fontSize="small" />, path: '/reward-points' },
-      { text: 'AI Learning', icon: <Psychology fontSize="small" />, path: '/learning' },
     ],
   },
   {
@@ -108,7 +106,6 @@ const pageTitles: Record<string, string> = {
   '/reports/monthwise': 'Month-wise Reports',
   '/reward-points': 'Reward Points',
   '/reward-points/history': 'Points History',
-  '/learning': 'AI Learning',
   '/import': 'Import',
   '/backup': 'Backup',
   '/payees': 'Payees',

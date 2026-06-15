@@ -18,7 +18,6 @@ import Payees from './pages/Payees';
 import Categories from './pages/Categories';
 import Import from './pages/Import';
 import Backup from './pages/Backup';
-import LearningDashboard from './pages/LearningDashboard';
 import CategoryReports from './pages/CategoryReports';
 import MonthwiseCategoryReport from './pages/MonthwiseCategoryReport';
 import RewardPoints from './pages/RewardPoints';
@@ -67,7 +66,6 @@ const AppContent: React.FC = () => {
           <Route path="/backup" element={<Backup />} />
           <Route path="/reward-points" element={<RewardPoints />} />
           <Route path="/reward-points/history" element={<RewardPointsHistory />} />
-          <Route path="/learning" element={<LearningDashboard />} />
           <Route path="/admin" element={<Admin />} />
         </Routes>
       </Layout>

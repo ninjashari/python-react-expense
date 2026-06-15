@@ -5,10 +5,6 @@ from database import engine, Base
 from routers import accounts, transactions, payees, categories, import_data, auth, reward_points, admin
 import models
 
-ML_ENABLED = os.getenv("ML_ENABLED", "false").lower() == "true"
-if ML_ENABLED:
-    from routers import learning
-
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Expense Manager API", version="1.0.0")
@@ -57,8 +53,6 @@ app.include_router(categories.router, prefix="/api/categories", tags=["categorie
 app.include_router(import_data.router, prefix="/api/import", tags=["import"])
 app.include_router(reward_points.router, prefix="/api/reward-points", tags=["reward-points"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
-if ML_ENABLED:
-    app.include_router(learning.router, prefix="/api/learning", tags=["learning"])
 
 
 @app.get("/")
