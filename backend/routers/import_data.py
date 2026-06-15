@@ -7,7 +7,6 @@ import io
 from datetime import datetime
 from decimal import Decimal
 import os
-import pypdf
 import openpyxl
 from database import get_db
 from models.transactions import Transaction
@@ -19,44 +18,16 @@ from utils.auth import get_current_active_user
 ML_ENABLED = os.getenv("ML_ENABLED", "false").lower() == "true"
 
 if ML_ENABLED:
-    import pytesseract
-    from PIL import Image
     from schemas.import_schemas import (
-        PDFLLMImportRequest, PDFLLMImportResponse,
-        PDFLLMPreviewResponse, PDFLLMSystemStatusResponse,
         XLSLLMImportRequest, XLSLLMImportResponse,
         XLSLLMPreviewResponse, XLSLLMSystemStatusResponse,
-        LLMTransactionData, BatchImportRequest
+        LLMTransactionData,
     )
-    from services.pdf_llm_processor import PDFLLMProcessor
     from services.xls_llm_processor import XLSLLMProcessor
-    from services.ai_trainer import TransactionAITrainer
     from services.ai_cache import get_cached_trainer, retrain_in_background
 from routers.transactions import update_account_balance
 
 router = APIRouter()
-
-def extract_text_from_pdf(file_content: bytes) -> str:
-    """Extract text from PDF using pypdf"""
-    try:
-        pdf_reader = pypdf.PdfReader(io.BytesIO(file_content))
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text() + "\n"
-        return text
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error reading PDF: {str(e)}")
-
-def extract_text_from_image(file_content: bytes) -> str:
-    """Extract text from image using OCR (requires ML_ENABLED=true)"""
-    if not ML_ENABLED:
-        raise HTTPException(status_code=503, detail="OCR is disabled. Set ML_ENABLED=true to enable.")
-    try:
-        image = Image.open(io.BytesIO(file_content))
-        text = pytesseract.image_to_string(image)
-        return text
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error processing image: {str(e)}")
 
 def parse_csv_data(file_content: bytes) -> pd.DataFrame:
     """Parse CSV file and return DataFrame"""
@@ -465,45 +436,6 @@ async def import_excel(
         "errors": errors
     }
 
-@router.post("/pdf-ocr")
-async def import_pdf_with_ocr(
-    file: UploadFile = File(...),
-    account_id: uuid.UUID = Form(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Extract text from PDF using OCR (basic implementation)"""
-    
-    # Verify account exists and belongs to current user
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.user_id == current_user.id
-    ).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    
-    content = await file.read()
-    
-    # Try to extract text from PDF first
-    try:
-        extracted_text = extract_text_from_pdf(content)
-    except:
-        # If PDF text extraction fails, convert to image and use OCR
-        try:
-            extracted_text = extract_text_from_image(content)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to extract text: {str(e)}")
-    
-    # This is a basic implementation that returns the extracted text
-    # In a production system, you would use LLM here to parse the text
-    # and extract transaction data automatically
-    
-    return {
-        "message": "Text extracted successfully",
-        "extracted_text": extracted_text,
-        "note": "This is raw extracted text. In production, an LLM would parse this into structured transaction data."
-    }
-
 @router.post("/column-mapping/{file_type}")
 async def get_suggested_column_mapping(
     file_type: str,
@@ -625,261 +557,6 @@ async def get_suggested_column_mapping(
         "sample_data": cleaned_sample_data,
         "suggested_mappings": cleaned_suggestions
     }
-
-
-@router.get("/pdf-llm/status")
-async def get_pdf_llm_status(
-    current_user: User = Depends(get_current_active_user)
-) -> PDFLLMSystemStatusResponse:
-    """Get status of PDF-LLM processing system"""
-    try:
-        processor = PDFLLMProcessor()
-        status = processor.get_system_status()
-        return PDFLLMSystemStatusResponse(**status)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error checking system status: {str(e)}")
-
-
-@router.post("/pdf-llm/preview")
-async def preview_pdf_llm_extraction(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user)
-) -> PDFLLMPreviewResponse:
-    """Preview PDF text extraction without full LLM processing"""
-    
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-    
-    try:
-        content = await file.read()
-        processor = PDFLLMProcessor()
-        preview_result = processor.preview_extraction(content)
-        return PDFLLMPreviewResponse(**preview_result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error previewing PDF: {str(e)}")
-
-
-@router.post("/pdf-llm")
-async def import_pdf_with_llm(
-    file: UploadFile = File(...),
-    account_id: uuid.UUID = Form(...),
-    llm_model: Optional[str] = Form("llama3.1"),
-    preview_only: bool = Form(False),
-    background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-) -> PDFLLMImportResponse:
-    """Import transactions from PDF using LLM extraction"""
-    
-    # Verify account exists and belongs to current user
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.user_id == current_user.id
-    ).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-    
-    try:
-        content = await file.read()
-        processor = PDFLLMProcessor(llm_model)
-        
-        # Process PDF and extract transactions
-        result = processor.process_pdf_file(content)
-        
-        if preview_only or result["status"] != "success":
-            return PDFLLMImportResponse(**result)
-        
-        # Use cached trained model — no training during import
-        ai_trainer = get_cached_trainer(db, current_user.id)
-
-        # Import transactions to database
-        transactions_created = 0
-        errors = []
-        ai_predictions_made = 0
-
-        for transaction_data in result["transactions"]:
-            try:
-                # Convert LLM data to database format
-                llm_transaction = LLMTransactionData(**transaction_data)
-                
-                # Use AI to predict payee and category from existing entities only
-                payee_id = None
-                category_id = None
-                
-                ai_prediction = ai_trainer.predict_payee_and_category(
-                    llm_transaction.description,
-                    llm_transaction.transaction_type,
-                    llm_transaction.amount,
-                    str(account_id)
-                )
-                
-                if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
-                    payee_id = ai_prediction['payee']['id']
-                    print(f"AI predicted payee: {ai_prediction['payee']['name']} (confidence: {ai_prediction['payee']['confidence']:.2f})")
-                    ai_predictions_made += 1
-                
-                if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
-                    category_id = ai_prediction['category']['id']
-                    print(f"AI predicted category: {ai_prediction['category']['name']} (confidence: {ai_prediction['category']['confidence']:.2f})")
-                    ai_predictions_made += 1
-                
-                # Create transaction
-                transaction_create = TransactionCreate(
-                    date=llm_transaction.date,
-                    amount=llm_transaction.amount,
-                    description=llm_transaction.description,
-                    type=llm_transaction.transaction_type,
-                    account_id=account_id,
-                    payee_id=payee_id,
-                    category_id=category_id
-                )
-                
-                db_transaction = Transaction(**transaction_create.model_dump(), user_id=current_user.id)
-                db.add(db_transaction)
-                
-                # Update account balance
-                update_account_balance(db, account_id, llm_transaction.amount, llm_transaction.transaction_type)
-                
-                transactions_created += 1
-                
-            except Exception as e:
-                errors.append(f"Transaction {transactions_created + 1}: {str(e)}")
-        
-        # Commit all transactions
-        try:
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-        if background_tasks is not None:
-            background_tasks.add_task(retrain_in_background, current_user.id)
-
-        # Update result with import statistics
-        result["transactions_created"] = transactions_created
-        result["import_errors"] = errors
-        result["ai_predictions_made"] = ai_predictions_made
-        result["message"] = f"Successfully imported {transactions_created} transactions from PDF using LLM with {ai_predictions_made} AI predictions"
-        print(f"AI made {ai_predictions_made} predictions for payees and categories")
-
-        return PDFLLMImportResponse(**result)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing PDF with LLM: {str(e)}")
-
-
-@router.post("/transactions/batch")
-async def import_transactions_batch(
-    request: BatchImportRequest,
-    background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Import a batch of pre-processed transactions directly with AI categorization"""
-    
-    # Verify account exists and belongs to current user
-    account = db.query(Account).filter(
-        Account.id == request.account_id,
-        Account.user_id == current_user.id
-    ).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    
-    # Use cached trained model — no training during import
-    ai_trainer = get_cached_trainer(db, current_user.id)
-
-    transactions_created = 0
-    errors = []
-    ai_predictions_made = 0
-
-    try:
-        print(f"Starting batch import of {len(request.transactions_data)} transactions")
-        for i, transaction_data in enumerate(request.transactions_data):
-            try:
-                print(f"Processing transaction {i + 1}: {transaction_data.description}")
-                print(f"Transaction data: date={transaction_data.date}, amount={transaction_data.amount}, type={transaction_data.transaction_type}")
-                
-                # Use AI to predict payee and category from existing entities only
-                payee_id = None
-                category_id = None
-                
-                ai_prediction = ai_trainer.predict_payee_and_category(
-                    transaction_data.description,
-                    transaction_data.transaction_type,
-                    transaction_data.amount,
-                    str(request.account_id)
-                )
-                
-                if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
-                    payee_id = ai_prediction['payee']['id']
-                    print(f"AI predicted payee: {ai_prediction['payee']['name']} (confidence: {ai_prediction['payee']['confidence']:.2f})")
-                    ai_predictions_made += 1
-                
-                if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
-                    category_id = ai_prediction['category']['id']
-                    print(f"AI predicted category: {ai_prediction['category']['name']} (confidence: {ai_prediction['category']['confidence']:.2f})")
-                    ai_predictions_made += 1
-
-                # Create the transaction
-                # Parse date string to date object
-                try:
-                    transaction_date = datetime.strptime(transaction_data.date, '%Y-%m-%d').date()
-                except ValueError:
-                    # Try alternative date formats
-                    transaction_date = datetime.strptime(transaction_data.date, '%Y-%m-%d').date()
-                
-                transaction = Transaction(
-                    date=transaction_date,
-                    amount=Decimal(str(transaction_data.amount)),
-                    description=transaction_data.description,
-                    type=transaction_data.transaction_type,
-                    account_id=request.account_id,
-                    payee_id=payee_id,
-                    category_id=category_id,
-                    user_id=current_user.id
-                )
-                
-                db.add(transaction)
-                db.flush()
-                
-                # Update account balance
-                update_account_balance(db, request.account_id, float(transaction_data.amount), transaction_data.transaction_type)
-                
-                transactions_created += 1
-                print(f"Successfully created transaction {i + 1}")
-                
-            except Exception as e:
-                print(f"Error creating transaction {i + 1}: {str(e)}")
-                # Don't rollback here, just log the error and continue
-                errors.append(f"Transaction {i + 1}: {str(e)}")
-                continue
-        
-        # Commit all transactions
-        print(f"Committing {transactions_created} transactions to database")
-        db.commit()
-        print(f"Database commit successful")
-        print(f"AI made {ai_predictions_made} predictions for payees and categories")
-
-        if background_tasks is not None:
-            background_tasks.add_task(retrain_in_background, current_user.id)
-
-        return {
-            "transactions_created": transactions_created,
-            "import_errors": errors,
-            "ai_predictions_made": ai_predictions_made,
-            "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error importing transactions: {str(e)}")
 
 
 # XLS LLM Import Endpoints

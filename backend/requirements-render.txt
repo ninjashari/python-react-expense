@@ -11,5 +11,4 @@ bcrypt
 pandas
 openpyxl
 xlrd
-pypdf
 python-dotenv
