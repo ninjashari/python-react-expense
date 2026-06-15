@@ -1,30 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional, List
 import uuid
 import pandas as pd
 import io
 from datetime import datetime
-from decimal import Decimal
-import os
 import openpyxl
 from database import get_db
 from models.transactions import Transaction
 from models.accounts import Account
+from models.payees import Payee
+from models.categories import Category
 from models.users import User
 from schemas.transactions import TransactionCreate
 from utils.auth import get_current_active_user
-
-ML_ENABLED = os.getenv("ML_ENABLED", "false").lower() == "true"
-
-if ML_ENABLED:
-    from schemas.import_schemas import (
-        XLSLLMImportRequest, XLSLLMImportResponse,
-        XLSLLMPreviewResponse, XLSLLMSystemStatusResponse,
-        LLMTransactionData,
-    )
-    from services.xls_llm_processor import XLSLLMProcessor
-    from services.ai_cache import get_cached_trainer, retrain_in_background
 from routers.transactions import update_account_balance
 
 router = APIRouter()
@@ -165,46 +154,37 @@ def process_transactions_data(
 ) -> tuple[int, List[str]]:
     """Process DataFrame rows and create transactions"""
 
-    ai_trainer = get_cached_trainer(db, current_user.id) if ML_ENABLED else None
-
     transactions_created = 0
     errors = []
-    ai_predictions_made = 0
 
     for index, row in df.iterrows():
         try:
-            # Parse transaction data - restrict to DD/MM/YYYY or DD-MM-YYYY format
+            # Parse date - restrict to DD/MM/YYYY or DD-MM-YYYY format
             date_value = str(row[date_column]).strip()
-            
-            # Try DD/MM/YYYY format first
             try:
                 transaction_date = pd.to_datetime(date_value, format='%d/%m/%Y').date()
             except (ValueError, TypeError):
-                # Try DD-MM-YYYY format
                 try:
                     transaction_date = pd.to_datetime(date_value, format='%d-%m-%Y').date()
                 except (ValueError, TypeError):
                     raise ValueError(f"Invalid date format '{date_value}'. Please use DD/MM/YYYY or DD-MM-YYYY format.")
-            
-            # Handle amount parsing for both single amount column and withdrawal/deposit columns
+
+            # Handle amount parsing
             if withdrawal_column and deposit_column:
-                # ICICI style: separate withdrawal and deposit columns
                 withdrawal_amt = float(row[withdrawal_column]) if pd.notna(row[withdrawal_column]) and str(row[withdrawal_column]).strip() != '' else 0.0
                 deposit_amt = float(row[deposit_column]) if pd.notna(row[deposit_column]) and str(row[deposit_column]).strip() != '' else 0.0
-                
                 if withdrawal_amt > 0:
                     amount = withdrawal_amt
-                    transaction_type = 'expense'  # Override for withdrawal
+                    transaction_type = 'expense'
                 elif deposit_amt > 0:
                     amount = deposit_amt
-                    transaction_type = 'income'   # Override for deposit
+                    transaction_type = 'income'
                 else:
-                    continue  # Skip rows with no amount
+                    continue
             else:
-                # Standard style: single amount column
                 amount = float(row[amount_column])
                 transaction_type = default_transaction_type
-            
+
             description = str(row[description_column]) if pd.notna(row[description_column]) else ""
 
             # Extract reward points if column specified
@@ -217,34 +197,42 @@ def process_transactions_data(
                     except (ValueError, TypeError):
                         reward_points = None
 
-            # Determine transaction type (only override if transaction_type_column is specified)
+            # Override transaction type from column if provided
             if transaction_type_column and transaction_type_column in df.columns:
                 type_value = str(row[transaction_type_column]).lower().strip()
                 if type_value in ['income', 'expense', 'transfer']:
                     transaction_type = type_value
-            
-            # Validate transaction type
-            if transaction_type not in ['income', 'expense', 'transfer']:
-                transaction_type = 'expense'  # Default fallback
-            
-            payee_id = None
-            category_id = None
 
-            if ai_trainer is not None:
-                ai_prediction = ai_trainer.predict_payee_and_category(
-                    description, transaction_type, amount, str(account_id)
-                )
-                if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
-                    payee_id = ai_prediction['payee']['id']
-                    ai_predictions_made += 1
-                if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
-                    category_id = ai_prediction['category']['id']
-                    ai_predictions_made += 1
-            
-            # Create transaction
+            if transaction_type not in ['income', 'expense', 'transfer']:
+                transaction_type = 'expense'
+
+            # Look up payee by name from the mapped column
+            payee_id = None
+            if payee_column and payee_column in df.columns:
+                payee_name = str(row[payee_column]).strip()
+                if payee_name and payee_name.lower() != 'nan':
+                    payee = db.query(Payee).filter(
+                        Payee.user_id == current_user.id,
+                        Payee.name == payee_name
+                    ).first()
+                    if payee:
+                        payee_id = payee.id
+
+            # Look up category by name from the mapped column
+            category_id = None
+            if category_column and category_column in df.columns:
+                category_name = str(row[category_column]).strip()
+                if category_name and category_name.lower() != 'nan':
+                    category = db.query(Category).filter(
+                        Category.user_id == current_user.id,
+                        Category.name == category_name
+                    ).first()
+                    if category:
+                        category_id = category.id
+
             transaction_data = TransactionCreate(
                 date=transaction_date,
-                amount=abs(amount),  # Ensure positive amount
+                amount=abs(amount),
                 description=description,
                 type=transaction_type,
                 account_id=account_id,
@@ -252,20 +240,16 @@ def process_transactions_data(
                 category_id=category_id,
                 reward_points=reward_points
             )
-            
+
             db_transaction = Transaction(**transaction_data.model_dump(), user_id=current_user.id)
             db.add(db_transaction)
-            
-            # Update account balance for imported transaction
             update_account_balance(db, account_id, abs(amount), transaction_type)
-            
             transactions_created += 1
-            
+
         except Exception as e:
             errors.append(f"Row {index + 1}: {str(e)}")
-    
-    print(f"AI made {ai_predictions_made} predictions for payees and categories")
-    return transactions_created, errors, ai_predictions_made
+
+    return transactions_created, errors
 
 @router.post("/csv")
 async def import_csv(
@@ -279,7 +263,6 @@ async def import_csv(
     transaction_type_column: Optional[str] = Form(None),
     default_transaction_type: str = Form("expense"),
     reward_points_column: Optional[str] = Form(None),
-    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -302,8 +285,7 @@ async def import_csv(
     if missing_columns:
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
-    # Process transactions using common utility function
-    transactions_created, errors, ai_predictions_made = process_transactions_data(
+    transactions_created, errors = process_transactions_data(
         df=df,
         db=db,
         current_user=current_user,
@@ -326,21 +308,9 @@ async def import_csv(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    if background_tasks is not None:
-        background_tasks.add_task(retrain_in_background, current_user.id)
-
-    training_notice = None
-    if transactions_created >= 100:
-        training_notice = (
-            "You've imported 100+ transactions. Retrain the AI for better predictions: "
-            "go to the Learning Dashboard and click 'Train Model'."
-        )
-
     return {
-        "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions",
+        "message": f"Successfully imported {transactions_created} transactions",
         "transactions_created": transactions_created,
-        "ai_predictions_made": ai_predictions_made,
-        "training_notice": training_notice,
         "errors": errors
     }
 
@@ -359,7 +329,6 @@ async def import_excel(
     deposit_column: Optional[str] = Form(None),
     default_transaction_type: str = Form("expense"),
     reward_points_column: Optional[str] = Form(None),
-    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -394,8 +363,7 @@ async def import_excel(
     if missing_columns:
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
-    # Process transactions using common utility function
-    transactions_created, errors, ai_predictions_made = process_transactions_data(
+    transactions_created, errors = process_transactions_data(
         df=df,
         db=db,
         current_user=current_user,
@@ -418,21 +386,9 @@ async def import_excel(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    if background_tasks is not None:
-        background_tasks.add_task(retrain_in_background, current_user.id)
-
-    training_notice = None
-    if transactions_created >= 100:
-        training_notice = (
-            "You've imported 100+ transactions. Retrain the AI for better predictions: "
-            "go to the Learning Dashboard and click 'Train Model'."
-        )
-
     return {
-        "message": f"Successfully imported {transactions_created} transactions with {ai_predictions_made} AI predictions",
+        "message": f"Successfully imported {transactions_created} transactions",
         "transactions_created": transactions_created,
-        "ai_predictions_made": ai_predictions_made,
-        "training_notice": training_notice,
         "errors": errors
     }
 
@@ -559,197 +515,3 @@ async def get_suggested_column_mapping(
     }
 
 
-# XLS LLM Import Endpoints
-
-@router.get("/xls-llm/status")
-async def get_xls_llm_status(
-    current_user: User = Depends(get_current_active_user)
-) -> XLSLLMSystemStatusResponse:
-    """Get status of XLS-LLM processing system"""
-    try:
-        processor = XLSLLMProcessor()
-        status_data = processor.get_system_status()
-        return XLSLLMSystemStatusResponse(**status_data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error checking XLS-LLM system status: {str(e)}")
-
-
-@router.post("/xls-llm/preview")
-async def preview_xls_llm_extraction(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user)
-) -> XLSLLMPreviewResponse:
-    """Preview XLS text extraction without full LLM processing"""
-    
-    # Validate file type
-    if not file.filename or not file.filename.lower().endswith(('.xls', '.xlsx')):
-        raise HTTPException(
-            status_code=400, 
-            detail="Invalid file type. Please upload an XLS or XLSX file."
-        )
-    
-    try:
-        print(f"DEBUG: XLS LLM preview endpoint called with file: {file.filename}")
-        
-        # Read file content
-        file_content = await file.read()
-        print(f"DEBUG: Read {len(file_content)} bytes from uploaded file")
-        
-        # Process with XLS LLM processor
-        processor = XLSLLMProcessor()
-        preview_data = processor.preview_extraction(file_content, file.filename)
-        
-        print(f"DEBUG: Preview data keys: {preview_data.keys()}")
-        
-        response = XLSLLMPreviewResponse(**preview_data)
-        print(f"DEBUG: Created response successfully")
-        return response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error previewing XLS file: {str(e)}")
-
-
-@router.post("/xls-llm")
-async def import_xls_with_llm(
-    file: UploadFile = File(...),
-    account_id: uuid.UUID = Form(...),
-    llm_model: Optional[str] = Form("llama3.1"),
-    preview_only: bool = Form(False),
-    background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-) -> XLSLLMImportResponse:
-    """Import transactions from XLS file using LLM processing"""
-    
-    # Validate file type
-    if not file.filename or not file.filename.lower().endswith(('.xls', '.xlsx')):
-        raise HTTPException(
-            status_code=400, 
-            detail="Invalid file type. Please upload an XLS or XLSX file."
-        )
-    
-    # Verify account exists and belongs to current user
-    account = db.query(Account).filter(
-        Account.id == account_id,
-        Account.user_id == current_user.id
-    ).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    
-    try:
-        # Read file content
-        file_content = await file.read()
-        
-        # Process with XLS LLM processor
-        processor = XLSLLMProcessor(llm_model)
-        result = processor.process_xls_file(file_content, file.filename)
-        
-        # If preview only, return early
-        if preview_only:
-            return XLSLLMImportResponse(**result)
-        
-        # If extraction failed, return the error result
-        if result["status"] != "success":
-            return XLSLLMImportResponse(**result)
-        
-        # Use cached trained model — no training during import
-        ai_trainer = get_cached_trainer(db, current_user.id)
-
-        # Import the extracted transactions with AI predictions
-        transactions_created = 0
-        errors = []
-        ai_predictions_made = 0
-
-        try:
-            print(f"Starting import of {len(result['transactions'])} transactions from XLS")
-            for i, transaction_data in enumerate(result["transactions"]):
-                try:
-                    # Convert dict to LLMTransactionData object for consistency
-                    if isinstance(transaction_data, dict):
-                        transaction_obj = LLMTransactionData(**transaction_data)
-                    else:
-                        transaction_obj = transaction_data
-                    
-                    print(f"Processing transaction {i + 1}: {transaction_obj.description}")
-                    
-                    # Use AI to predict payee and category from existing entities only
-                    payee_id = None
-                    category_id = None
-                    
-                    ai_prediction = ai_trainer.predict_payee_and_category(
-                        transaction_obj.description,
-                        transaction_obj.transaction_type,
-                        transaction_obj.amount,
-                        str(account_id)
-                    )
-                    
-                    if ai_prediction['payee'] and ai_prediction['payee']['confidence'] >= 0.6:
-                        payee_id = ai_prediction['payee']['id']
-                        print(f"AI predicted payee: {ai_prediction['payee']['name']} (confidence: {ai_prediction['payee']['confidence']:.2f})")
-                        ai_predictions_made += 1
-                    
-                    if ai_prediction['category'] and ai_prediction['category']['confidence'] >= 0.6:
-                        category_id = ai_prediction['category']['id']
-                        print(f"AI predicted category: {ai_prediction['category']['name']} (confidence: {ai_prediction['category']['confidence']:.2f})")
-                        ai_predictions_made += 1
-                    
-                    # Create the transaction
-                    try:
-                        transaction_date = datetime.strptime(transaction_obj.date, '%Y-%m-%d').date()
-                    except ValueError:
-                        print(f"Error parsing date: {transaction_obj.date}")
-                        errors.append(f"Transaction {i + 1}: Invalid date format")
-                        continue
-                    
-                    transaction = Transaction(
-                        date=transaction_date,
-                        amount=Decimal(str(transaction_obj.amount)),
-                        description=transaction_obj.description,
-                        type=transaction_obj.transaction_type,
-                        account_id=account_id,
-                        payee_id=payee_id,
-                        category_id=category_id,
-                        user_id=current_user.id
-                    )
-                    
-                    db.add(transaction)
-                    db.flush()
-                    
-                    # Update account balance
-                    update_account_balance(db, account_id, float(transaction_obj.amount), transaction_obj.transaction_type)
-                    
-                    transactions_created += 1
-                    print(f"Successfully created transaction {i + 1}")
-                    
-                except Exception as e:
-                    print(f"Error creating transaction {i + 1}: {str(e)}")
-                    errors.append(f"Transaction {i + 1}: {str(e)}")
-                    continue
-            
-            # Commit all transactions
-            print(f"Committing {transactions_created} transactions to database")
-            db.commit()
-            print(f"Database commit successful")
-
-            if background_tasks is not None:
-                background_tasks.add_task(retrain_in_background, current_user.id)
-
-        except Exception as e:
-            db.rollback()
-            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-        # Update result with import statistics
-        result["transactions_created"] = transactions_created
-        result["import_errors"] = errors
-        result["ai_predictions_made"] = ai_predictions_made
-        result["message"] = f"Successfully imported {transactions_created} transactions from XLS using LLM with {ai_predictions_made} AI predictions"
-        print(f"AI made {ai_predictions_made} predictions for payees and categories")
-        
-        return XLSLLMImportResponse(**result)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing XLS with LLM: {str(e)}")
