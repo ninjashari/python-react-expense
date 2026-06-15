@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -5,12 +6,14 @@ from database import get_db
 from models.users import User
 from schemas.users import UserCreate, UserLogin, UserResponse, Token, ChangePassword
 from utils.auth import (
-    verify_password, 
-    get_password_hash, 
+    verify_password,
+    get_password_hash,
     create_access_token,
     get_current_active_user,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
+
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip().lower()
 
 router = APIRouter()
 
@@ -18,20 +21,26 @@ router = APIRouter()
 def register(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
     try:
-        # Check if email already exists
+        if len(user.password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters long"
+            )
+
         db_user = db.query(User).filter(User.email == user.email).first()
         if db_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
-        
-        # Create new user
+
         hashed_password = get_password_hash(user.password)
+        is_admin = bool(ADMIN_EMAIL and user.email.strip().lower() == ADMIN_EMAIL)
         db_user = User(
             email=user.email,
             name=user.name,
-            password_hash=hashed_password
+            password_hash=hashed_password,
+            is_admin=is_admin,
         )
         db.add(db_user)
         db.commit()

@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import accounts, transactions, payees, categories, import_data, auth, reward_points
+from routers import accounts, transactions, payees, categories, import_data, auth, reward_points, admin
 import models
 
 ML_ENABLED = os.getenv("ML_ENABLED", "false").lower() == "true"
@@ -56,6 +56,7 @@ app.include_router(payees.router, prefix="/api/payees", tags=["payees"])
 app.include_router(categories.router, prefix="/api/categories", tags=["categories"])
 app.include_router(import_data.router, prefix="/api/import", tags=["import"])
 app.include_router(reward_points.router, prefix="/api/reward-points", tags=["reward-points"])
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 if ML_ENABLED:
     app.include_router(learning.router, prefix="/api/learning", tags=["learning"])
 

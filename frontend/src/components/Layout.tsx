@@ -36,6 +36,7 @@ import {
   AccountBalanceWallet,
   Brightness4,
   Brightness7,
+  AdminPanelSettings,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -57,7 +58,7 @@ interface NavGroup {
   }[];
 }
 
-const navGroups: NavGroup[] = [
+const buildNavGroups = (isAdmin: boolean): NavGroup[] => [
   {
     label: 'Main',
     items: [
@@ -90,6 +91,12 @@ const navGroups: NavGroup[] = [
       { text: 'Categories', icon: <Category fontSize="small" />, path: '/categories' },
     ],
   },
+  ...(isAdmin ? [{
+    label: 'Admin',
+    items: [
+      { text: 'User Management', icon: <AdminPanelSettings fontSize="small" />, path: '/admin' },
+    ],
+  }] : []),
 ];
 
 const pageTitles: Record<string, string> = {
@@ -106,6 +113,7 @@ const pageTitles: Record<string, string> = {
   '/backup': 'Backup',
   '/payees': 'Payees',
   '/categories': 'Categories',
+  '/admin': 'User Management',
 };
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
@@ -116,6 +124,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const theme = useTheme();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
   const [changePasswordOpen, setChangePasswordOpen] = React.useState(false);
+
+  const navGroups = buildNavGroups(user?.is_admin ?? false);
 
   const pageTitle = pageTitles[location.pathname] ?? 'Expense Manager';
 

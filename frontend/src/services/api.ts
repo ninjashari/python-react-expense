@@ -329,4 +329,12 @@ export const rewardPointsApi = {
     api.delete(`/reward-points/bonuses/${id}`).then(res => res.data),
 };
 
+export const adminApi = {
+  listUsers: (): Promise<import('../types/auth').User[]> =>
+    api.get('/admin/users').then(res => res.data),
+
+  deleteUser: (userId: string): Promise<{ message: string }> =>
+    api.delete(`/admin/users/${userId}`).then(res => res.data),
+};
+
 export default api;

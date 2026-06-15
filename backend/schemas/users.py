@@ -16,9 +16,10 @@ class UserLogin(BaseModel):
 
 class UserResponse(UserBase):
     id: uuid.UUID
+    is_admin: bool = False
     created_at: datetime
     updated_at: Optional[datetime]
-    
+
     class Config:
         from_attributes = True
 
