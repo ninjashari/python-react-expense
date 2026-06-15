@@ -17,10 +17,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Drop the existing CHECK constraint
-    op.drop_constraint('accounts_type_check', 'accounts', type_='check')
-    
-    # Add the new CHECK constraint with PPF included
+    # Use IF EXISTS because the constraint may not exist on a fresh database
+    op.execute("ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_type_check")
+
     op.create_check_constraint(
         'accounts_type_check',
         'accounts',
