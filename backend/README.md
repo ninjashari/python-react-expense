@@ -76,10 +76,23 @@ The FastAPI backend for the Expense Manager application, providing a robust REST
 
 6. **Run the development server:**
    ```bash
-   python -m uvicorn main:app --reload --port 8001
+   python -m uvicorn main:app --reload --port 8000
    ```
 
-The API will be available at `http://localhost:8001` with documentation at `http://localhost:8001/docs`.
+The API will be available at `http://localhost:8000` with documentation at `http://localhost:8000/docs`.
+
+### Seeding Demo Data
+
+To populate a self-contained demo account with realistic sample data (accounts, categories, payees,
+~225 transactions, and reward-point history) for local testing or screenshots:
+
+```bash
+python seed_demo_data.py
+```
+
+This creates/refreshes the user `demo@expensemanager.app` (password `demo1234`). The script is
+**idempotent and isolated** — re-running it wipes and recreates only that demo user's rows and never
+modifies any other account's data.
 
 ## ⚙️ Configuration
 

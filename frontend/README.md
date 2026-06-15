@@ -24,7 +24,7 @@ A modern React TypeScript frontend for the Expense Manager application, featurin
 ### Core UI Features
 - **Responsive Design** - Works on desktop, tablet, and mobile
 - **Material-UI Components** - Consistent, accessible UI components
-- **Dark/Light Theme** - Automatic theme switching support
+- **Dark/Light Theme** - One-click theme toggle (Indigo + Emerald design system), persisted across sessions via `ColorModeProvider`
 - **Form Validation** - React Hook Form with Yup validation
 - **Toast Notifications** - User-friendly success/error messages
 - **Loading States** - Skeleton loaders and progress indicators
@@ -370,33 +370,38 @@ const TransactionForm: React.FC = () => {
 
 ## 🎨 Styling
 
-### Material-UI Theme
+### Material-UI Theme & Color Mode
+
+The theme is built dynamically from the active color mode. `ColorModeProvider`
+(`src/contexts/ThemeContext.tsx`) stores the chosen mode in `localStorage` and exposes a
+`useColorMode()` hook; `App.tsx` rebuilds the MUI theme with `useMemo` whenever the mode changes.
 
 **Theme Configuration:**
 ```typescript
-const theme = createTheme({
+// src/contexts/ThemeContext.tsx exposes { mode, toggleColorMode }
+const { mode } = useColorMode();
+
+const theme = useMemo(() => createTheme({
   palette: {
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
+    mode, // 'light' | 'dark'
+    primary:   { main: mode === 'light' ? '#4f46e5' : '#818cf8' }, // Indigo
+    secondary: { main: mode === 'light' ? '#10b981' : '#34d399' }, // Emerald
+    background: {
+      default: mode === 'light' ? '#f8fafc' : '#0f172a',
+      paper:   mode === 'light' ? '#ffffff' : '#1e293b',
     },
   },
-  typography: {
-    fontFamily: ['Roboto', 'Arial', 'sans-serif'].join(','),
-  },
+  typography: { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" },
+  shape: { borderRadius: 10 },
   components: {
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          textTransform: 'none',
-        },
-      },
-    },
+    MuiButton: { styleOverrides: { root: { textTransform: 'none', fontWeight: 600 } } },
+    // MuiCard, MuiAppBar, MuiDrawer, MuiListItemButton, MuiTextField, MuiTableHead… also overridden
   },
-});
+}), [mode]);
 ```
+
+The toggle lives in the top `AppBar` (see `src/components/Layout.tsx`) and flips between
+`Brightness4` / `Brightness7` icons.
 
 **Custom Styling:**
 ```typescript

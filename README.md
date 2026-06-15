@@ -8,22 +8,79 @@
 [![Material-UI](https://img.shields.io/badge/Material--UI-5.18-007FFF.svg)](https://mui.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A modern, full-stack expense management application designed for personal financial tracking and analysis. Built with React 19 and FastAPI, featuring comprehensive transaction management, intelligent AI-powered imports, and advanced reporting capabilities.
+A modern, full-stack expense management application designed for personal financial tracking and analysis. Built with React 19 and FastAPI, featuring comprehensive transaction management, intelligent AI-powered imports, and advanced reporting capabilities — wrapped in a refreshed Material-UI design system with a built-in **dark / light mode** toggle.
 
 ## 📋 Table of Contents
 
+- [Screenshots](#-screenshots)
 - [Features](#-features)
 - [Technology Stack](#-technology-stack)
 - [Quick Start](#-quick-start)
 - [Installation](#-installation)
 - [Configuration](#-configuration)
+- [Demo Data](#-demo-data)
 - [Usage](#-usage)
 - [API Documentation](#-api-documentation)
 - [Development](#-development)
 - [Contributing](#-contributing)
 - [License](#-license)
 
+## 📸 Screenshots
+
+> All screenshots use the built-in **demo account** (`demo@expensemanager.app` / `demo1234`) with
+> generated sample data — see [Demo Data](#-demo-data) to load it locally. No real financial data is shown.
+
+### Dashboard
+
+| Light | Dark |
+|-------|------|
+| ![Dashboard – light](docs/screenshots/dashboard-light.png) | ![Dashboard – dark](docs/screenshots/dashboard-dark.png) |
+
+### Sign In
+
+| Light | Dark |
+|-------|------|
+| ![Sign in – light](docs/screenshots/login-light.png) | ![Sign in – dark](docs/screenshots/login-dark.png) |
+
+### Transactions
+
+| Light | Dark |
+|-------|------|
+| ![Transactions – light](docs/screenshots/transactions-light.png) | ![Transactions – dark](docs/screenshots/transactions-dark.png) |
+
+### Accounts
+
+| Light | Dark |
+|-------|------|
+| ![Accounts – light](docs/screenshots/accounts-light.png) | ![Accounts – dark](docs/screenshots/accounts-dark.png) |
+
+### Reports & Analytics
+
+| All Reports | By Category | Month-wise |
+|-------------|-------------|------------|
+| ![Reports](docs/screenshots/reports-light.png) | ![Category report](docs/screenshots/reports-by-category-light.png) | ![Month-wise report](docs/screenshots/reports-monthwise-light.png) |
+
+### Reward Points & AI Learning
+
+| Reward Points | Points History | AI Learning |
+|---------------|----------------|-------------|
+| ![Reward points](docs/screenshots/reward-points-light.png) | ![Reward points history](docs/screenshots/reward-points-history-light.png) | ![AI learning](docs/screenshots/learning-light.png) |
+
+### Data Management
+
+| Import | Categories | Payees | Backup |
+|--------|------------|--------|--------|
+| ![Import](docs/screenshots/import-light.png) | ![Categories](docs/screenshots/categories-light.png) | ![Payees](docs/screenshots/payees-light.png) | ![Backup](docs/screenshots/backup-light.png) |
+
 ## ✨ Features
+
+### 🎨 Modern UI/UX
+
+- **Refreshed Design System** - Indigo + Emerald Material-UI theme with the Inter typeface and rounded, card-based layouts
+- **Dark / Light Mode** - One-click theme toggle in the top bar, persisted across sessions via `localStorage`
+- **Grouped Navigation** - Sidebar organized into Main, Reports, Insights, and Data sections with a branded header and user footer
+- **Split-Panel Auth** - Redesigned sign-in / sign-up screens with a gradient brand panel
+- **Responsive Layout** - Adapts from desktop to mobile widths
 
 ### 💼 Core Financial Management
 
@@ -133,11 +190,11 @@ cp .env.example .env
 alembic upgrade head
 
 # Start the development server
-python -m uvicorn main:app --reload --port 8001
+python -m uvicorn main:app --reload --port 8000
 ```
 
-🎉 **Backend is now running at:** `http://localhost:8001`  
-📚 **API Documentation:** `http://localhost:8001/docs`
+🎉 **Backend is now running at:** `http://localhost:8000`  
+📚 **API Documentation:** `http://localhost:8000/docs`
 
 ### 4. Frontend Setup
 
@@ -155,7 +212,7 @@ cp .env.example .env
 npm start
 ```
 
-🎉 **Frontend is now running at:** `http://localhost:3001`
+🎉 **Frontend is now running at:** `http://localhost:3000`
 
 ### 5. Optional: PDF Processing Setup
 
@@ -204,7 +261,7 @@ ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
 # CORS Configuration
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3001
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 
 # Optional: PDF LLM Import
 OLLAMA_BASE_URL=http://localhost:11434
@@ -221,8 +278,30 @@ LOG_LEVEL=INFO
 Create a `.env` file in the `frontend/` directory:
 
 ```bash
-REACT_APP_API_BASE_URL=http://localhost:8001/api
+REACT_APP_API_BASE_URL=http://localhost:8000/api
 ```
+
+## 🌱 Demo Data
+
+Want to explore the app (or reproduce the screenshots above) without entering your own data? A seed
+script creates a self-contained **demo user** with realistic generated accounts, categories, payees,
+~225 transactions across several months, and reward-point history.
+
+```bash
+cd backend
+python seed_demo_data.py
+```
+
+Then sign in with:
+
+| Field | Value |
+|-------|-------|
+| Email | `demo@expensemanager.app` |
+| Password | `demo1234` |
+
+The script is **idempotent and isolated** — re-running it only wipes and recreates the demo user's own
+data and never touches any other account. Reward-point values are stored as whole numbers to match the
+API schema.
 
 ## 📖 Usage Guide
 
@@ -298,7 +377,7 @@ REACT_APP_API_BASE_URL=http://localhost:8001/api
 
 ### REST API Endpoints
 
-The application provides a comprehensive REST API. Full interactive documentation is available at `http://localhost:8001/docs` when running the backend.
+The application provides a comprehensive REST API. Full interactive documentation is available at `http://localhost:8000/docs` when running the backend.
 
 #### Core Resources
 | Endpoint | Methods | Description |
