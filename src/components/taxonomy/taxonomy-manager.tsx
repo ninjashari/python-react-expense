@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { LucideIcon } from "lucide-react";
-import { Loader2, MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Loader2, MoreHorizontal, Pencil, Plus, Search, Sparkles, Store, Tags, Trash2 } from "lucide-react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { apiFetch, ApiError } from "@/lib/client";
@@ -38,12 +37,14 @@ export type TaxonomyItem = {
   txnCount: number;
 };
 
+const ICONS = { Tags, Store };
+
 type Props = {
   title: string;
   description: string;
   endpoint: string;
   defaultColor: string;
-  icon: LucideIcon;
+  icon: keyof typeof ICONS;
 };
 
 /** Debounce a value by `delay` ms. The setState runs inside a timer (async),
@@ -57,7 +58,8 @@ function useDebounced<T>(value: T, delay = 300): T {
   return debounced;
 }
 
-export function TaxonomyManager({ title, description, endpoint, defaultColor, icon: Icon }: Props) {
+export function TaxonomyManager({ title, description, endpoint, defaultColor, icon }: Props) {
+  const Icon = ICONS[icon];
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounced(search.trim(), 300);
 
@@ -73,11 +75,16 @@ export function TaxonomyManager({ title, description, endpoint, defaultColor, ic
   const [saving, setSaving] = useState(false);
 
   const [deleting, setDeleting] = useState<TaxonomyItem | null>(null);
+  const [cleaning, setCleaning] = useState(false);
 
   const items = data ?? [];
   const isSearching = debouncedSearch.length > 0;
+  const unusedCount = items.filter((i) => i.txnCount === 0).length;
 
-  const singular = useMemo(() => title.replace(/s$/, ""), [title]);
+  const singular = useMemo(
+    () => (title.endsWith("ies") ? `${title.slice(0, -3)}y` : title.replace(/s$/, "")),
+    [title],
+  );
 
   function openCreate() {
     setEditing(null);
@@ -139,9 +146,28 @@ export function TaxonomyManager({ title, description, endpoint, defaultColor, ic
     }
   }
 
+  async function handleCleanup() {
+    setCleaning(true);
+    try {
+      const res = await apiFetch<{ deleted: number }>(`${endpoint}/unused`, { method: "DELETE" });
+      toast.success(`Removed ${res.deleted} unused ${res.deleted === 1 ? singular.toLowerCase() : title.toLowerCase()}`);
+      mutate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to clean up");
+    } finally {
+      setCleaning(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader title={title} description={description}>
+        {unusedCount > 0 && (
+          <Button variant="outline" onClick={handleCleanup} disabled={cleaning}>
+            {cleaning ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            Remove unused ({unusedCount})
+          </Button>
+        )}
         <Button onClick={openCreate}>
           <Plus className="size-4" />
           Add {singular.toLowerCase()}

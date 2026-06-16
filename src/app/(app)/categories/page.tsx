@@ -1,4 +1,3 @@
-import { Tags } from "lucide-react";
 import { TaxonomyManager } from "@/components/taxonomy/taxonomy-manager";
 
 export default function CategoriesPage() {
@@ -8,7 +7,7 @@ export default function CategoriesPage() {
       description="Organise your transactions into spending categories."
       endpoint="/api/categories"
       defaultColor="#6366f1"
-      icon={Tags}
+      icon="Tags"
     />
   );
 }

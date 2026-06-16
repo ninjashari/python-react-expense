@@ -1,4 +1,3 @@
-import { Store } from "lucide-react";
 import { TaxonomyManager } from "@/components/taxonomy/taxonomy-manager";
 
 export default function PayeesPage() {
@@ -8,7 +7,7 @@ export default function PayeesPage() {
       description="Track who you pay and who pays you."
       endpoint="/api/payees"
       defaultColor="#10b981"
-      icon={Store}
+      icon="Store"
     />
   );
 }
