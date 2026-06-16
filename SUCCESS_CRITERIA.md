@@ -32,6 +32,6 @@ Single Next.js (App Router, TS) app. Postgres (Neon) + Drizzle. Tailwind + shadc
 - [x] Builds and runs locally; smoke-tested
 
 ## Later iterations (post-core)
-- Reward points + bonuses + redemptions, history
-- CSV/Excel import
-- Backup/export
+- [x] Reward points + redemptions (simple ledger), history
+- [x] CSV/Excel import
+- [x] Backup/export (JSON backup + CSV transactions export)

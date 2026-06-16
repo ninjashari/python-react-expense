@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { UnauthorizedError } from "./auth";
 import { OwnershipError } from "./transactions-service";
+import { InsufficientPointsError } from "./rewards";
 
 export function ok<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, init);
@@ -34,6 +35,9 @@ export function route<A extends unknown[]>(
         return fail("Validation failed", 422, err.issues);
       }
       if (err instanceof OwnershipError) {
+        return fail(err.message, 422);
+      }
+      if (err instanceof InsufficientPointsError) {
         return fail(err.message, 422);
       }
       console.error("[route error]", err);

@@ -5,6 +5,8 @@ import {
   Tags,
   Store,
   PieChart,
+  Award,
+  Database,
   type LucideIcon,
 } from "lucide-react";
 
@@ -17,4 +19,6 @@ export const navItems: NavItem[] = [
   { href: "/categories", label: "Categories", icon: Tags },
   { href: "/payees", label: "Payees", icon: Store },
   { href: "/reports", label: "Reports", icon: PieChart },
+  { href: "/rewards", label: "Rewards", icon: Award },
+  { href: "/data", label: "Data", icon: Database },
 ];

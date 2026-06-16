@@ -139,16 +139,47 @@ export const transactions = pgTable(
   ],
 );
 
+export const rewardRedemptions = pgTable(
+  "reward_redemptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    points: numeric("points", { precision: 12, scale: 2 }).notNull(),
+    description: text("description"),
+    date: date("date").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("reward_redemptions_user_idx").on(t.userId),
+    index("reward_redemptions_account_idx").on(t.accountId),
+  ],
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   accounts: many(accounts),
   transactions: many(transactions),
   categories: many(categories),
   payees: many(payees),
+  rewardRedemptions: many(rewardRedemptions),
 }));
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
   user: one(users, { fields: [accounts.userId], references: [users.id] }),
   transactions: many(transactions),
+  rewardRedemptions: many(rewardRedemptions),
+}));
+
+export const rewardRedemptionsRelations = relations(rewardRedemptions, ({ one }) => ({
+  user: one(users, { fields: [rewardRedemptions.userId], references: [users.id] }),
+  account: one(accounts, {
+    fields: [rewardRedemptions.accountId],
+    references: [accounts.id],
+  }),
 }));
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
@@ -175,3 +206,5 @@ export type Category = typeof categories.$inferSelect;
 export type Payee = typeof payees.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type NewTransaction = typeof transactions.$inferInsert;
+export type RewardRedemption = typeof rewardRedemptions.$inferSelect;
+export type NewRewardRedemption = typeof rewardRedemptions.$inferInsert;

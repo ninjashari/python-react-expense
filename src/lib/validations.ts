@@ -109,5 +109,12 @@ export const taxonomySchema = z.object({
 
 export const taxonomyUpdateSchema = taxonomySchema.partial();
 
+export const redemptionSchema = z.object({
+  points: money.pipe(z.number().positive()),
+  description: z.string().max(500).optional().nullable(),
+  date: z.string(),
+});
+
 export type AccountInput = z.infer<typeof accountSchema>;
 export type TransactionInput = z.infer<typeof transactionSchema>;
+export type RedemptionInput = z.infer<typeof redemptionSchema>;
