@@ -14,6 +14,10 @@ export const POST = route(async (req: Request) => {
 
   const body = loginSchema.parse(await req.json());
 
+  // Per-account throttle so IP rotation cannot brute-force a single account.
+  const byEmail = rateLimit(`login-email:${body.email}`, 10, 60_000);
+  if (!byEmail.ok) return fail("Too many attempts. Try again later.", 429);
+
   const [user] = await db
     .select()
     .from(users)

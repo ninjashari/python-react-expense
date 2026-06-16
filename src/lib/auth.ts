@@ -6,10 +6,19 @@ import bcrypt from "bcryptjs";
 const COOKIE_NAME = "em_session";
 const MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
+// Placeholder values that must never be used to sign real sessions.
+const INSECURE_SECRETS = new Set([
+  "change-me-to-a-long-random-string-at-least-32-chars",
+  "local-development-secret-key-at-least-32-characters-long",
+]);
+
 function getSecret() {
   const secret = process.env.AUTH_SECRET;
   if (!secret || secret.length < 32) {
     throw new Error("AUTH_SECRET must be set and at least 32 characters");
+  }
+  if (process.env.NODE_ENV === "production" && INSECURE_SECRETS.has(secret)) {
+    throw new Error("AUTH_SECRET is a known placeholder; set a unique secret in production");
   }
   return new TextEncoder().encode(secret);
 }

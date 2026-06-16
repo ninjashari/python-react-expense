@@ -14,10 +14,15 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(100),
 });
 
-export const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1).max(100),
-  newPassword: passwordSchema,
-});
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(100),
+    newPassword: passwordSchema,
+  })
+  .refine((d) => d.currentPassword !== d.newPassword, {
+    message: "New password must be different from the current one",
+    path: ["newPassword"],
+  });
 
 export const accountTypeValues = [
   "checking",

@@ -4,7 +4,12 @@ import { transactions, accounts, categories, payees } from "@/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { transactionSchema, transactionTypeValues } from "@/lib/validations";
 import { route, ok, created } from "@/lib/http";
-import { assertAccountsOwned, recalcAffected } from "@/lib/transactions-service";
+import {
+  assertAccountsOwned,
+  assertCategoryOwned,
+  assertPayeeOwned,
+  recalcAffected,
+} from "@/lib/transactions-service";
 
 export const runtime = "nodejs";
 
@@ -96,6 +101,8 @@ export const POST = route(async (req: Request) => {
   const userId = await requireUserId();
   const data = transactionSchema.parse(await req.json());
   await assertAccountsOwned(userId, [data.accountId, data.toAccountId]);
+  await assertCategoryOwned(userId, data.categoryId);
+  await assertPayeeOwned(userId, data.payeeId);
 
   const [row] = await db
     .insert(transactions)

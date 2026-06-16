@@ -4,7 +4,12 @@ import { transactions } from "@/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { transactionUpdateSchema } from "@/lib/validations";
 import { route, ok, noContent, fail } from "@/lib/http";
-import { assertAccountsOwned, recalcAffected } from "@/lib/transactions-service";
+import {
+  assertAccountsOwned,
+  assertCategoryOwned,
+  assertPayeeOwned,
+  recalcAffected,
+} from "@/lib/transactions-service";
 
 export const runtime = "nodejs";
 
@@ -47,6 +52,8 @@ export const PUT = route(async (req: Request, { params }: Ctx) => {
     return fail("Cannot transfer to the same account", 422);
 
   await assertAccountsOwned(userId, [nextAccount, nextTo]);
+  if (data.categoryId !== undefined) await assertCategoryOwned(userId, data.categoryId);
+  if (data.payeeId !== undefined) await assertPayeeOwned(userId, data.payeeId);
 
   const update: Record<string, unknown> = { updatedAt: new Date() };
   update.type = nextType;
