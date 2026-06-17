@@ -234,11 +234,11 @@ export function TaxonomyManager({ title, description, endpoint, defaultColor, ic
             {items.map((item) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                className="group flex items-center justify-between gap-3 rounded-xl border p-3 transition-all duration-200 hover:border-primary/20 hover:shadow-sm"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <span
-                    className="size-4 shrink-0 rounded-full border"
+                    className="size-4 shrink-0 rounded-full shadow-sm ring-2 ring-white dark:ring-card"
                     style={{ backgroundColor: item.color }}
                     aria-hidden
                   />
