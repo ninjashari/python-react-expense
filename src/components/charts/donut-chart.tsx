@@ -3,9 +3,15 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { formatCurrency } from "@/lib/utils";
 
-export type DonutDatum = { name: string; value: number; color: string };
+export type DonutDatum = { name: string; value: number; color: string; id?: string | null };
 
-export function DonutChart({ data }: { data: DonutDatum[] }) {
+export function DonutChart({
+  data,
+  onSelect,
+}: {
+  data: DonutDatum[];
+  onSelect?: (datum: DonutDatum) => void;
+}) {
   if (!data.length) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
@@ -24,9 +30,14 @@ export function DonutChart({ data }: { data: DonutDatum[] }) {
           outerRadius={96}
           paddingAngle={2}
           stroke="none"
+          onClick={onSelect ? (_, index) => onSelect(data[index]) : undefined}
         >
           {data.map((d, i) => (
-            <Cell key={i} fill={d.color} />
+            <Cell
+              key={i}
+              fill={d.color}
+              className={onSelect ? "cursor-pointer outline-none" : "outline-none"}
+            />
           ))}
         </Pie>
         <Tooltip

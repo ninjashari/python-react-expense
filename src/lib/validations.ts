@@ -115,6 +115,22 @@ export const redemptionSchema = z.object({
   date: z.string(),
 });
 
+const bulkIds = z.array(z.string().uuid()).min(1).max(500);
+
+export const bulkTransactionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("delete"), ids: bulkIds }),
+  z.object({
+    action: z.literal("categorize"),
+    ids: bulkIds,
+    categoryId: z.string().uuid().nullable(),
+  }),
+  z.object({
+    action: z.literal("setPayee"),
+    ids: bulkIds,
+    payeeId: z.string().uuid().nullable(),
+  }),
+]);
+
 export type AccountInput = z.infer<typeof accountSchema>;
 export type TransactionInput = z.infer<typeof transactionSchema>;
 export type RedemptionInput = z.infer<typeof redemptionSchema>;

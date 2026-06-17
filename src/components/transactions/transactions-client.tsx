@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
   ArrowLeftRight,
@@ -9,6 +10,8 @@ import {
   MoreHorizontal,
   Plus,
   Search,
+  Trash2,
+  X,
 } from "lucide-react";
 import { fetcher } from "@/lib/swr";
 import { apiFetch } from "@/lib/client";
@@ -18,6 +21,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -45,10 +49,12 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { TransactionForm } from "./transaction-form";
+import { InlineInput, InlineSelect } from "./inline-edits";
 import type { AccountOption, Option, Tx, TxPage, TxType } from "./types";
 
 const PAGE_SIZE = 25;
 const ALL = "all";
+const NONE = "none";
 
 type FilterType = TxType | "all";
 
@@ -68,14 +74,22 @@ function useDebounced<T>(value: T, delay = 300): T {
 }
 
 export function TransactionsClient() {
-  const [page, setPage] = useState(1);
-  const [accountId, setAccountId] = useState<string>(ALL);
-  const [categoryId, setCategoryId] = useState<string>(ALL);
-  const [payeeId, setPayeeId] = useState<string>(ALL);
-  const [type, setType] = useState<FilterType>("all");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [search, setSearch] = useState("");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Initialize filters from the URL so report drill-downs and back-navigation
+  // restore the exact view. The initializer runs once on mount.
+  const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get("page")) || 1));
+  const [accountId, setAccountId] = useState(() => searchParams.get("accountId") ?? ALL);
+  const [categoryId, setCategoryId] = useState(() => searchParams.get("categoryId") ?? ALL);
+  const [payeeId, setPayeeId] = useState(() => searchParams.get("payeeId") ?? ALL);
+  const [type, setType] = useState<FilterType>(
+    () => (searchParams.get("type") as FilterType) ?? "all",
+  );
+  const [from, setFrom] = useState(() => searchParams.get("from") ?? "");
+  const [to, setTo] = useState(() => searchParams.get("to") ?? "");
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
   const debouncedSearch = useDebounced(search, 300);
 
   const [sort] = useState<"date" | "amount" | "created">("date");
@@ -84,9 +98,10 @@ export function TransactionsClient() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Tx | null>(null);
   const [deleting, setDeleting] = useState<Tx | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  // Changing any filter resets pagination to the first page. Wrap each setter
-  // so the reset happens in the event handler (not synchronously in an effect).
+  // Changing any filter resets pagination to the first page.
   function withReset<T>(setter: (v: T) => void) {
     return (v: T) => {
       setter(v);
@@ -118,6 +133,26 @@ export function TransactionsClient() {
     return params.toString();
   }, [page, sort, order, accountId, categoryId, payeeId, type, from, to, debouncedSearch]);
 
+  // Mirror the active filters into the URL (without pageSize/sort noise) so the
+  // view is shareable and survives navigation. Replace, don't push.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (page > 1) params.set("page", String(page));
+    if (accountId !== ALL) params.set("accountId", accountId);
+    if (categoryId !== ALL) params.set("categoryId", categoryId);
+    if (payeeId !== ALL) params.set("payeeId", payeeId);
+    if (type !== "all") params.set("type", type);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+    const next = params.toString();
+    const current = searchParams.toString();
+    if (next !== current) {
+      router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, accountId, categoryId, payeeId, type, from, to, debouncedSearch]);
+
   const { data, isLoading, mutate } = useSWR<TxPage>(`/api/transactions?${qs}`, fetcher);
   const { data: accounts } = useSWR<AccountOption[]>("/api/accounts", fetcher);
   const { data: categories } = useSWR<Option[]>("/api/categories", fetcher);
@@ -130,6 +165,14 @@ export function TransactionsClient() {
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
+
+  // Selection only ever applies to the rows currently in view: reset it during
+  // render when the query (filters/page) changes — the React-recommended pattern.
+  const [selectionScope, setSelectionScope] = useState(qs);
+  if (selectionScope !== qs) {
+    setSelectionScope(qs);
+    setSelected(new Set());
+  }
 
   const hasFilters =
     accountId !== ALL ||
@@ -169,6 +212,83 @@ export function TransactionsClient() {
       mutate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete transaction");
+    }
+  }
+
+  // Inline single-field edit. The PUT endpoint recalculates balances.
+  const saveField = useCallback(
+    async (id: string, patch: Record<string, unknown>) => {
+      try {
+        await apiFetch(`/api/transactions/${id}`, { method: "PUT", body: patch });
+        toast.success("Transaction updated");
+        mutate();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to update transaction");
+        mutate(); // revert optimistic display
+      }
+    },
+    [mutate],
+  );
+
+  // --- Bulk actions ---
+  const selectedIds = useMemo(() => [...selected], [selected]);
+
+  function toggleRow(id: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleAll(checked: boolean) {
+    setSelected(checked ? new Set(items.map((t) => t.id)) : new Set());
+  }
+
+  const allSelected = items.length > 0 && items.every((t) => selected.has(t.id));
+  const someSelected = items.some((t) => selected.has(t.id));
+  const headerState = allSelected ? true : someSelected ? "indeterminate" : false;
+
+  async function bulkCategorize(value: string) {
+    try {
+      await apiFetch("/api/transactions/bulk", {
+        method: "POST",
+        body: { action: "categorize", ids: selectedIds, categoryId: value === NONE ? null : value },
+      });
+      toast.success(`Updated ${selectedIds.length} transaction${selectedIds.length === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      mutate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bulk update failed");
+    }
+  }
+
+  async function bulkSetPayee(value: string) {
+    try {
+      await apiFetch("/api/transactions/bulk", {
+        method: "POST",
+        body: { action: "setPayee", ids: selectedIds, payeeId: value === NONE ? null : value },
+      });
+      toast.success(`Updated ${selectedIds.length} transaction${selectedIds.length === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      mutate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bulk update failed");
+    }
+  }
+
+  async function bulkDelete() {
+    try {
+      await apiFetch("/api/transactions/bulk", {
+        method: "POST",
+        body: { action: "delete", ids: selectedIds },
+      });
+      toast.success(`Deleted ${selectedIds.length} transaction${selectedIds.length === 1 ? "" : "s"}`);
+      setSelected(new Set());
+      mutate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bulk delete failed");
     }
   }
 
@@ -300,6 +420,53 @@ export function TransactionsClient() {
         </CardContent>
       </Card>
 
+      {/* Bulk action toolbar */}
+      {selected.size > 0 && (
+        <Card className="mb-4 border-primary/40">
+          <CardContent className="flex flex-wrap items-center gap-3 p-3">
+            <span className="text-sm font-medium">
+              {selected.size} selected
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value="" onValueChange={bulkCategorize}>
+                <SelectTrigger size="sm" className="w-[160px]">
+                  <SelectValue placeholder="Set category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Uncategorized</SelectItem>
+                  {categoryOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value="" onValueChange={bulkSetPayee}>
+                <SelectTrigger size="sm" className="w-[160px]">
+                  <SelectValue placeholder="Set payee" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>No payee</SelectItem>
+                  {payeeOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="destructive" size="sm" onClick={() => setBulkDeleting(true)}>
+                <Trash2 className="size-4" />
+                Delete
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                <X className="size-4" />
+                Clear
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Table */}
       <Card>
         <CardContent className="p-0">
@@ -329,6 +496,13 @@ export function TransactionsClient() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={headerState}
+                      onCheckedChange={(c) => toggleAll(c === true)}
+                      aria-label="Select all"
+                    />
+                  </TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Description / Payee</TableHead>
                   <TableHead>Category</TableHead>
@@ -343,6 +517,11 @@ export function TransactionsClient() {
                   <TransactionRow
                     key={tx.id}
                     tx={tx}
+                    selected={selected.has(tx.id)}
+                    onToggle={(c) => toggleRow(tx.id, c)}
+                    categoryOptions={categoryOptions}
+                    payeeOptions={payeeOptions}
+                    onSaveField={saveField}
                     onEdit={() => openEdit(tx)}
                     onDelete={() => setDeleting(tx)}
                   />
@@ -405,40 +584,95 @@ export function TransactionsClient() {
         description="This action cannot be undone."
         onConfirm={handleDelete}
       />
+
+      <ConfirmDialog
+        open={bulkDeleting}
+        onOpenChange={setBulkDeleting}
+        title={`Delete ${selected.size} transaction${selected.size === 1 ? "" : "s"}?`}
+        description="This action cannot be undone."
+        confirmLabel={`Delete ${selected.size}`}
+        onConfirm={bulkDelete}
+      />
     </div>
   );
 }
 
 function TransactionRow({
   tx,
+  selected,
+  onToggle,
+  categoryOptions,
+  payeeOptions,
+  onSaveField,
   onEdit,
   onDelete,
 }: {
   tx: Tx;
+  selected: boolean;
+  onToggle: (checked: boolean) => void;
+  categoryOptions: Option[];
+  payeeOptions: Option[];
+  onSaveField: (id: string, patch: Record<string, unknown>) => Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const amount = Number(tx.amount);
-  const primary = tx.payeeName || tx.description || "Transaction";
+  const primaryDisplay = (
+    <span className="truncate font-medium">
+      {tx.payeeName || tx.description || "Transaction"}
+    </span>
+  );
 
   return (
-    <TableRow className="hover:bg-muted/50">
-      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-        {formatDate(tx.date)}
-      </TableCell>
-      <TableCell className="font-medium">{primary}</TableCell>
+    <TableRow className={cn("hover:bg-muted/50", selected && "bg-muted/40")}>
       <TableCell>
-        {tx.categoryName ? (
-          <span className="inline-flex items-center gap-2">
-            <span
-              className="size-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: tx.categoryColor ?? "#94a3b8" }}
-            />
-            {tx.categoryName}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">Uncategorized</span>
-        )}
+        <Checkbox
+          checked={selected}
+          onCheckedChange={(c) => onToggle(c === true)}
+          aria-label="Select row"
+        />
+      </TableCell>
+      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+        <InlineInput
+          value={tx.date}
+          type="date"
+          display={<span>{formatDate(tx.date)}</span>}
+          onCommit={(next) => onSaveField(tx.id, { date: next })}
+        />
+      </TableCell>
+      <TableCell className="max-w-[220px]">
+        <InlineSelect
+          value={tx.payeeId ?? "none"}
+          display={primaryDisplay}
+          noneLabel="No payee"
+          options={payeeOptions.map((p) => ({ value: p.id, label: p.name }))}
+          onCommit={(next) =>
+            onSaveField(tx.id, { payeeId: next === "none" ? null : next })
+          }
+        />
+      </TableCell>
+      <TableCell>
+        <InlineSelect
+          value={tx.categoryId ?? "none"}
+          noneLabel="Uncategorized"
+          options={categoryOptions.map((c) => ({ value: c.id, label: c.name }))}
+          display={
+            tx.categoryName ? (
+              <span className="inline-flex items-center gap-2">
+                <span
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: tx.categoryColor ?? "#94a3b8" }}
+                />
+                {tx.categoryName}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">Uncategorized</span>
+            )
+          }
+          onCommit={(next) =>
+            onSaveField(tx.id, { categoryId: next === "none" ? null : next })
+          }
+        />
       </TableCell>
       <TableCell className="text-sm">{tx.accountName ?? "—"}</TableCell>
       <TableCell>
@@ -453,10 +687,21 @@ function TransactionRow({
           tx.type === "expense" && "text-rose-500",
         )}
       >
-        {tx.type === "income" && "+"}
-        {tx.type === "expense" && "−"}
-        {tx.type === "transfer" && "⇄ "}
-        {formatCurrency(amount)}
+        <InlineInput
+          value={String(amount)}
+          type="number"
+          align="right"
+          inputClassName="w-24"
+          display={
+            <span>
+              {tx.type === "income" && "+"}
+              {tx.type === "expense" && "−"}
+              {tx.type === "transfer" && "⇄ "}
+              {formatCurrency(amount)}
+            </span>
+          }
+          onCommit={(next) => onSaveField(tx.id, { amount: next })}
+        />
       </TableCell>
       <TableCell>
         <DropdownMenu>
