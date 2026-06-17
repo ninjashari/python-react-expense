@@ -14,7 +14,15 @@ import { formatCurrency } from "@/lib/utils";
 
 export type TrendDatum = { month: string; income: number; expense: number };
 
-export function TrendChart({ data }: { data: TrendDatum[] }) {
+export function TrendChart({
+  data,
+  incomeLabel = "Income",
+  expenseLabel = "Expense",
+}: {
+  data: TrendDatum[];
+  incomeLabel?: string;
+  expenseLabel?: string;
+}) {
   if (!data.length) {
     return (
       <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
@@ -46,8 +54,8 @@ export function TrendChart({ data }: { data: TrendDatum[] }) {
           cursor={{ fill: "var(--accent)", opacity: 0.4 }}
         />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey="income" name="Income" fill="var(--chart-2)" radius={[4, 4, 0, 0]} />
-        <Bar dataKey="expense" name="Expense" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="income" name={incomeLabel} fill="var(--chart-2)" radius={[4, 4, 0, 0]} />
+        <Bar dataKey="expense" name={expenseLabel} fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
