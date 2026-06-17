@@ -102,22 +102,36 @@ export default async function DashboardPage() {
       label: "Total balance",
       value: totalBalance,
       icon: Wallet,
-      tint: "text-primary",
+      gradient: "from-indigo-500 to-purple-600",
+      iconBg: "bg-indigo-500/10 text-indigo-600 dark:bg-indigo-400/15 dark:text-indigo-400",
     },
-    { label: "Income (this month)", value: income, icon: TrendingUp, tint: "text-emerald-500" },
-    { label: "Expenses (this month)", value: expense, icon: TrendingDown, tint: "text-rose-500" },
+    {
+      label: "Income (this month)",
+      value: income,
+      icon: TrendingUp,
+      gradient: "from-emerald-500 to-teal-600",
+      iconBg: "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400",
+    },
+    {
+      label: "Expenses (this month)",
+      value: expense,
+      icon: TrendingDown,
+      gradient: "from-rose-500 to-pink-600",
+      iconBg: "bg-rose-500/10 text-rose-600 dark:bg-rose-400/15 dark:text-rose-400",
+    },
     {
       label: "Net (this month)",
       value: income - expense,
       icon: ArrowLeftRight,
-      tint: "text-sky-500",
+      gradient: "from-sky-500 to-cyan-600",
+      iconBg: "bg-sky-500/10 text-sky-600 dark:bg-sky-400/15 dark:text-sky-400",
     },
   ];
 
   return (
     <div>
       <PageHeader title={`Welcome back, ${user.name.split(" ")[0]}`} description="Here's your financial overview.">
-        <Button asChild>
+        <Button asChild className="gradient-primary border-0 text-white shadow-md hover:opacity-90">
           <Link href="/transactions">
             New transaction <ArrowRight className="size-4" />
           </Link>
@@ -126,13 +140,14 @@ export default async function DashboardPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {stats.map((s) => (
-          <Card key={s.label}>
-            <CardContent className="flex items-center justify-between p-5">
+          <Card key={s.label} className="group relative overflow-hidden transition-shadow hover:shadow-md">
+            <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", s.gradient)} />
+            <CardContent className="flex items-center justify-between p-5 pt-6">
               <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">{s.label}</p>
-                <p className="text-2xl font-semibold tabular-nums">{formatCurrency(s.value)}</p>
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{s.label}</p>
+                <p className="text-2xl font-bold tabular-nums">{formatCurrency(s.value)}</p>
               </div>
-              <div className={cn("rounded-full bg-muted p-3", s.tint)}>
+              <div className={cn("rounded-xl p-3 transition-transform duration-200 group-hover:scale-110", s.iconBg)}>
                 <s.icon className="size-5" />
               </div>
             </CardContent>
@@ -140,7 +155,7 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+      <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader className="flex-row items-center justify-between">
             <div>
@@ -151,7 +166,7 @@ export default async function DashboardPage() {
               <Link href="/transactions">View all</Link>
             </Button>
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent className="space-y-0.5">
             {recent.length === 0 && (
               <p className="py-8 text-center text-sm text-muted-foreground">
                 No transactions yet. Add your first one.
@@ -162,20 +177,32 @@ export default async function DashboardPage() {
               return (
                 <div
                   key={t.id}
-                  className="flex items-center justify-between rounded-md px-2 py-2.5 hover:bg-muted/50"
+                  className="flex items-center justify-between rounded-lg px-3 py-3 transition-colors hover:bg-muted/50"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">
-                      {t.payeeName || t.description || "Transaction"}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {t.accountName} · {t.categoryName ?? "Uncategorized"} · {formatDate(t.date)}
-                    </p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className={cn(
+                      "flex size-9 shrink-0 items-center justify-center rounded-lg text-xs font-bold",
+                      positive
+                        ? "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/15 dark:text-emerald-400"
+                        : t.type === "transfer"
+                          ? "bg-sky-500/10 text-sky-600 dark:bg-sky-400/15 dark:text-sky-400"
+                          : "bg-rose-500/10 text-rose-600 dark:bg-rose-400/15 dark:text-rose-400",
+                    )}>
+                      {positive ? "+" : t.type === "expense" ? "−" : "⇄"}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {t.payeeName || t.description || "Transaction"}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {t.accountName} · {t.categoryName ?? "Uncategorized"} · {formatDate(t.date)}
+                      </p>
+                    </div>
                   </div>
                   <span
                     className={cn(
                       "shrink-0 text-sm font-semibold tabular-nums",
-                      positive ? "text-emerald-500" : "text-foreground",
+                      positive ? "text-emerald-600 dark:text-emerald-400" : "text-foreground",
                     )}
                   >
                     {positive ? "+" : t.type === "expense" ? "−" : ""}
@@ -198,7 +225,7 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="mt-6">
+      <Card className="mt-8">
         <CardHeader>
           <CardTitle>Accounts</CardTitle>
           <CardDescription>{acctRows.length} account(s)</CardDescription>
@@ -217,7 +244,7 @@ export default async function DashboardPage() {
             <Link
               key={a.id}
               href="/accounts"
-              className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
+              className="group flex items-center justify-between rounded-xl border p-4 transition-all duration-200 hover:border-primary/30 hover:shadow-sm"
             >
               <div>
                 <p className="font-medium">{a.name}</p>
