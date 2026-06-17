@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import List, Optional
+from datetime import datetime
 import uuid
+import io
+import pandas as pd
 
 from database import get_db
 from models.reward_points import RewardPointRedemption, RewardPointBonus
@@ -96,6 +100,298 @@ def get_summary(
         ))
 
     return RewardPointsSummaryResponse(items=items)
+
+
+@router.get("/export")
+def export_reward_points(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Export all reward points data (earned, bonuses, redemptions) to a multi-sheet Excel file."""
+    try:
+        # Map of credit account id -> name for the current user
+        credit_accounts = (
+            db.query(Account)
+            .filter(Account.user_id == current_user.id, Account.type == 'credit')
+            .all()
+        )
+        account_map = {acc.id: acc.name for acc in credit_accounts}
+        credit_ids = list(account_map.keys())
+
+        # Earned points (from transactions on credit accounts, non-zero reward_points)
+        earned_data = []
+        if credit_ids:
+            txns = (
+                db.query(Transaction)
+                .filter(
+                    Transaction.user_id == current_user.id,
+                    Transaction.reward_points.isnot(None),
+                    Transaction.reward_points != 0,
+                    Transaction.account_id.in_(credit_ids)
+                )
+                .order_by(Transaction.date)
+                .all()
+            )
+            for tx in txns:
+                earned_data.append({
+                    'Date': tx.date.strftime('%Y-%m-%d') if tx.date else '',
+                    'Account': account_map.get(tx.account_id, ''),
+                    'Points': float(tx.reward_points),
+                    'Description': tx.description or '',
+                })
+
+        # Bonus points
+        bonuses = (
+            db.query(RewardPointBonus)
+            .filter(RewardPointBonus.user_id == current_user.id)
+            .order_by(RewardPointBonus.date)
+            .all()
+        )
+        bonus_data = []
+        for b in bonuses:
+            bonus_data.append({
+                'Date': b.date.strftime('%Y-%m-%d') if b.date else '',
+                'Account': account_map.get(b.account_id, ''),
+                'Points': float(b.points),
+                'Description': b.description or '',
+                'Source File': b.source_file or '',
+            })
+
+        # Redemptions
+        redemptions = (
+            db.query(RewardPointRedemption)
+            .filter(RewardPointRedemption.user_id == current_user.id)
+            .order_by(RewardPointRedemption.date)
+            .all()
+        )
+        redemption_data = []
+        for r in redemptions:
+            redemption_data.append({
+                'Date': r.date.strftime('%Y-%m-%d') if r.date else '',
+                'Account': account_map.get(r.account_id, ''),
+                'Points Used': float(r.points_used),
+                'Description': r.description or '',
+            })
+
+        if not earned_data and not bonus_data and not redemption_data:
+            raise HTTPException(status_code=404, detail="No reward points data found to export")
+
+        # Build a multi-sheet Excel workbook
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            pd.DataFrame(earned_data, columns=['Date', 'Account', 'Points', 'Description']) \
+                .to_excel(writer, index=False, sheet_name='Earned')
+            pd.DataFrame(bonus_data, columns=['Date', 'Account', 'Points', 'Description', 'Source File']) \
+                .to_excel(writer, index=False, sheet_name='Bonuses')
+            pd.DataFrame(redemption_data, columns=['Date', 'Account', 'Points Used', 'Description']) \
+                .to_excel(writer, index=False, sheet_name='Redemptions')
+
+        output.seek(0)
+        return StreamingResponse(
+            io.BytesIO(output.getvalue()),
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={"Content-Disposition": "attachment; filename=reward_points_export.xlsx"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export reward points: {str(e)}")
+
+
+def _parse_date(value):
+    """Parse a date cell that may be a string or a pandas/datetime value."""
+    if isinstance(value, str):
+        return datetime.strptime(value.strip(), '%Y-%m-%d').date()
+    if hasattr(value, 'date'):
+        return value.date()
+    return value
+
+
+@router.post("/import")
+def import_reward_points(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Import reward points data (bonuses and redemptions) from an Excel/CSV file.
+
+    Excel files may contain 'Bonuses' and/or 'Redemptions' sheets (as produced by
+    the export). CSV files are auto-detected as bonuses or redemptions based on
+    their columns ('Points Used' => redemptions, 'Points' => bonuses).
+
+    Earned points are derived from transactions and are not imported here.
+    Accounts are matched by name (must be an existing credit card account).
+    """
+    try:
+        if not file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format. Only Excel (.xlsx, .xls) and CSV files are supported."
+            )
+
+        content = file.file.read()
+
+        # Build the set of sheets to process: { 'bonuses': df, 'redemptions': df }
+        sheets: dict[str, pd.DataFrame] = {}
+        try:
+            if file.filename.lower().endswith('.csv'):
+                df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+                if 'Points Used' in df.columns:
+                    sheets['redemptions'] = df
+                elif 'Points' in df.columns:
+                    sheets['bonuses'] = df
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="CSV must contain a 'Points' (bonuses) or 'Points Used' (redemptions) column."
+                    )
+            else:
+                excel = pd.read_excel(io.BytesIO(content), sheet_name=None)
+                for name, df in excel.items():
+                    key = name.strip().lower()
+                    if key == 'bonuses':
+                        sheets['bonuses'] = df
+                    elif key == 'redemptions':
+                        sheets['redemptions'] = df
+                if not sheets:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Excel file must contain a 'Bonuses' and/or 'Redemptions' sheet."
+                    )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to read file: {str(e)}. Please ensure the file is not corrupted."
+            )
+
+        # Map credit account names (lowercased) -> account
+        credit_accounts = (
+            db.query(Account)
+            .filter(Account.user_id == current_user.id, Account.type == 'credit')
+            .all()
+        )
+        account_by_name = {acc.name.strip().lower(): acc for acc in credit_accounts}
+
+        created_redemptions = 0
+        created_bonuses = 0
+        skipped = 0
+        errors: list[str] = []
+
+        # ── Redemptions ────────────────────────────────────────────────
+        if 'redemptions' in sheets:
+            df = sheets['redemptions']
+            for col in ('Account', 'Date', 'Points Used'):
+                if col not in df.columns:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Redemptions sheet missing required column: '{col}'"
+                    )
+            for index, row in df.iterrows():
+                try:
+                    if pd.isna(row.get('Account')) or pd.isna(row.get('Points Used')):
+                        continue
+                    account = account_by_name.get(str(row['Account']).strip().lower())
+                    if not account:
+                        errors.append(f"Redemptions row {index + 2}: Credit account '{row['Account']}' not found")
+                        continue
+                    rec_date = _parse_date(row['Date'])
+                    points = float(row['Points Used'])
+                    description = None
+                    if 'Description' in row and pd.notna(row['Description']):
+                        description = str(row['Description']).strip() or None
+
+                    # Skip duplicates (same account/date/points/description)
+                    exists = db.query(RewardPointRedemption).filter(
+                        RewardPointRedemption.user_id == current_user.id,
+                        RewardPointRedemption.account_id == account.id,
+                        RewardPointRedemption.date == rec_date,
+                        RewardPointRedemption.points_used == points,
+                    ).first()
+                    if exists:
+                        skipped += 1
+                        continue
+
+                    db.add(RewardPointRedemption(
+                        user_id=current_user.id,
+                        account_id=account.id,
+                        date=rec_date,
+                        points_used=points,
+                        description=description,
+                    ))
+                    created_redemptions += 1
+                except Exception as row_error:
+                    errors.append(f"Redemptions row {index + 2}: {str(row_error)}")
+                    continue
+
+        # ── Bonuses ────────────────────────────────────────────────────
+        if 'bonuses' in sheets:
+            df = sheets['bonuses']
+            for col in ('Account', 'Date', 'Points'):
+                if col not in df.columns:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Bonuses sheet missing required column: '{col}'"
+                    )
+            for index, row in df.iterrows():
+                try:
+                    if pd.isna(row.get('Account')) or pd.isna(row.get('Points')):
+                        continue
+                    account = account_by_name.get(str(row['Account']).strip().lower())
+                    if not account:
+                        errors.append(f"Bonuses row {index + 2}: Credit account '{row['Account']}' not found")
+                        continue
+                    rec_date = _parse_date(row['Date'])
+                    points = float(row['Points'])
+                    description = None
+                    if 'Description' in row and pd.notna(row['Description']):
+                        description = str(row['Description']).strip() or None
+                    source_file = None
+                    if 'Source File' in row and pd.notna(row['Source File']):
+                        source_file = str(row['Source File']).strip() or None
+
+                    exists = db.query(RewardPointBonus).filter(
+                        RewardPointBonus.user_id == current_user.id,
+                        RewardPointBonus.account_id == account.id,
+                        RewardPointBonus.date == rec_date,
+                        RewardPointBonus.points == points,
+                    ).first()
+                    if exists:
+                        skipped += 1
+                        continue
+
+                    db.add(RewardPointBonus(
+                        user_id=current_user.id,
+                        account_id=account.id,
+                        date=rec_date,
+                        points=points,
+                        description=description,
+                        source_file=source_file,
+                    ))
+                    created_bonuses += 1
+                except Exception as row_error:
+                    errors.append(f"Bonuses row {index + 2}: {str(row_error)}")
+                    continue
+
+        db.commit()
+
+        return {
+            "message": "Import completed successfully",
+            "created_redemptions": created_redemptions,
+            "created_bonuses": created_bonuses,
+            "skipped_count": skipped,
+            "error_count": len(errors),
+            "errors": errors[:10],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to import reward points: {str(e)}")
 
 
 @router.get("/", response_model=List[RewardPointRedemptionResponse])

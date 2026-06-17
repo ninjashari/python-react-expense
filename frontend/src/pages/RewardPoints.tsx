@@ -26,7 +26,7 @@ import {
   Paper,
   Chip,
 } from '@mui/material';
-import { Add, Edit, Delete, Loyalty, History, Star } from '@mui/icons-material';
+import { Add, Edit, Delete, Loyalty, History, Star, FileDownload, FileUpload } from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { accountsApi, rewardPointsApi } from '../services/api';
@@ -48,6 +48,8 @@ const RewardPoints: React.FC = () => {
   const [editingBonus, setEditingBonus] = useState<RewardPointBonus | null>(null);
   const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'date', dir: 'desc' });
   const [bonusSort, setBonusSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'date', dir: 'desc' });
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
   const queryClient = useQueryClient();
 
   const handleSort = (col: string) =>
@@ -225,6 +227,57 @@ const RewardPoints: React.FC = () => {
 
   const summary: RewardPointsSummaryItem[] = summaryData?.items ?? [];
 
+  const hasData = redemptions.length > 0 || (bonuses as RewardPointBonus[]).length > 0 || summary.length > 0;
+
+  const handleExport = async () => {
+    try {
+      const response = await rewardPointsApi.exportToExcel();
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'reward_points_export.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('Export failed:', error);
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    if (!file) return;
+    setIsImporting(true);
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const result = await rewardPointsApi.import(formData);
+      setImportResult(result);
+      queryClient.invalidateQueries({ queryKey: ['rewardPointRedemptions'] });
+      queryClient.invalidateQueries({ queryKey: ['rewardPointBonuses'] });
+      queryClient.invalidateQueries({ queryKey: ['rewardPointsSummary'] });
+    } catch (error: any) {
+      setImportResult({
+        error: true,
+        message: error.response?.data?.detail || 'Failed to import reward points',
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleImport = () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.xlsx,.xls,.csv';
+    fileInput.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) handleImportFile(file);
+    };
+    fileInput.click();
+  };
+
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
@@ -239,6 +292,22 @@ const RewardPoints: React.FC = () => {
             onClick={() => navigate('/reward-points/history')}
           >
             View History
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileUpload />}
+            onClick={handleImport}
+            disabled={isImporting}
+          >
+            {isImporting ? 'Importing...' : 'Import'}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileDownload />}
+            onClick={handleExport}
+            disabled={!hasData}
+          >
+            Export
           </Button>
           <Button
             variant="outlined"
@@ -263,6 +332,33 @@ const RewardPoints: React.FC = () => {
       {creditAccounts.length === 0 && (
         <Alert severity="info" sx={{ mb: 3 }}>
           No credit card accounts found. Add a credit card account to track reward points.
+        </Alert>
+      )}
+
+      {importResult && (
+        <Alert
+          severity={importResult.error ? 'error' : 'success'}
+          sx={{ mb: 3 }}
+          onClose={() => setImportResult(null)}
+        >
+          {importResult.error ? (
+            importResult.message
+          ) : (
+            <>
+              <Typography variant="body2" fontWeight="bold">{importResult.message}</Typography>
+              <Typography variant="body2">• Redemptions created: {importResult.created_redemptions}</Typography>
+              <Typography variant="body2">• Bonuses created: {importResult.created_bonuses}</Typography>
+              <Typography variant="body2">• Skipped (duplicates): {importResult.skipped_count}</Typography>
+              {importResult.error_count > 0 && (
+                <>
+                  <Typography variant="body2" color="error">• Errors: {importResult.error_count}</Typography>
+                  {importResult.errors?.map((err: string, i: number) => (
+                    <Typography key={i} variant="caption" display="block" color="error">{err}</Typography>
+                  ))}
+                </>
+              )}
+            </>
+          )}
         </Alert>
       )}
 

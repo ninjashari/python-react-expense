@@ -7,6 +7,7 @@ import {
   Typography,
   Grid,
   TextField,
+  MenuItem,
   Button,
   Table,
   TableBody,
@@ -31,44 +32,50 @@ import { formatCurrency } from '../utils/formatters';
 import { usePageTitle } from '../hooks/usePageTitle';
 
 interface MonthwiseReportFilters {
-  startDate: string;
-  endDate: string;
+  year: string;
+  month: string; // '' = all months of the selected year
   accountIds: Option[];
 }
 
-// Get current financial year (April 1 to March 31 for India)
-const getCurrentFinancialYear = () => {
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-  
-  let fyStart: Date;
-  let fyEnd: Date;
-  
-  if (currentMonth < 3) {
-    fyStart = new Date(currentYear - 1, 3, 1);
-    fyEnd = new Date(currentYear, 2, 31);
-  } else {
-    fyStart = new Date(currentYear, 3, 1);
-    fyEnd = new Date(currentYear + 1, 2, 31);
+const MONTH_OPTIONS = [
+  { value: '01', label: 'January' },
+  { value: '02', label: 'February' },
+  { value: '03', label: 'March' },
+  { value: '04', label: 'April' },
+  { value: '05', label: 'May' },
+  { value: '06', label: 'June' },
+  { value: '07', label: 'July' },
+  { value: '08', label: 'August' },
+  { value: '09', label: 'September' },
+  { value: '10', label: 'October' },
+  { value: '11', label: 'November' },
+  { value: '12', label: 'December' },
+];
+
+// Build a list of selectable years (current year back through 10 years)
+const getYearOptions = () => {
+  const currentYear = new Date().getFullYear();
+  return Array.from({ length: 11 }, (_, i) => String(currentYear - i));
+};
+
+// Derive a start/end date range from a year and optional month
+const getDateRange = (year: string, month: string) => {
+  if (month) {
+    const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+    return {
+      start: `${year}-${month}-01`,
+      end: `${year}-${month}-${String(lastDay).padStart(2, '0')}`,
+    };
   }
-  
-  const formatDate = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-  
   return {
-    start: formatDate(fyStart),
-    end: formatDate(fyEnd),
+    start: `${year}-01-01`,
+    end: `${year}-12-31`,
   };
 };
 
 const defaultFilters: MonthwiseReportFilters = {
-  startDate: getCurrentFinancialYear().start,
-  endDate: getCurrentFinancialYear().end,
+  year: String(new Date().getFullYear()),
+  month: '',
   accountIds: [],
 };
 
@@ -76,9 +83,16 @@ const MonthwiseCategoryReport: React.FC = () => {
   usePageTitle({ title: 'Month-wise Category Report' });
   const navigate = useNavigate();
   const { filters, setFilters } = usePersistentFilters<MonthwiseReportFilters>(
-    'monthwise-category-filters',
+    'monthwise-category-filters-v2',
     defaultFilters
   );
+
+  const { start: startDate, end: endDate } = useMemo(
+    () => getDateRange(filters.year, filters.month),
+    [filters.year, filters.month]
+  );
+
+  const yearOptions = useMemo(() => getYearOptions(), []);
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -90,11 +104,11 @@ const MonthwiseCategoryReport: React.FC = () => {
     isLoading,
     error,
   } = useQuery({
-    queryKey: ['monthwise-category-reports', filters.startDate, filters.endDate, filters.accountIds],
+    queryKey: ['monthwise-category-reports', startDate, endDate, filters.accountIds],
     queryFn: () =>
       transactionsApi.getByCategory({
-        start_date: filters.startDate,
-        end_date: filters.endDate,
+        start_date: startDate,
+        end_date: endDate,
         account_ids: filters.accountIds.map(a => a.value).join(','),
       }),
   });
@@ -217,26 +231,26 @@ const MonthwiseCategoryReport: React.FC = () => {
   }, [categoryRows]);
 
   const handleCategoryClick = (categoryId: string, categoryName: string, monthKey?: string) => {
-    let startDate = filters.startDate;
-    let endDate = filters.endDate;
-    
+    let clickStartDate = startDate;
+    let clickEndDate = endDate;
+
     if (monthKey) {
       // monthKey format: "2025-04"
       const [year, month] = monthKey.split('-');
       const monthNum = parseInt(month);
       const yearNum = parseInt(year);
-      
+
       // First day of the month
-      startDate = `${year}-${month}-01`;
-      
+      clickStartDate = `${year}-${month}-01`;
+
       // Last day of the month
       const lastDay = new Date(yearNum, monthNum, 0).getDate();
-      endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+      clickEndDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
     }
-    
+
     const reportFilters = {
-      startDate,
-      endDate,
+      startDate: clickStartDate,
+      endDate: clickEndDate,
       accountIds: filters.accountIds,
       categoryIds: [{ value: categoryId, label: categoryName }],
       payeeIds: [],
@@ -253,7 +267,7 @@ const MonthwiseCategoryReport: React.FC = () => {
     
     lines.push('Month-wise Category Report');
     lines.push(`Generated: ${new Date().toLocaleString()}`);
-    lines.push(`Period: ${filters.startDate} to ${filters.endDate}`);
+    lines.push(`Period: ${startDate} to ${endDate}`);
     lines.push('');
     
     const headerRow = ['Category', ...monthColumns.map(m => `${m.label} ${m.year}`), 'Overall'];
@@ -281,7 +295,7 @@ const MonthwiseCategoryReport: React.FC = () => {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `monthwise-category-report-${filters.startDate}-to-${filters.endDate}.csv`;
+    link.download = `monthwise-category-report-${startDate}-to-${endDate}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -310,8 +324,8 @@ const MonthwiseCategoryReport: React.FC = () => {
     <Box p={3}>
       <ReportHeader
         title="Month-wise Category Analysis"
-        startDate={filters.startDate}
-        endDate={filters.endDate}
+        startDate={startDate}
+        endDate={endDate}
         selectedAccounts={filters.accountIds}
       />
 
@@ -320,25 +334,34 @@ const MonthwiseCategoryReport: React.FC = () => {
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} md={3}>
               <TextField
-                label="Start Date"
-                type="date"
-                value={filters.startDate}
-                onChange={(e) => handleFilterChange('startDate', e.target.value)}
+                select
+                label="Year"
+                value={filters.year}
+                onChange={(e) => handleFilterChange('year', e.target.value)}
                 fullWidth
                 size="small"
-                InputLabelProps={{ shrink: true }}
-              />
+              >
+                {yearOptions.map((year) => (
+                  <MenuItem key={year} value={year}>{year}</MenuItem>
+                ))}
+              </TextField>
             </Grid>
             <Grid item xs={12} md={3}>
               <TextField
-                label="End Date"
-                type="date"
-                value={filters.endDate}
-                onChange={(e) => handleFilterChange('endDate', e.target.value)}
+                select
+                label="Month"
+                value={filters.month}
+                onChange={(e) => handleFilterChange('month', e.target.value)}
                 fullWidth
                 size="small"
-                InputLabelProps={{ shrink: true }}
-              />
+                disabled={!filters.year}
+                helperText={!filters.year ? 'Select a year first' : undefined}
+              >
+                <MenuItem value="">All months</MenuItem>
+                {MONTH_OPTIONS.map((m) => (
+                  <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+                ))}
+              </TextField>
             </Grid>
             <Grid item xs={12} md={4}>
               <MultiSelectDropdown

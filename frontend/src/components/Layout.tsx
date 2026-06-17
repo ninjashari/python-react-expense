@@ -30,7 +30,6 @@ import {
   Analytics,
   Psychology,
   Lock,
-  PieChart,
   CalendarMonth,
   Loyalty,
   AccountBalanceWallet,
@@ -70,7 +69,6 @@ const navGroups: NavGroup[] = [
     label: 'Reports',
     items: [
       { text: 'All Reports', icon: <Analytics fontSize="small" />, path: '/reports' },
-      { text: 'By Category', icon: <PieChart fontSize="small" />, path: '/reports/by-category' },
       { text: 'Month-wise', icon: <CalendarMonth fontSize="small" />, path: '/reports/monthwise' },
     ],
   },
@@ -97,7 +95,6 @@ const pageTitles: Record<string, string> = {
   '/accounts': 'Accounts',
   '/transactions': 'Transactions',
   '/reports': 'Reports',
-  '/reports/by-category': 'Reports by Category',
   '/reports/monthwise': 'Month-wise Reports',
   '/reward-points': 'Reward Points',
   '/reward-points/history': 'Points History',

@@ -327,6 +327,14 @@ export const rewardPointsApi = {
 
   deleteBonus: (id: string): Promise<void> =>
     api.delete(`/reward-points/bonuses/${id}`).then(res => res.data),
+
+  exportToExcel: (): Promise<any> =>
+    api.get('/reward-points/export', { responseType: 'blob' }).then(res => res),
+
+  import: (formData: FormData): Promise<any> =>
+    api.post('/reward-points/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(res => res.data),
 };
 
 export default api;
