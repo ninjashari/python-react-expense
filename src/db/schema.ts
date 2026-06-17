@@ -160,18 +160,49 @@ export const rewardRedemptions = pgTable(
   ],
 );
 
+export const rewardBonuses = pgTable(
+  "reward_bonuses",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    points: numeric("points", { precision: 12, scale: 2 }).notNull(),
+    description: text("description"),
+    date: date("date").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("reward_bonuses_user_idx").on(t.userId),
+    index("reward_bonuses_account_idx").on(t.accountId),
+  ],
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   accounts: many(accounts),
   transactions: many(transactions),
   categories: many(categories),
   payees: many(payees),
   rewardRedemptions: many(rewardRedemptions),
+  rewardBonuses: many(rewardBonuses),
 }));
 
 export const accountsRelations = relations(accounts, ({ one, many }) => ({
   user: one(users, { fields: [accounts.userId], references: [users.id] }),
   transactions: many(transactions),
   rewardRedemptions: many(rewardRedemptions),
+  rewardBonuses: many(rewardBonuses),
+}));
+
+export const rewardBonusesRelations = relations(rewardBonuses, ({ one }) => ({
+  user: one(users, { fields: [rewardBonuses.userId], references: [users.id] }),
+  account: one(accounts, {
+    fields: [rewardBonuses.accountId],
+    references: [accounts.id],
+  }),
 }));
 
 export const rewardRedemptionsRelations = relations(rewardRedemptions, ({ one }) => ({

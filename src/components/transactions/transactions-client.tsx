@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
+  ArrowDown,
   ArrowLeftRight,
+  ArrowUp,
+  ArrowUpDown,
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
@@ -50,13 +53,28 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { TransactionForm } from "./transaction-form";
 import { InlineInput, InlineSelect } from "./inline-edits";
+import { MultiSelectFilter } from "./multi-select-filter";
 import type { AccountOption, Option, Tx, TxPage, TxType } from "./types";
 
 const PAGE_SIZE = 25;
-const ALL = "all";
 const NONE = "none";
 
 type FilterType = TxType | "all";
+type SortField = "date" | "amount";
+type SortOrder = "asc" | "desc";
+
+/** Read a multi-value filter from the URL, accepting both the plural CSV form
+ * (`categoryIds=a,b`) and the legacy singular form (`categoryId=a`) used by
+ * report drill-down links. */
+function readIds(params: URLSearchParams, plural: string, singular: string): string[] {
+  const raw = [
+    ...(params.get(plural)?.split(",") ?? []),
+    ...(params.get(singular) ? [params.get(singular)!] : []),
+  ]
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...new Set(raw)];
+}
 
 const TYPE_BADGE: Record<TxType, "default" | "secondary" | "outline"> = {
   income: "default",
@@ -81,9 +99,24 @@ export function TransactionsClient() {
   // Initialize filters from the URL so report drill-downs and back-navigation
   // restore the exact view. The initializer runs once on mount.
   const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get("page")) || 1));
-  const [accountId, setAccountId] = useState(() => searchParams.get("accountId") ?? ALL);
-  const [categoryId, setCategoryId] = useState(() => searchParams.get("categoryId") ?? ALL);
-  const [payeeId, setPayeeId] = useState(() => searchParams.get("payeeId") ?? ALL);
+  const [accountIds, setAccountIds] = useState<string[]>(() =>
+    readIds(searchParams, "accountIds", "accountId"),
+  );
+  const [excludeAccounts, setExcludeAccounts] = useState(
+    () => searchParams.get("excludeAccounts") === "1",
+  );
+  const [categoryIds, setCategoryIds] = useState<string[]>(() =>
+    readIds(searchParams, "categoryIds", "categoryId"),
+  );
+  const [excludeCategories, setExcludeCategories] = useState(
+    () => searchParams.get("excludeCategories") === "1",
+  );
+  const [payeeIds, setPayeeIds] = useState<string[]>(() =>
+    readIds(searchParams, "payeeIds", "payeeId"),
+  );
+  const [excludePayees, setExcludePayees] = useState(
+    () => searchParams.get("excludePayees") === "1",
+  );
   const [type, setType] = useState<FilterType>(
     () => (searchParams.get("type") as FilterType) ?? "all",
   );
@@ -92,8 +125,12 @@ export function TransactionsClient() {
   const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
   const debouncedSearch = useDebounced(search, 300);
 
-  const [sort] = useState<"date" | "amount" | "created">("date");
-  const [order] = useState<"asc" | "desc">("desc");
+  const [sort, setSort] = useState<SortField>(
+    () => (searchParams.get("sort") === "amount" ? "amount" : "date"),
+  );
+  const [order, setOrder] = useState<SortOrder>(
+    () => (searchParams.get("order") === "asc" ? "asc" : "desc"),
+  );
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Tx | null>(null);
@@ -109,49 +146,82 @@ export function TransactionsClient() {
     };
   }
 
-  const onAccount = withReset(setAccountId);
-  const onCategory = withReset(setCategoryId);
-  const onPayee = withReset(setPayeeId);
+  const onAccountIds = withReset<string[]>(setAccountIds);
+  const onExcludeAccounts = withReset<boolean>(setExcludeAccounts);
+  const onCategoryIds = withReset<string[]>(setCategoryIds);
+  const onExcludeCategories = withReset<boolean>(setExcludeCategories);
+  const onPayeeIds = withReset<string[]>(setPayeeIds);
+  const onExcludePayees = withReset<boolean>(setExcludePayees);
   const onType = withReset<FilterType>(setType);
   const onFrom = withReset(setFrom);
   const onTo = withReset(setTo);
   const onSearch = withReset(setSearch);
 
-  const qs = useMemo(() => {
-    const params = new URLSearchParams();
-    params.set("page", String(page));
-    params.set("pageSize", String(PAGE_SIZE));
-    params.set("sort", sort);
-    params.set("order", order);
-    if (accountId !== ALL) params.set("accountId", accountId);
-    if (categoryId !== ALL) params.set("categoryId", categoryId);
-    if (payeeId !== ALL) params.set("payeeId", payeeId);
-    if (type !== "all") params.set("type", type);
-    if (from) params.set("from", from);
-    if (to) params.set("to", to);
-    if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
-    return params.toString();
-  }, [page, sort, order, accountId, categoryId, payeeId, type, from, to, debouncedSearch]);
+  // Clicking a sortable header sorts by that field; clicking the active field
+  // toggles direction. Sorting resets to the first page.
+  function toggleSort(field: SortField) {
+    if (sort === field) {
+      setOrder((o) => (o === "asc" ? "desc" : "asc"));
+    } else {
+      setSort(field);
+      setOrder("desc");
+    }
+    setPage(1);
+  }
 
-  // Mirror the active filters into the URL (without pageSize/sort noise) so the
-  // view is shareable and survives navigation. Replace, don't push.
+  // Shared param builder for both the API query and the shareable URL.
+  const buildParams = useCallback(
+    (forApi: boolean) => {
+      const params = new URLSearchParams();
+      if (forApi) {
+        params.set("page", String(page));
+        params.set("pageSize", String(PAGE_SIZE));
+      } else if (page > 1) {
+        params.set("page", String(page));
+      }
+      if (accountIds.length) params.set("accountIds", accountIds.join(","));
+      if (excludeAccounts && accountIds.length) params.set("excludeAccounts", "1");
+      if (categoryIds.length) params.set("categoryIds", categoryIds.join(","));
+      if (excludeCategories && categoryIds.length) params.set("excludeCategories", "1");
+      if (payeeIds.length) params.set("payeeIds", payeeIds.join(","));
+      if (excludePayees && payeeIds.length) params.set("excludePayees", "1");
+      if (type !== "all") params.set("type", type);
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      if (forApi || sort !== "date") params.set("sort", sort);
+      if (forApi || order !== "desc") params.set("order", order);
+      return params;
+    },
+    [
+      page,
+      accountIds,
+      excludeAccounts,
+      categoryIds,
+      excludeCategories,
+      payeeIds,
+      excludePayees,
+      type,
+      from,
+      to,
+      debouncedSearch,
+      sort,
+      order,
+    ],
+  );
+
+  const qs = useMemo(() => buildParams(true).toString(), [buildParams]);
+
+  // Mirror the active filters into the URL so the view is shareable and
+  // survives navigation. Replace, don't push.
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (page > 1) params.set("page", String(page));
-    if (accountId !== ALL) params.set("accountId", accountId);
-    if (categoryId !== ALL) params.set("categoryId", categoryId);
-    if (payeeId !== ALL) params.set("payeeId", payeeId);
-    if (type !== "all") params.set("type", type);
-    if (from) params.set("from", from);
-    if (to) params.set("to", to);
-    if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
-    const next = params.toString();
+    const next = buildParams(false).toString();
     const current = searchParams.toString();
     if (next !== current) {
       router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, accountId, categoryId, payeeId, type, from, to, debouncedSearch]);
+  }, [buildParams]);
 
   const { data, isLoading, mutate } = useSWR<TxPage>(`/api/transactions?${qs}`, fetcher);
   const { data: accounts } = useSWR<AccountOption[]>("/api/accounts", fetcher);
@@ -175,18 +245,21 @@ export function TransactionsClient() {
   }
 
   const hasFilters =
-    accountId !== ALL ||
-    categoryId !== ALL ||
-    payeeId !== ALL ||
+    accountIds.length > 0 ||
+    categoryIds.length > 0 ||
+    payeeIds.length > 0 ||
     type !== "all" ||
     Boolean(from) ||
     Boolean(to) ||
     Boolean(debouncedSearch.trim());
 
   function clearFilters() {
-    setAccountId(ALL);
-    setCategoryId(ALL);
-    setPayeeId(ALL);
+    setAccountIds([]);
+    setExcludeAccounts(false);
+    setCategoryIds([]);
+    setExcludeCategories(false);
+    setPayeeIds([]);
+    setExcludePayees(false);
     setType("all");
     setFrom("");
     setTo("");
@@ -338,53 +411,42 @@ export function TransactionsClient() {
 
           <div className="grid gap-2">
             <Label>Account</Label>
-            <Select value={accountId} onValueChange={onAccount}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All accounts</SelectItem>
-                {accountOptions.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelectFilter
+              label="Accounts"
+              options={accountOptions.map((a) => ({ value: a.id, label: a.name }))}
+              selected={accountIds}
+              onChange={onAccountIds}
+              exclude={excludeAccounts}
+              onExcludeChange={onExcludeAccounts}
+            />
           </div>
 
           <div className="grid gap-2">
             <Label>Category</Label>
-            <Select value={categoryId} onValueChange={onCategory}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All categories</SelectItem>
-                {categoryOptions.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelectFilter
+              label="Categories"
+              options={categoryOptions.map((c) => ({ value: c.id, label: c.name, color: c.color }))}
+              selected={categoryIds}
+              onChange={onCategoryIds}
+              exclude={excludeCategories}
+              onExcludeChange={onExcludeCategories}
+              withNone
+              noneLabel="Uncategorized"
+            />
           </div>
 
           <div className="grid gap-2">
             <Label>Payee</Label>
-            <Select value={payeeId} onValueChange={onPayee}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All payees</SelectItem>
-                {payeeOptions.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiSelectFilter
+              label="Payees"
+              options={payeeOptions.map((p) => ({ value: p.id, label: p.name, color: p.color }))}
+              selected={payeeIds}
+              onChange={onPayeeIds}
+              exclude={excludePayees}
+              onExcludeChange={onExcludePayees}
+              withNone
+              noneLabel="No payee"
+            />
           </div>
 
           <div className="grid gap-2">
@@ -503,12 +565,27 @@ export function TransactionsClient() {
                       aria-label="Select all"
                     />
                   </TableHead>
-                  <TableHead>Date</TableHead>
+                  <TableHead>
+                    <SortButton
+                      label="Date"
+                      active={sort === "date"}
+                      order={order}
+                      onClick={() => toggleSort("date")}
+                    />
+                  </TableHead>
                   <TableHead>Description / Payee</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Account</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="text-right">
+                    <SortButton
+                      label="Amount"
+                      active={sort === "amount"}
+                      order={order}
+                      onClick={() => toggleSort("amount")}
+                      align="right"
+                    />
+                  </TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -594,6 +671,36 @@ export function TransactionsClient() {
         onConfirm={bulkDelete}
       />
     </div>
+  );
+}
+
+function SortButton({
+  label,
+  active,
+  order,
+  onClick,
+  align = "left",
+}: {
+  label: string;
+  active: boolean;
+  order: SortOrder;
+  onClick: () => void;
+  align?: "left" | "right";
+}) {
+  const Icon = !active ? ArrowUpDown : order === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1 font-medium transition-colors hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+        align === "right" && "flex-row-reverse",
+      )}
+    >
+      {label}
+      <Icon className="size-3.5" />
+    </button>
   );
 }
 

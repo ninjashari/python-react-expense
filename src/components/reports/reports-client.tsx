@@ -40,6 +40,7 @@ type Period = "this-month" | "last-3-months" | "last-6-months" | "this-year" | "
 
 type CategoryRow = { categoryId: string | null; name: string; color: string; total: number; count: number };
 type PayeeRow = { payeeId: string | null; name: string; color: string; total: number; count: number };
+type AccountRow = { accountId: string | null; name: string; total: number; count: number };
 type TrendRow = { month: string; income: number; expense: number; net: number };
 type MonthCatRow = { month: string; categoryId: string | null; name: string; color: string; total: number };
 
@@ -159,6 +160,10 @@ export function ReportsClient() {
     `/api/reports/by-payee?${qs}`,
     fetcher,
   );
+  const { data: byAccount, isLoading: accountLoading } = useSWR<AccountRow[]>(
+    `/api/reports/by-account?${qs}`,
+    fetcher,
+  );
   const { data: trend, isLoading: trendLoading } = useSWR<TrendRow[]>(
     "/api/reports/monthly-trend?months=12",
     fetcher,
@@ -187,6 +192,9 @@ export function ReportsClient() {
 
   const topPayees = payees.slice(0, 10);
   const payeeMax = topPayees.reduce((m, p) => Math.max(m, p.total), 0);
+
+  const accountRows = byAccount ?? [];
+  const accountMax = accountRows.reduce((m, a) => Math.max(m, a.total), 0);
 
   const trendData: TrendDatum[] = (trend ?? []).map((t) => ({
     month: shortMonth(t.month),
@@ -410,6 +418,63 @@ export function ReportsClient() {
           </CardContent>
         </Card>
       </div>
+
+      {/* By account */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>{typeLabel} by account</CardTitle>
+          <CardDescription>By {type} in the selected range · click to drill in</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {accountLoading ? (
+            <Loading />
+          ) : accountRows.length === 0 ? (
+            <EmptyState
+              icon={BarChart3}
+              title="No data for this period"
+              description={`No ${type} transactions found in the selected range.`}
+            />
+          ) : (
+            <ul className="grid gap-3 sm:grid-cols-2">
+              {accountRows.map((a) => {
+                const width = accountMax > 0 ? (a.total / accountMax) * 100 : 0;
+                const inner = (
+                  <>
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="truncate font-medium">{a.name}</span>
+                      <span className="shrink-0 tabular-nums">{formatCurrency(a.total)}</span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all duration-500"
+                        style={{ width: `${width}%` }}
+                      />
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {a.count} transaction{a.count === 1 ? "" : "s"}
+                    </p>
+                  </>
+                );
+                return (
+                  <li key={a.accountId ?? a.name}>
+                    {a.accountId ? (
+                      <button
+                        type="button"
+                        onClick={() => drillTo({ accountIds: a.accountId! })}
+                        className="block w-full rounded-sm px-1 py-0.5 text-left hover:bg-muted"
+                      >
+                        {inner}
+                      </button>
+                    ) : (
+                      <div className="px-1 py-0.5">{inner}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Monthwise category breakdown */}
       <Card className="mt-6">
