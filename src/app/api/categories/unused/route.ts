@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { categories, transactions } from "@/db/schema";
 import { requireUserId } from "@/lib/auth";
 import { route, ok } from "@/lib/http";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -21,5 +22,6 @@ export const DELETE = route(async () => {
       : eq(categories.userId, userId);
 
   const deleted = await db.delete(categories).where(where).returning({ id: categories.id });
+  logger.info("unused categories removed", { userId, deleted: deleted.length });
   return ok({ deleted: deleted.length });
 });

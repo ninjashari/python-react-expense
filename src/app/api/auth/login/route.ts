@@ -5,6 +5,7 @@ import { verifyPassword, createSession } from "@/lib/auth";
 import { loginSchema } from "@/lib/validations";
 import { route, ok, fail } from "@/lib/http";
 import { rateLimit, clientKey } from "@/lib/ratelimit";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -29,8 +30,12 @@ export const POST = route(async (req: Request) => {
     ? await verifyPassword(body.password, user.passwordHash)
     : await verifyPassword(body.password, "$2a$12$0000000000000000000000000000000000000000000000000000");
 
-  if (!user || !valid) return fail("Invalid email or password", 401);
+  if (!user || !valid) {
+    logger.info("login failed", { email: body.email });
+    return fail("Invalid email or password", 401);
+  }
 
   await createSession({ userId: user.id, email: user.email });
+  logger.info("login succeeded", { userId: user.id });
   return ok({ user: { id: user.id, email: user.email, name: user.name } });
 });

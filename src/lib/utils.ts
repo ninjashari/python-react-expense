@@ -37,3 +37,51 @@ export function slugify(input: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 }
+
+/** Convert HSL (h in degrees, s and l as 0–100 percentages) to a #rrggbb hex string. */
+/** Split an array into consecutive chunks of at most `size` items. */
+export function chunk<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
+/** Convert HSL (h in degrees, s and l as 0–100 percentages) to a #rrggbb hex string. */
+function hslToHex(h: number, s: number, l: number) {
+  const sFrac = s / 100;
+  const lFrac = l / 100;
+  const a = sFrac * Math.min(lFrac, 1 - lFrac);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = lFrac - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+/**
+ * Generate `count` distinct, vibrant hex colours. Hues are spread evenly around
+ * the wheel with a random starting offset, and saturation/lightness are jittered
+ * so repeated runs produce a fresh palette while staying visually distinct.
+ */
+export function randomDistinctColors(count: number): string[] {
+  if (count <= 0) return [];
+  const colors = new Set<string>();
+  const offset = Math.random() * 360;
+  const golden = 137.508; // golden-angle spacing keeps adjacent hues far apart
+  let i = 0;
+  while (colors.size < count) {
+    const hue = (offset + i * golden) % 360;
+    const sat = 60 + Math.random() * 25; // 60–85%
+    const light = 45 + Math.random() * 15; // 45–60%
+    colors.add(hslToHex(hue, sat, light));
+    i++;
+    if (i > count * 50) break; // safety valve against an impossible run
+  }
+  return [...colors];
+}

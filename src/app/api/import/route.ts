@@ -6,11 +6,15 @@ import { requireUserId } from "@/lib/auth";
 import { route, ok, fail } from "@/lib/http";
 import { transactionTypeValues } from "@/lib/validations";
 import { recalcAffected } from "@/lib/transactions-service";
-import { slugify } from "@/lib/utils";
+import { slugify, chunk } from "@/lib/utils";
+import { logger } from "@/lib/logger";
+
+// Postgres caps bind parameters at 65535 per statement; chunk inserts well under it.
+const INSERT_BATCH = 500;
 
 export const runtime = "nodejs";
 
-const MAX_ROWS = 2000;
+const MAX_ROWS = 10000;
 
 const money = z
   .union([z.number(), z.string()])
@@ -147,11 +151,16 @@ export const POST = route(async (req: Request) => {
     if (toAccountId) touchedAccountIds.add(toAccountId);
   }
 
-  if (toInsert.length > 0) {
-    await db.insert(transactions).values(toInsert);
+  for (const batch of chunk(toInsert, INSERT_BATCH)) {
+    await db.insert(transactions).values(batch);
   }
 
   await recalcAffected(userId, [...touchedAccountIds]);
 
+  logger.info("transactions imported", {
+    userId,
+    imported: toInsert.length,
+    failed: failures.length,
+  });
   return ok({ imported: toInsert.length, failed: failures });
 });

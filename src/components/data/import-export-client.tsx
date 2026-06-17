@@ -37,33 +37,19 @@ type FieldKey =
   | "categoryName"
   | "payeeName"
   | "description"
-  | "notes";
+  | "notes"
+  | "name"
+  | "color"
+  | "balance"
+  | "accountNumber"
+  | "creditLimit"
+  | "status"
+  | "openingDate"
+  | "currency";
 
 type FieldDef = { key: FieldKey; label: string; required: boolean; guess: string[] };
 
-const FIELDS: FieldDef[] = [
-  { key: "date", label: "Date", required: true, guess: ["date"] },
-  { key: "amount", label: "Amount", required: true, guess: ["amount"] },
-  { key: "type", label: "Type", required: true, guess: ["type"] },
-  { key: "accountName", label: "Account", required: true, guess: ["account"] },
-  { key: "toAccountName", label: "To account", required: false, guess: ["to account", "toaccount", "destination"] },
-  { key: "categoryName", label: "Category", required: false, guess: ["category"] },
-  { key: "payeeName", label: "Payee", required: false, guess: ["payee", "merchant"] },
-  { key: "description", label: "Description", required: false, guess: ["description", "memo"] },
-  { key: "notes", label: "Notes", required: false, guess: ["notes", "note"] },
-];
-
-type ImportRow = {
-  date: string;
-  amount: number;
-  type: "income" | "expense" | "transfer";
-  accountName: string;
-  toAccountName?: string | null;
-  categoryName?: string | null;
-  payeeName?: string | null;
-  description?: string | null;
-  notes?: string | null;
-};
+type EntityKind = "transactions" | "accounts" | "categories" | "payees";
 
 type ImportResult = { imported: number; failed: Array<{ row: number; reason: string }> };
 
@@ -73,6 +59,153 @@ function normalizeType(raw: string): "income" | "expense" | "transfer" {
   if (v.includes("transfer")) return "transfer";
   return "expense";
 }
+
+const ACCOUNT_TYPES = ["checking", "savings", "credit", "cash", "investment", "ppf"] as const;
+const ACCOUNT_STATUSES = ["active", "inactive", "closed"] as const;
+
+function normalizeAccountType(raw: string): (typeof ACCOUNT_TYPES)[number] {
+  const v = raw.trim().toLowerCase();
+  const match = ACCOUNT_TYPES.find((t) => t === v || v.includes(t));
+  return match ?? "checking";
+}
+
+function normalizeAccountStatus(raw: string): (typeof ACCOUNT_STATUSES)[number] {
+  const v = raw.trim().toLowerCase();
+  const match = ACCOUNT_STATUSES.find((s) => s === v || v.includes(s));
+  return match ?? "active";
+}
+
+type EntityConfig = {
+  label: string;
+  endpoint: string;
+  description: string;
+  fields: FieldDef[];
+  mapRow: (valueFor: (key: FieldKey) => string) => Record<string, unknown>;
+  previewColumns: Array<{ key: string; label: string }>;
+  successNoun: (n: number) => string;
+};
+
+const ENTITY_CONFIGS: Record<EntityKind, EntityConfig> = {
+  transactions: {
+    label: "Transactions",
+    endpoint: "/api/import",
+    description:
+      "Upload a CSV or Excel (.xlsx) file containing your transactions. Accounts must already exist; categories and payees referenced by name will be created automatically.",
+    fields: [
+      { key: "date", label: "Date", required: true, guess: ["date"] },
+      { key: "amount", label: "Amount", required: true, guess: ["amount"] },
+      { key: "type", label: "Type", required: true, guess: ["type"] },
+      { key: "accountName", label: "Account", required: true, guess: ["account"] },
+      {
+        key: "toAccountName",
+        label: "To account",
+        required: false,
+        guess: ["to account", "toaccount", "destination"],
+      },
+      { key: "categoryName", label: "Category", required: false, guess: ["category"] },
+      { key: "payeeName", label: "Payee", required: false, guess: ["payee", "merchant"] },
+      { key: "description", label: "Description", required: false, guess: ["description", "memo"] },
+      { key: "notes", label: "Notes", required: false, guess: ["notes", "note"] },
+    ],
+    mapRow: (valueFor) => ({
+      date: valueFor("date"),
+      amount: Number(valueFor("amount").replace(/[^0-9.-]/g, "")) || 0,
+      type: normalizeType(valueFor("type")),
+      accountName: valueFor("accountName"),
+      toAccountName: valueFor("toAccountName") || null,
+      categoryName: valueFor("categoryName") || null,
+      payeeName: valueFor("payeeName") || null,
+      description: valueFor("description") || null,
+      notes: valueFor("notes") || null,
+    }),
+    previewColumns: [
+      { key: "date", label: "Date" },
+      { key: "type", label: "Type" },
+      { key: "accountName", label: "Account" },
+      { key: "toAccountName", label: "To account" },
+      { key: "categoryName", label: "Category" },
+      { key: "payeeName", label: "Payee" },
+      { key: "amount", label: "Amount" },
+      { key: "description", label: "Description" },
+    ],
+    successNoun: (n) => `transaction${n === 1 ? "" : "s"}`,
+  },
+  accounts: {
+    label: "Accounts",
+    endpoint: "/api/import/accounts",
+    description:
+      "Upload a CSV or Excel (.xlsx) file containing your accounts. Rows whose name matches an existing account will be skipped.",
+    fields: [
+      { key: "name", label: "Name", required: true, guess: ["name", "account"] },
+      { key: "type", label: "Type", required: true, guess: ["type"] },
+      { key: "balance", label: "Balance", required: false, guess: ["balance", "opening balance"] },
+      { key: "accountNumber", label: "Account number", required: false, guess: ["account number", "acct"] },
+      { key: "creditLimit", label: "Credit limit", required: false, guess: ["credit limit"] },
+      { key: "status", label: "Status", required: false, guess: ["status"] },
+      { key: "openingDate", label: "Opening date", required: false, guess: ["opening date"] },
+      { key: "currency", label: "Currency", required: false, guess: ["currency"] },
+    ],
+    mapRow: (valueFor) => ({
+      name: valueFor("name"),
+      type: normalizeAccountType(valueFor("type")),
+      balance: Number(valueFor("balance").replace(/[^0-9.-]/g, "")) || 0,
+      accountNumber: valueFor("accountNumber") || null,
+      creditLimit: valueFor("creditLimit")
+        ? Number(valueFor("creditLimit").replace(/[^0-9.-]/g, ""))
+        : null,
+      status: valueFor("status") ? normalizeAccountStatus(valueFor("status")) : "active",
+      openingDate: valueFor("openingDate") || null,
+      currency: (valueFor("currency") || "INR").toUpperCase(),
+    }),
+    previewColumns: [
+      { key: "name", label: "Name" },
+      { key: "type", label: "Type" },
+      { key: "balance", label: "Balance" },
+      { key: "accountNumber", label: "Account number" },
+      { key: "status", label: "Status" },
+      { key: "currency", label: "Currency" },
+    ],
+    successNoun: (n) => `account${n === 1 ? "" : "s"}`,
+  },
+  categories: {
+    label: "Categories",
+    endpoint: "/api/import/categories",
+    description:
+      "Upload a CSV or Excel (.xlsx) file containing your categories. Rows matching an existing category name will be skipped.",
+    fields: [
+      { key: "name", label: "Name", required: true, guess: ["name", "category"] },
+      { key: "color", label: "Color", required: false, guess: ["color", "colour"] },
+    ],
+    mapRow: (valueFor) => ({
+      name: valueFor("name"),
+      color: valueFor("color") || undefined,
+    }),
+    previewColumns: [
+      { key: "name", label: "Name" },
+      { key: "color", label: "Color" },
+    ],
+    successNoun: (n) => `categor${n === 1 ? "y" : "ies"}`,
+  },
+  payees: {
+    label: "Payees",
+    endpoint: "/api/import/payees",
+    description:
+      "Upload a CSV or Excel (.xlsx) file containing your payees. Rows matching an existing payee name will be skipped.",
+    fields: [
+      { key: "name", label: "Name", required: true, guess: ["name", "payee", "merchant"] },
+      { key: "color", label: "Color", required: false, guess: ["color", "colour"] },
+    ],
+    mapRow: (valueFor) => ({
+      name: valueFor("name"),
+      color: valueFor("color") || undefined,
+    }),
+    previewColumns: [
+      { key: "name", label: "Name" },
+      { key: "color", label: "Color" },
+    ],
+    successNoun: (n) => `payee${n === 1 ? "" : "s"}`,
+  },
+};
 
 function guessColumn(headers: string[], guesses: string[]): string {
   const lower = headers.map((h) => h.toLowerCase());
@@ -101,6 +234,7 @@ function downloadBlob(content: string | Blob, filename: string) {
 
 export function ImportExportClient() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [entity, setEntity] = useState<EntityKind>("transactions");
   const [fileName, setFileName] = useState<string | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
   const [sourceRows, setSourceRows] = useState<unknown[][]>([]);
@@ -110,6 +244,17 @@ export function ImportExportClient() {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [exportingJson, setExportingJson] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
+
+  const config = ENTITY_CONFIGS[entity];
+
+  function handleEntityChange(next: EntityKind) {
+    setEntity(next);
+    setFileName(null);
+    setHeaders([]);
+    setSourceRows([]);
+    setMapping({} as Record<FieldKey, string>);
+    setResult(null);
+  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -129,7 +274,7 @@ export function ImportExportClient() {
       const dataRows = rows.slice(1).filter((r) => Array.isArray(r) && r.length > 0);
 
       const initialMapping = {} as Record<FieldKey, string>;
-      for (const field of FIELDS) {
+      for (const field of config.fields) {
         initialMapping[field.key] = guessColumn(headerRow, field.guess);
       }
 
@@ -146,7 +291,7 @@ export function ImportExportClient() {
   }
 
   const mapRow = useCallback(
-    (row: unknown[]): ImportRow => {
+    (row: unknown[]): Record<string, unknown> => {
       function valueFor(key: FieldKey): string {
         const col = mapping[key];
         if (!col || col === NONE) return "";
@@ -157,27 +302,16 @@ export function ImportExportClient() {
         return v === undefined || v === null ? "" : String(v).trim();
       }
 
-      const amountRaw = valueFor("amount").replace(/[^0-9.-]/g, "");
-      return {
-        date: valueFor("date"),
-        amount: Number(amountRaw) || 0,
-        type: normalizeType(valueFor("type")),
-        accountName: valueFor("accountName"),
-        toAccountName: valueFor("toAccountName") || null,
-        categoryName: valueFor("categoryName") || null,
-        payeeName: valueFor("payeeName") || null,
-        description: valueFor("description") || null,
-        notes: valueFor("notes") || null,
-      };
+      return config.mapRow(valueFor);
     },
-    [mapping, headers],
+    [mapping, headers, config],
   );
 
   const previewRows = useMemo(() => sourceRows.slice(0, 10).map(mapRow), [sourceRows, mapRow]);
 
-  const requiredMapped = FIELDS.filter((f) => f.required).every(
-    (f) => mapping[f.key] && mapping[f.key] !== NONE,
-  );
+  const requiredMapped = config.fields
+    .filter((f) => f.required)
+    .every((f) => mapping[f.key] && mapping[f.key] !== NONE);
 
   async function handleImport() {
     if (!requiredMapped) {
@@ -188,13 +322,14 @@ export function ImportExportClient() {
     setImporting(true);
     setResult(null);
     try {
-      const res = await apiFetch<ImportResult>("/api/import", {
+      const res = await apiFetch<ImportResult>(config.endpoint, {
         method: "POST",
         body: allRows,
       });
       setResult(res);
       if (res.failed.length === 0) {
-        toast.success(`Imported ${res.imported} transaction${res.imported === 1 ? "" : "s"}`);
+        toast.success(`Imported ${res.imported} ${config.successNoun(res.imported)}`);
+        resetImport();
       } else {
         toast.warning(
           `Imported ${res.imported}, ${res.failed.length} failed. See details below.`,
@@ -253,7 +388,7 @@ export function ImportExportClient() {
     <div>
       <PageHeader
         title="Data"
-        description="Import transactions from a spreadsheet, or export a backup of your data."
+        description="Import accounts, categories, payees, or transactions from a spreadsheet, or export a backup of your data."
       />
 
       <Tabs defaultValue="import">
@@ -266,13 +401,24 @@ export function ImportExportClient() {
           <Card>
             <CardHeader>
               <CardTitle>Upload file</CardTitle>
-              <CardDescription>
-                Upload a CSV or Excel (.xlsx) file containing your transactions. Accounts must
-                already exist; categories and payees referenced by name will be created
-                automatically.
-              </CardDescription>
+              <CardDescription>{config.description}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="grid gap-2 sm:max-w-xs">
+                <Label htmlFor="import-entity">What are you importing?</Label>
+                <Select value={entity} onValueChange={(v) => handleEntityChange(v as EntityKind)}>
+                  <SelectTrigger id="import-entity" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(ENTITY_CONFIGS) as EntityKind[]).map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {ENTITY_CONFIGS[key].label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex flex-wrap items-center gap-3">
                 <input
                   ref={fileInputRef}
@@ -322,7 +468,7 @@ export function ImportExportClient() {
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {FIELDS.map((field) => (
+                    {config.fields.map((field) => (
                       <div key={field.key} className="grid gap-2">
                         <Label htmlFor={`map-${field.key}`}>
                           {field.label}
@@ -361,27 +507,19 @@ export function ImportExportClient() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Account</TableHead>
-                        <TableHead>To account</TableHead>
-                        <TableHead>Category</TableHead>
-                        <TableHead>Payee</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead>Description</TableHead>
+                        {config.previewColumns.map((col) => (
+                          <TableHead key={col.key}>{col.label}</TableHead>
+                        ))}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {previewRows.map((row, idx) => (
                         <TableRow key={idx}>
-                          <TableCell>{row.date}</TableCell>
-                          <TableCell>{row.type}</TableCell>
-                          <TableCell>{row.accountName}</TableCell>
-                          <TableCell>{row.toAccountName}</TableCell>
-                          <TableCell>{row.categoryName}</TableCell>
-                          <TableCell>{row.payeeName}</TableCell>
-                          <TableCell>{row.amount}</TableCell>
-                          <TableCell>{row.description}</TableCell>
+                          {config.previewColumns.map((col) => (
+                            <TableCell key={col.key}>
+                              {row[col.key] as React.ReactNode}
+                            </TableCell>
+                          ))}
                         </TableRow>
                       ))}
                     </TableBody>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, MoreHorizontal, Pencil, Plus, Search, Sparkles, Store, Tags, Trash2 } from "lucide-react";
+import { Loader2, MoreHorizontal, Palette, Pencil, Plus, Search, Sparkles, Store, Tags, Trash2 } from "lucide-react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/swr";
 import { apiFetch, ApiError } from "@/lib/client";
@@ -76,6 +76,7 @@ export function TaxonomyManager({ title, description, endpoint, defaultColor, ic
 
   const [deleting, setDeleting] = useState<TaxonomyItem | null>(null);
   const [cleaning, setCleaning] = useState(false);
+  const [recoloring, setRecoloring] = useState(false);
 
   const items = data ?? [];
   const isSearching = debouncedSearch.length > 0;
@@ -146,6 +147,21 @@ export function TaxonomyManager({ title, description, endpoint, defaultColor, ic
     }
   }
 
+  async function handleRecolor() {
+    setRecoloring(true);
+    try {
+      const res = await apiFetch<{ recolored: number }>(`${endpoint}/recolor`, { method: "POST" });
+      toast.success(
+        `Reassigned colours to ${res.recolored} ${res.recolored === 1 ? singular.toLowerCase() : title.toLowerCase()}`,
+      );
+      mutate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reassign colours");
+    } finally {
+      setRecoloring(false);
+    }
+  }
+
   async function handleCleanup() {
     setCleaning(true);
     try {
@@ -162,6 +178,12 @@ export function TaxonomyManager({ title, description, endpoint, defaultColor, ic
   return (
     <div>
       <PageHeader title={title} description={description}>
+        {items.length > 0 && (
+          <Button variant="outline" onClick={handleRecolor} disabled={recoloring}>
+            {recoloring ? <Loader2 className="size-4 animate-spin" /> : <Palette className="size-4" />}
+            Reassign colours
+          </Button>
+        )}
         {unusedCount > 0 && (
           <Button variant="outline" onClick={handleCleanup} disabled={cleaning}>
             {cleaning ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}

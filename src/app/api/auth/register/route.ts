@@ -5,6 +5,7 @@ import { hashPassword, createSession } from "@/lib/auth";
 import { registerSchema } from "@/lib/validations";
 import { route, created, fail } from "@/lib/http";
 import { rateLimit, clientKey } from "@/lib/ratelimit";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -28,5 +29,6 @@ export const POST = route(async (req: Request) => {
     .returning({ id: users.id, email: users.email, name: users.name });
 
   await createSession({ userId: user.id, email: user.email });
+  logger.info("user registered", { userId: user.id });
   return created({ user });
 });
