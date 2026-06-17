@@ -422,9 +422,9 @@ export function TransactionsClient() {
 
       {/* Bulk action toolbar */}
       {selected.size > 0 && (
-        <Card className="mb-4 border-primary/40">
+        <Card className="mb-4 border-primary/30 bg-primary/5">
           <CardContent className="flex flex-wrap items-center gap-3 p-3">
-            <span className="text-sm font-medium">
+            <span className="gradient-text text-sm font-bold">
               {selected.size} selected
             </span>
             <div className="flex flex-wrap items-center gap-2">
@@ -683,8 +683,8 @@ function TransactionRow({
       <TableCell
         className={cn(
           "text-right font-semibold tabular-nums",
-          tx.type === "income" && "text-emerald-500",
-          tx.type === "expense" && "text-rose-500",
+          tx.type === "income" && "text-emerald-600 dark:text-emerald-400",
+          tx.type === "expense" && "text-rose-600 dark:text-rose-400",
         )}
       >
         <InlineInput
