@@ -169,9 +169,55 @@ def delete_unused_payees(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete unused payees: {str(e)}")
 
+@router.get("/export")
+def export_payees(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Export all payees to Excel/CSV format"""
+    try:
+        # Get all payees for the current user
+        payees = db.query(Payee).filter(
+            Payee.user_id == current_user.id
+        ).order_by(Payee.name).all()
+
+        if not payees:
+            raise HTTPException(status_code=404, detail="No payees found to export")
+
+        # Convert to DataFrame
+        data = []
+        for payee in payees:
+            data.append({
+                'Name': payee.name,
+                'Color': payee.color,
+                'Created At': payee.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'Slug': payee.slug
+            })
+
+        df = pd.DataFrame(data)
+
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Payees')
+
+        output.seek(0)
+
+        # Return as streaming response
+        return StreamingResponse(
+            io.BytesIO(output.getvalue()),
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={"Content-Disposition": "attachment; filename=payees_export.xlsx"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export payees: {str(e)}")
+
 @router.get("/{payee_id}", response_model=PayeeResponse)
 def get_payee(
-    payee_id: uuid.UUID, 
+    payee_id: uuid.UUID,
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_active_user)
 ):
@@ -325,52 +371,6 @@ def reassign_payee_colors(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to reassign payee colors: {str(e)}")
-
-@router.get("/export")
-def export_payees(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Export all payees to Excel/CSV format"""
-    try:
-        # Get all payees for the current user
-        payees = db.query(Payee).filter(
-            Payee.user_id == current_user.id
-        ).order_by(Payee.name).all()
-        
-        if not payees:
-            raise HTTPException(status_code=404, detail="No payees found to export")
-        
-        # Convert to DataFrame
-        data = []
-        for payee in payees:
-            data.append({
-                'Name': payee.name,
-                'Color': payee.color,
-                'Created At': payee.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-                'Slug': payee.slug
-            })
-        
-        df = pd.DataFrame(data)
-        
-        # Create Excel file in memory
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Payees')
-        
-        output.seek(0)
-        
-        # Return as streaming response
-        return StreamingResponse(
-            io.BytesIO(output.getvalue()),
-            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            headers={"Content-Disposition": "attachment; filename=payees_export.xlsx"}
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to export payees: {str(e)}")
 
 @router.post("/import")
 def import_payees(

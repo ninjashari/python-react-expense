@@ -55,9 +55,66 @@ def get_accounts(
     accounts = db.query(Account).filter(Account.user_id == current_user.id).order_by(Account.created_at.desc()).all()
     return accounts
 
+@router.get("/export")
+def export_accounts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Export all accounts to Excel/CSV format"""
+    try:
+        # Get all accounts for the current user
+        accounts = db.query(Account).filter(
+            Account.user_id == current_user.id
+        ).order_by(Account.name).all()
+
+        if not accounts:
+            raise HTTPException(status_code=404, detail="No accounts found to export")
+
+        # Convert to DataFrame
+        data = []
+        for account in accounts:
+            data.append({
+                'Name': account.name,
+                'Type': account.type,
+                'Balance': float(account.balance) if account.balance else 0.0,
+                'Opening Date': account.opening_date.strftime('%Y-%m-%d') if account.opening_date else '',
+                'Account Number': account.account_number or '',
+                'Card Number': account.card_number or '',
+                'Card Expiry Month': account.card_expiry_month or '',
+                'Card Expiry Year': account.card_expiry_year or '',
+                'Credit Limit': float(account.credit_limit) if account.credit_limit else '',
+                'Bill Generation Date': account.bill_generation_date or '',
+                'Payment Due Date': account.payment_due_date or '',
+                'Interest Rate': float(account.interest_rate) if account.interest_rate else '',
+                'Status': account.status,
+                'Currency': account.currency,
+                'Created At': account.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+            })
+
+        df = pd.DataFrame(data)
+
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Accounts')
+
+        output.seek(0)
+
+        # Return as streaming response
+        return StreamingResponse(
+            io.BytesIO(output.getvalue()),
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={"Content-Disposition": "attachment; filename=accounts_export.xlsx"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export accounts: {str(e)}")
+
 @router.get("/{account_id}", response_model=AccountResponse)
 def get_account(
-    account_id: uuid.UUID, 
+    account_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -181,63 +238,6 @@ def recalculate_all_balances(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to recalculate balances: {str(e)}")
-
-@router.get("/export")
-def export_accounts(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Export all accounts to Excel/CSV format"""
-    try:
-        # Get all accounts for the current user
-        accounts = db.query(Account).filter(
-            Account.user_id == current_user.id
-        ).order_by(Account.name).all()
-        
-        if not accounts:
-            raise HTTPException(status_code=404, detail="No accounts found to export")
-        
-        # Convert to DataFrame
-        data = []
-        for account in accounts:
-            data.append({
-                'Name': account.name,
-                'Type': account.type,
-                'Balance': float(account.balance) if account.balance else 0.0,
-                'Opening Date': account.opening_date.strftime('%Y-%m-%d') if account.opening_date else '',
-                'Account Number': account.account_number or '',
-                'Card Number': account.card_number or '',
-                'Card Expiry Month': account.card_expiry_month or '',
-                'Card Expiry Year': account.card_expiry_year or '',
-                'Credit Limit': float(account.credit_limit) if account.credit_limit else '',
-                'Bill Generation Date': account.bill_generation_date or '',
-                'Payment Due Date': account.payment_due_date or '',
-                'Interest Rate': float(account.interest_rate) if account.interest_rate else '',
-                'Status': account.status,
-                'Currency': account.currency,
-                'Created At': account.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-            })
-        
-        df = pd.DataFrame(data)
-        
-        # Create Excel file in memory
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Accounts')
-        
-        output.seek(0)
-        
-        # Return as streaming response
-        return StreamingResponse(
-            io.BytesIO(output.getvalue()),
-            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            headers={"Content-Disposition": "attachment; filename=accounts_export.xlsx"}
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to export accounts: {str(e)}")
 
 @router.post("/import")
 def import_accounts(

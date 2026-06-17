@@ -144,9 +144,55 @@ def delete_unused_categories(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to delete unused categories: {str(e)}")
 
+@router.get("/export")
+def export_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Export all categories to Excel/CSV format"""
+    try:
+        # Get all categories for the current user
+        categories = db.query(Category).filter(
+            Category.user_id == current_user.id
+        ).order_by(Category.name).all()
+
+        if not categories:
+            raise HTTPException(status_code=404, detail="No categories found to export")
+
+        # Convert to DataFrame
+        data = []
+        for category in categories:
+            data.append({
+                'Name': category.name,
+                'Color': category.color,
+                'Created At': category.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                'Slug': category.slug
+            })
+
+        df = pd.DataFrame(data)
+
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Categories')
+
+        output.seek(0)
+
+        # Return as streaming response
+        return StreamingResponse(
+            io.BytesIO(output.getvalue()),
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={"Content-Disposition": "attachment; filename=categories_export.xlsx"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export categories: {str(e)}")
+
 @router.get("/{category_id}", response_model=CategoryResponse)
 def get_category(
-    category_id: uuid.UUID, 
+    category_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -280,52 +326,6 @@ def reassign_category_colors(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to reassign category colors: {str(e)}")
-
-@router.get("/export")
-def export_categories(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Export all categories to Excel/CSV format"""
-    try:
-        # Get all categories for the current user
-        categories = db.query(Category).filter(
-            Category.user_id == current_user.id
-        ).order_by(Category.name).all()
-        
-        if not categories:
-            raise HTTPException(status_code=404, detail="No categories found to export")
-        
-        # Convert to DataFrame
-        data = []
-        for category in categories:
-            data.append({
-                'Name': category.name,
-                'Color': category.color,
-                'Created At': category.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-                'Slug': category.slug
-            })
-        
-        df = pd.DataFrame(data)
-        
-        # Create Excel file in memory
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Categories')
-        
-        output.seek(0)
-        
-        # Return as streaming response
-        return StreamingResponse(
-            io.BytesIO(output.getvalue()),
-            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            headers={"Content-Disposition": "attachment; filename=categories_export.xlsx"}
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to export categories: {str(e)}")
 
 @router.post("/import")
 def import_categories(
