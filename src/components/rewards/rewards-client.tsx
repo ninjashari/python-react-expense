@@ -187,16 +187,17 @@ function AccountRewardsPanel({ account }: { account: CreditAccountOption }) {
   return (
     <div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardContent className="flex items-center justify-between p-5">
+        <Card className="group relative overflow-hidden transition-shadow hover:shadow-md">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-500 to-orange-600" />
+          <CardContent className="flex items-center justify-between p-5 pt-6">
             <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Points balance</p>
-              <p className="text-3xl font-semibold tabular-nums">
+              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Points balance</p>
+              <p className="text-3xl font-bold tabular-nums">
                 {isLoading ? "—" : formatPoints(balance)}
                 <span className="ml-1 text-base font-normal text-muted-foreground">pts</span>
               </p>
             </div>
-            <div className="rounded-full bg-muted p-3 text-primary">
+            <div className="rounded-xl bg-amber-500/10 p-3 text-amber-600 transition-transform duration-200 group-hover:scale-110 dark:bg-amber-400/15 dark:text-amber-400">
               <Award className="size-5" />
             </div>
           </CardContent>

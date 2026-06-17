@@ -383,8 +383,8 @@ export function ReportsClient() {
                       </div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
                         <div
-                          className="h-full rounded-full"
-                          style={{ width: `${width}%`, backgroundColor: p.color }}
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${width}%`, background: `linear-gradient(90deg, ${p.color}, ${p.color}dd)` }}
                         />
                       </div>
                     </>

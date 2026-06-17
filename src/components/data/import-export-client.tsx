@@ -559,7 +559,8 @@ export function ImportExportClient() {
         </TabsContent>
 
         <TabsContent value="export" className="space-y-4">
-          <Card>
+          <Card className="group overflow-hidden transition-shadow hover:shadow-sm">
+            <div className="h-1 bg-gradient-to-r from-blue-500 to-indigo-600" />
             <CardHeader>
               <CardTitle>Export backup</CardTitle>
               <CardDescription>
@@ -579,7 +580,8 @@ export function ImportExportClient() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="group overflow-hidden transition-shadow hover:shadow-sm">
+            <div className="h-1 bg-gradient-to-r from-emerald-500 to-teal-600" />
             <CardHeader>
               <CardTitle>Export transactions</CardTitle>
               <CardDescription>
