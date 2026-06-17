@@ -20,7 +20,7 @@ export function AppShell({ user, children }: Props) {
   const [open, setOpen] = useState(false);
 
   const NavLinks = (
-    <nav className="flex flex-col gap-1 p-3">
+    <nav className="flex flex-col gap-0.5 p-3">
       {navItems.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
         return (
@@ -29,13 +29,13 @@ export function AppShell({ user, children }: Props) {
             href={item.href}
             onClick={() => setOpen(false)}
             className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
               active
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                ? "gradient-primary text-white shadow-sm"
+                : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
             )}
           >
-            <item.icon className="size-4" />
+            <item.icon className={cn("size-4 transition-transform duration-200", !active && "group-hover:scale-110")} />
             {item.label}
           </Link>
         );
@@ -44,13 +44,15 @@ export function AppShell({ user, children }: Props) {
   );
 
   return (
-    <div className="flex min-h-screen bg-muted/30">
+    <div className="flex min-h-screen bg-background">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 border-r bg-sidebar lg:block">
-        <div className="sticky top-0">
-          <div className="flex h-16 items-center gap-2 border-b px-5 font-semibold text-sidebar-foreground">
-            <Wallet className="size-5 text-primary" />
-            Ledgerly
+        <div className="sticky top-0 flex h-full flex-col">
+          <div className="flex h-16 items-center gap-2.5 border-b px-5 font-semibold text-sidebar-foreground">
+            <div className="gradient-primary flex size-8 items-center justify-center rounded-lg text-white shadow-sm">
+              <Wallet className="size-4" />
+            </div>
+            <span className="gradient-text text-lg">Ledgerly</span>
           </div>
           {NavLinks}
         </div>
@@ -59,12 +61,14 @@ export function AppShell({ user, children }: Props) {
       {/* Mobile drawer */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
-          <aside className="absolute left-0 top-0 h-full w-64 bg-sidebar shadow-xl">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setOpen(false)} />
+          <aside className="absolute left-0 top-0 h-full w-64 bg-sidebar shadow-2xl">
             <div className="flex h-16 items-center justify-between border-b px-5 font-semibold">
-              <span className="flex items-center gap-2">
-                <Wallet className="size-5 text-primary" />
-                Ledgerly
+              <span className="flex items-center gap-2.5">
+                <div className="gradient-primary flex size-8 items-center justify-center rounded-lg text-white shadow-sm">
+                  <Wallet className="size-4" />
+                </div>
+                <span className="gradient-text text-lg">Ledgerly</span>
               </span>
               <Button variant="ghost" size="icon" onClick={() => setOpen(false)}>
                 <X className="size-5" />
@@ -76,7 +80,7 @@ export function AppShell({ user, children }: Props) {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:px-6">
+        <header className="glass sticky top-0 z-30 flex h-16 items-center gap-3 border-b px-4 sm:px-6">
           <Button
             variant="ghost"
             size="icon"

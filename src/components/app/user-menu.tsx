@@ -70,7 +70,7 @@ export function UserMenu({ name, email }: Props) {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="rounded-full">
             <Avatar className="size-8">
-              <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+              <AvatarFallback className="gradient-primary text-xs font-semibold text-white">
                 {initials(name)}
               </AvatarFallback>
             </Avatar>
