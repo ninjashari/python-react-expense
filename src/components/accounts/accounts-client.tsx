@@ -149,15 +149,16 @@ export function AccountsClient() {
       </PageHeader>
 
       {!isLoading && accounts.length > 0 && (
-        <Card className="mb-6">
-          <CardContent className="flex items-center justify-between p-5">
+        <Card className="group relative mb-6 overflow-hidden transition-shadow hover:shadow-md">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 to-purple-600" />
+          <CardContent className="flex items-center justify-between p-5 pt-6">
             <div className="space-y-1">
-              <p className="text-sm text-muted-foreground">Total balance (active)</p>
-              <p className="text-2xl font-semibold tabular-nums">
+              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Total balance (active)</p>
+              <p className="text-2xl font-bold tabular-nums">
                 {formatCurrency(totalBalance)}
               </p>
             </div>
-            <div className="rounded-full bg-muted p-3 text-primary">
+            <div className="rounded-xl bg-indigo-500/10 p-3 text-indigo-600 dark:bg-indigo-400/15 dark:text-indigo-400">
               <Wallet className="size-5" />
             </div>
           </CardContent>
@@ -257,8 +258,18 @@ function AccountCard({
   const hasInterest = account.type === "ppf" || account.type === "investment";
   const interestRate = account.interestRate != null ? Number(account.interestRate) : null;
 
+  const gradientMap: Record<string, string> = {
+    checking: "from-blue-500 to-indigo-600",
+    savings: "from-emerald-500 to-teal-600",
+    credit: "from-purple-500 to-pink-600",
+    cash: "from-amber-500 to-orange-600",
+    investment: "from-cyan-500 to-blue-600",
+    ppf: "from-teal-500 to-green-600",
+  };
+
   return (
-    <Card>
+    <Card className="group overflow-hidden transition-shadow duration-200 hover:shadow-md">
+      <div className={cn("h-1 bg-gradient-to-r", gradientMap[account.type] ?? "from-gray-400 to-gray-500")} />
       <CardHeader>
         <CardTitle className="truncate">{account.name}</CardTitle>
         <CardAction>
@@ -282,7 +293,7 @@ function AccountCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-2xl font-semibold tabular-nums">
+        <p className="text-2xl font-bold tabular-nums">
           {formatCurrency(balance, account.currency)}
         </p>
 
@@ -310,8 +321,10 @@ function AccountCard({
                 <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                   <div
                     className={cn(
-                      "h-full rounded-full",
-                      utilization >= 80 ? "bg-rose-500" : "bg-primary",
+                      "h-full rounded-full transition-all duration-500",
+                      utilization >= 80
+                        ? "bg-gradient-to-r from-rose-500 to-red-600"
+                        : "bg-gradient-to-r from-indigo-500 to-purple-500",
                     )}
                     style={{ width: `${utilization}%` }}
                   />
