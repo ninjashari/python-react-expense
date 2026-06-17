@@ -7,6 +7,7 @@ import { route, ok, fail } from "@/lib/http";
 import { accountSchema } from "@/lib/validations";
 import { logger } from "@/lib/logger";
 import { chunk } from "@/lib/utils";
+import { recalcAllBalances } from "@/lib/balance";
 
 export const runtime = "nodejs";
 
@@ -45,13 +46,12 @@ export const POST = route(async (req: Request) => {
     }
     existingNames.add(nameKey);
 
-    const opening = row.balance.toFixed(2);
     toInsert.push({
       userId,
       name: row.name,
       type: row.type,
-      openingBalance: opening,
-      balance: opening,
+      openingBalance: "0.00",
+      balance: "0.00",
       accountNumber: row.accountNumber ?? null,
       cardNumber: row.cardNumber ?? null,
       cardExpiryMonth: row.cardExpiryMonth ?? null,
@@ -69,6 +69,8 @@ export const POST = route(async (req: Request) => {
   for (const batch of chunk(toInsert, INSERT_BATCH)) {
     await db.insert(accounts).values(batch);
   }
+
+  await recalcAllBalances(userId);
 
   logger.info("accounts imported", {
     userId,

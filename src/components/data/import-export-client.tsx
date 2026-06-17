@@ -138,7 +138,6 @@ const ENTITY_CONFIGS: Record<EntityKind, EntityConfig> = {
     fields: [
       { key: "name", label: "Name", required: true, guess: ["name", "account"] },
       { key: "type", label: "Type", required: true, guess: ["type"] },
-      { key: "balance", label: "Balance", required: false, guess: ["balance", "opening balance"] },
       { key: "accountNumber", label: "Account number", required: false, guess: ["account number", "acct"] },
       { key: "creditLimit", label: "Credit limit", required: false, guess: ["credit limit"] },
       { key: "status", label: "Status", required: false, guess: ["status"] },
@@ -148,7 +147,7 @@ const ENTITY_CONFIGS: Record<EntityKind, EntityConfig> = {
     mapRow: (valueFor) => ({
       name: valueFor("name"),
       type: normalizeAccountType(valueFor("type")),
-      balance: Number(valueFor("balance").replace(/[^0-9.-]/g, "")) || 0,
+      balance: 0,
       accountNumber: valueFor("accountNumber") || null,
       creditLimit: valueFor("creditLimit")
         ? Number(valueFor("creditLimit").replace(/[^0-9.-]/g, ""))
@@ -160,7 +159,6 @@ const ENTITY_CONFIGS: Record<EntityKind, EntityConfig> = {
     previewColumns: [
       { key: "name", label: "Name" },
       { key: "type", label: "Type" },
-      { key: "balance", label: "Balance" },
       { key: "accountNumber", label: "Account number" },
       { key: "status", label: "Status" },
       { key: "currency", label: "Currency" },
