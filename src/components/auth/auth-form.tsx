@@ -34,8 +34,8 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   return (
     <div className="space-y-6">
       <div className="space-y-2 text-center lg:text-left">
-        <h2 className="text-2xl font-semibold tracking-tight">
-          {isRegister ? "Create your account" : "Sign in"}
+        <h2 className="text-2xl font-bold tracking-tight">
+          {isRegister ? "Create your account" : "Welcome back"}
         </h2>
         <p className="text-sm text-muted-foreground">
           {isRegister
@@ -74,7 +74,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
             placeholder="••••••••"
           />
         </div>
-        <Button type="submit" className="w-full" disabled={loading}>
+        <Button type="submit" className="gradient-primary w-full border-0 text-white shadow-md hover:opacity-90" disabled={loading}>
           {loading && <Loader2 className="size-4 animate-spin" />}
           {isRegister ? "Create account" : "Sign in"}
         </Button>
