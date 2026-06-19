@@ -19,7 +19,12 @@ import {
   Alert,
   Chip,
 } from '@mui/material';
-import { Add, Edit, Delete, Refresh, Calculate, FileDownload, FileUpload } from '@mui/icons-material';
+import {
+  Add, Edit, Delete, Refresh, Calculate, FileDownload, FileUpload,
+  AccountBalanceWallet, Savings, CreditCard, Payments, AccountBalance,
+  CalendarToday, Loyalty, Percent,
+} from '@mui/icons-material';
+import { alpha } from '@mui/material/styles';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { accountsApi, transactionsApi, rewardPointsApi } from '../services/api';
@@ -34,6 +39,92 @@ const accountTypes = [
   { value: 'cash', label: 'Cash' },
   { value: 'ppf', label: 'PPF (Public Provident Fund)' },
 ];
+
+// Distinct gradient + accent per account type
+interface TypeTheme {
+  gradient: string;
+  accent: string;
+  icon: React.ReactNode;
+}
+
+const TYPE_THEME: Record<string, TypeTheme> = {
+  checking: {
+    gradient: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+    accent: '#4f46e5',
+    icon: <AccountBalanceWallet />,
+  },
+  savings: {
+    gradient: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+    accent: '#059669',
+    icon: <Savings />,
+  },
+  credit: {
+    gradient: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)',
+    accent: '#ef4444',
+    icon: <CreditCard />,
+  },
+  cash: {
+    gradient: 'linear-gradient(135deg, #0891b2 0%, #06b6d4 100%)',
+    accent: '#0891b2',
+    icon: <Payments />,
+  },
+  ppf: {
+    gradient: 'linear-gradient(135deg, #db2777 0%, #ec4899 100%)',
+    accent: '#db2777',
+    icon: <AccountBalance />,
+  },
+};
+
+const getTypeTheme = (type: string): TypeTheme => TYPE_THEME[type] ?? TYPE_THEME.checking;
+
+// Bank brand gradients, detected from the account name.
+// Colors sourced from official brand palettes (schemecolor.com / brandpalettes.com).
+interface BankTheme {
+  keywords: string[];
+  gradient: string;
+  accent: string;
+}
+
+const BANK_THEMES: BankTheme[] = [
+  { keywords: ['hdfc'], gradient: 'linear-gradient(135deg, #004C8F 0%, #ED232A 100%)', accent: '#004C8F' },
+  { keywords: ['icici'], gradient: 'linear-gradient(135deg, #B02A30 0%, #F99D27 100%)', accent: '#B02A30' },
+  { keywords: ['axis'], gradient: 'linear-gradient(135deg, #97144D 0%, #EB1165 100%)', accent: '#97144D' },
+  { keywords: ['sbi', 'state bank'], gradient: 'linear-gradient(135deg, #292075 0%, #00B5EF 100%)', accent: '#292075' },
+  { keywords: ['kotak'], gradient: 'linear-gradient(135deg, #003874 0%, #ED1C24 100%)', accent: '#003874' },
+  { keywords: ['idfc'], gradient: 'linear-gradient(135deg, #9C1D26 0%, #D1394A 100%)', accent: '#9C1D26' },
+  { keywords: ['american express', 'amex'], gradient: 'linear-gradient(135deg, #006FCF 0%, #00A0DF 100%)', accent: '#006FCF' },
+  { keywords: ['citi'], gradient: 'linear-gradient(135deg, #003B7E 0%, #D9261C 100%)', accent: '#003B7E' },
+  { keywords: ['hsbc'], gradient: 'linear-gradient(135deg, #DB0011 0%, #FF5A5F 100%)', accent: '#DB0011' },
+  { keywords: ['indusind'], gradient: 'linear-gradient(135deg, #8A2432 0%, #A4123F 100%)', accent: '#8A2432' },
+  { keywords: ['yes bank'], gradient: 'linear-gradient(135deg, #00518F 0%, #ED1C24 100%)', accent: '#00518F' },
+  { keywords: ['au small', 'au bank'], gradient: 'linear-gradient(135deg, #5B2D8E 0%, #ED1B2E 100%)', accent: '#5B2D8E' },
+  { keywords: ['rbl'], gradient: 'linear-gradient(135deg, #1F2A44 0%, #C8102E 100%)', accent: '#C8102E' },
+  { keywords: ['bank of baroda', 'baroda'], gradient: 'linear-gradient(135deg, #E35205 0%, #F37021 100%)', accent: '#E35205' },
+  { keywords: ['punjab national', 'pnb'], gradient: 'linear-gradient(135deg, #4C1D6E 0%, #A6093D 100%)', accent: '#4C1D6E' },
+  { keywords: ['standard chartered', 'stanchart'], gradient: 'linear-gradient(135deg, #0473EA 0%, #38B449 100%)', accent: '#0473EA' },
+  { keywords: ['amazon'], gradient: 'linear-gradient(135deg, #232F3E 0%, #FF9900 100%)', accent: '#FF9900' },
+  { keywords: ['onecard', 'one card'], gradient: 'linear-gradient(135deg, #000000 0%, #434343 100%)', accent: '#1a1a1a' },
+  { keywords: ['federal'], gradient: 'linear-gradient(135deg, #00427A 0%, #F9A01B 100%)', accent: '#00427A' },
+  { keywords: ['idbi'], gradient: 'linear-gradient(135deg, #006837 0%, #00A651 100%)', accent: '#006837' },
+  { keywords: ['canara'], gradient: 'linear-gradient(135deg, #00558C 0%, #F9B000 100%)', accent: '#00558C' },
+];
+
+// Resolve the visual theme for a card: bank brand colors (from the account name)
+// when recognized, otherwise the account-type gradient. Icon stays type-based.
+const getBrandTheme = (account: Account): TypeTheme => {
+  const name = account.name.toLowerCase();
+  const bank = BANK_THEMES.find((b) => b.keywords.some((k) => name.includes(k)));
+  const typeT = getTypeTheme(account.type);
+  if (!bank) return typeT;
+  return { gradient: bank.gradient, accent: bank.accent, icon: typeT.icon };
+};
+
+// Mask an account/card number, keeping the last 4 visible
+const maskNumber = (value: string): string => {
+  const v = value.trim();
+  if (v.length <= 4) return v;
+  return `•••• ${v.slice(-4)}`;
+};
 
 const Accounts: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -60,12 +151,6 @@ const Accounts: React.FC = () => {
     // For credit cards: available = limit - debt (positive balance)
     // If balance is negative (credit balance), add it to available credit
     return creditLimit - Math.max(0, balance);
-  };
-
-  // Helper function to determine balance color for credit cards
-  const getCreditBalanceColor = (balance: number) => {
-    // For credit cards: positive balance = debt (bad), negative balance = credit (good)
-    return balance > 0 ? 'error.main' : 'success.main';
   };
 
   const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<CreateAccountDto>({
@@ -318,6 +403,199 @@ const Accounts: React.FC = () => {
     fileInput.click();
   };
 
+  // A compact label/value row for the card body
+  const DetailRow: React.FC<{ icon?: React.ReactNode; label: string; value: React.ReactNode }> = ({ icon, label, value }) => (
+    <Box display="flex" justifyContent="space-between" alignItems="center" gap={1}>
+      <Box display="flex" alignItems="center" gap={0.75} color="text.secondary" sx={{ minWidth: 0 }}>
+        {icon && <Box sx={{ display: 'flex', '& svg': { fontSize: '1rem' } }}>{icon}</Box>}
+        <Typography variant="caption" noWrap>{label}</Typography>
+      </Box>
+      <Typography variant="caption" fontWeight={600} sx={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+        {value}
+      </Typography>
+    </Box>
+  );
+
+  const renderAccountCard = (account: Account) => {
+    const tt = getBrandTheme(account);
+    const balance = Number(account.balance || 0);
+    const isCredit = account.type === 'credit';
+    const utilization = isCredit && account.credit_limit
+      ? getCreditUtilization(balance, account.credit_limit)
+      : 0;
+    const reward = rewardSummaryMap[account.id];
+    const expiry = account.card_expiry_month && account.card_expiry_year
+      ? `${String(account.card_expiry_month).padStart(2, '0')}/${String(account.card_expiry_year).slice(-2)}`
+      : null;
+
+    return (
+      <Grid item xs={12} sm={6} md={4} key={account.id}>
+        <Card
+          sx={{
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+            '&:hover': {
+              transform: 'translateY(-4px)',
+              boxShadow: (theme) =>
+                theme.palette.mode === 'light'
+                  ? '0 16px 32px -12px rgba(0,0,0,0.18)'
+                  : '0 16px 32px -12px rgba(0,0,0,0.6)',
+            },
+          }}
+        >
+          {/* Gradient header */}
+          <Box
+            sx={{
+              background: tt.gradient,
+              color: '#fff',
+              p: 2.5,
+              position: 'relative',
+              overflow: 'hidden',
+              opacity: account.status === 'closed' ? 0.7 : 1,
+            }}
+          >
+            {/* decorative circles */}
+            <Box sx={{ position: 'absolute', top: -40, right: -30, width: 130, height: 130, borderRadius: '50%', bgcolor: alpha('#fff', 0.1) }} />
+            <Box sx={{ position: 'absolute', bottom: -50, right: 20, width: 90, height: 90, borderRadius: '50%', bgcolor: alpha('#fff', 0.08) }} />
+
+            <Box position="relative">
+              <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+                <Box display="flex" alignItems="center" gap={1.25} sx={{ minWidth: 0 }}>
+                  <Box
+                    sx={{
+                      width: 40, height: 40, borderRadius: 2,
+                      bgcolor: alpha('#fff', 0.22),
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}
+                  >
+                    {tt.icon}
+                  </Box>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="subtitle1" fontWeight={700} noWrap title={account.name}>
+                      {account.name}
+                    </Typography>
+                    <Typography variant="caption" sx={{ opacity: 0.9 }}>
+                      {formatAccountType(account.type)}
+                    </Typography>
+                  </Box>
+                </Box>
+                {account.status !== 'active' && (
+                  <Chip
+                    label={account.status === 'closed' ? 'Closed' : 'Inactive'}
+                    size="small"
+                    sx={{
+                      height: 20, fontSize: '0.65rem', fontWeight: 700, color: '#fff',
+                      bgcolor: alpha('#000', 0.25),
+                    }}
+                  />
+                )}
+              </Box>
+
+              <Typography variant="caption" sx={{ opacity: 0.85 }}>
+                {isCredit && balance > 0 ? 'Outstanding' : 'Balance'}
+              </Typography>
+              <Typography variant="h5" fontWeight={700} sx={{ letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+                {isCredit && balance > 0 ? `${formatCurrency(balance)}` : formatCurrency(balance)}
+              </Typography>
+
+              {(account.card_number || expiry) && (
+                <Box display="flex" justifyContent="space-between" alignItems="center" mt={1.5} sx={{ opacity: 0.95 }}>
+                  <Typography variant="body2" sx={{ fontFamily: 'monospace', letterSpacing: 1 }}>
+                    {account.card_number ? maskNumber(account.card_number) : ''}
+                  </Typography>
+                  {expiry && (
+                    <Typography variant="caption" sx={{ opacity: 0.9 }}>
+                      Exp {expiry}
+                    </Typography>
+                  )}
+                </Box>
+              )}
+            </Box>
+          </Box>
+
+          {/* Body — all account info */}
+          <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1, p: 2.5 }}>
+            <DetailRow
+              icon={<CalendarToday />}
+              label="Opened"
+              value={new Date(account.opening_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+            />
+            {account.account_number && (
+              <DetailRow label="Account No." value={<span style={{ fontFamily: 'monospace' }}>{maskNumber(account.account_number)}</span>} />
+            )}
+
+            {isCredit && account.credit_limit && (
+              <>
+                <DetailRow icon={<CreditCard />} label="Credit Limit" value={formatCurrency(account.credit_limit)} />
+                <DetailRow label="Available" value={formatCurrency(getAvailableCredit(balance, account.credit_limit))} />
+                <Box mt={0.5}>
+                  <Box display="flex" justifyContent="space-between" mb={0.5}>
+                    <Typography variant="caption" color="text.secondary">Utilization</Typography>
+                    <Typography variant="caption" fontWeight={600}>{utilization.toFixed(1)}%</Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={utilization}
+                    color={utilization > 90 ? 'error' : utilization > 70 ? 'warning' : 'primary'}
+                    sx={{ height: 6, borderRadius: 3 }}
+                  />
+                </Box>
+              </>
+            )}
+
+            {isCredit && account.bill_generation_date && (
+              <DetailRow icon={<CalendarToday />} label="Bill Date" value={`${account.bill_generation_date}th`} />
+            )}
+            {isCredit && account.payment_due_date && (
+              <DetailRow label="Payment Due" value={`${account.payment_due_date}th`} />
+            )}
+
+            {account.type === 'ppf' && account.interest_rate && (
+              <DetailRow icon={<Percent />} label="Interest Rate" value={`${account.interest_rate}% p.a.`} />
+            )}
+
+            {isCredit && reward && (
+              <Box mt={1} pt={1.5} sx={{ borderTop: 1, borderColor: 'divider' }}>
+                <Box display="flex" alignItems="center" gap={0.75} mb={1}>
+                  <Loyalty sx={{ fontSize: '1rem', color: tt.accent }} />
+                  <Typography variant="caption" fontWeight={700} color="text.secondary">
+                    Reward Points
+                  </Typography>
+                </Box>
+                <Box display="flex" gap={0.5} flexWrap="wrap">
+                  <Chip label={`Earned ${reward.total_earned.toLocaleString()}`} size="small" color="success" variant="outlined" />
+                  <Chip label={`Redeemed ${reward.total_redeemed.toLocaleString()}`} size="small" color="warning" variant="outlined" />
+                  <Chip label={`Available ${reward.net_available.toLocaleString()}`} size="small" color="primary" />
+                </Box>
+              </Box>
+            )}
+
+            {/* Actions */}
+            <Box display="flex" justifyContent="flex-end" gap={0.5} mt="auto" pt={1.5}>
+              <IconButton size="small" onClick={() => handleOpenDialog(account)} title="Edit">
+                <Edit fontSize="small" />
+              </IconButton>
+              <IconButton
+                size="small"
+                onClick={() => handleRecalculateBalances(account)}
+                disabled={isRecalculating}
+                title="Recalculate balances"
+              >
+                {isRecalculating ? <CircularProgress size={16} /> : <Calculate fontSize="small" />}
+              </IconButton>
+              <IconButton size="small" onClick={() => handleDelete(account)} color="error" title="Delete">
+                <Delete fontSize="small" />
+              </IconButton>
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+    );
+  };
+
   if (isLoading) {
     return (
       <Box>
@@ -375,9 +653,14 @@ const Accounts: React.FC = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Accounts</Typography>
-        <Box display="flex" gap={1}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
+        <Box>
+          <Typography variant="h4" fontWeight={700}>Accounts</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {accounts?.length ?? 0} account{(accounts?.length ?? 0) === 1 ? '' : 's'} · all balances and details
+          </Typography>
+        </Box>
+        <Box display="flex" gap={1} flexWrap="wrap">
           <Button
             variant="outlined"
             startIcon={<FileUpload />}
@@ -481,161 +764,33 @@ const Accounts: React.FC = () => {
           const accountsOfType = groupedAccounts[type];
           if (!accountsOfType || accountsOfType.length === 0) return null;
 
+          const tt = getTypeTheme(type);
+
           return (
             <Box key={type} mb={4}>
-              <Typography variant="h5" gutterBottom sx={{ mb: 2, fontWeight: 600, color: 'primary.main' }}>
-                {formatAccountType(type)} Accounts ({accountsOfType.length})
-              </Typography>
-              <Grid container spacing={3}>
-                {accountsOfType.map((account) => (
-          <Grid item xs={12} sm={6} md={4} key={account.id}>
-            <Card>
-              <CardContent>
-                <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-                  <Box>
-                    <Typography variant="h6" gutterBottom>
-                      {account.name}
-                    </Typography>
-                    <Box display="flex" gap={1} alignItems="center" mb={1}>
-                      <Typography variant="body2" color="textSecondary">
-                        {formatAccountType(account.type)}
-                      </Typography>
-                      {account.status === 'closed' && (
-                        <Chip 
-                          label="Closed" 
-                          size="small" 
-                          color="error"
-                          variant="outlined"
-                        />
-                      )}
-                      {account.status === 'inactive' && (
-                        <Chip 
-                          label="Inactive" 
-                          size="small" 
-                          color="warning"
-                          variant="outlined"
-                        />
-                      )}
-                    </Box>
-                    <Typography
-                      variant="h5"
-                      color={account.type === 'credit' ? getCreditBalanceColor(Number(account.balance || 0)) : (account.balance >= 0 ? 'success.main' : 'error.main')}
-                      gutterBottom
-                    >
-                      {account.type === 'credit' && account.balance > 0 ? `${formatCurrency(account.balance)} debt` : formatCurrency(account.balance)}
-                    </Typography>
-                    <Typography variant="caption" color="textSecondary">
-                      Opened: {new Date(account.opening_date).toLocaleDateString()}
-                    </Typography>
-                    {account.type === 'credit' && (
-                      <Box mt={1}>
-                        {account.credit_limit && (
-                          <>
-                            <Typography variant="caption" display="block">
-                              Credit Limit: {formatCurrency(account.credit_limit)}
-                            </Typography>
-                            <Typography variant="caption" display="block" color="textSecondary">
-                              Available: {formatCurrency(getAvailableCredit(Number(account.balance || 0), account.credit_limit))}
-                            </Typography>
-                            <Box mt={1}>
-                              <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.5}>
-                                <Typography variant="caption" color="textSecondary">
-                                  Credit Utilization
-                                </Typography>
-                                <Typography variant="caption" color="textSecondary">
-                                  {getCreditUtilization(Number(account.balance || 0), account.credit_limit).toFixed(1)}%
-                                </Typography>
-                              </Box>
-                              <LinearProgress
-                                variant="determinate"
-                                value={getCreditUtilization(Number(account.balance || 0), account.credit_limit)}
-                                color={
-                                  getCreditUtilization(Number(account.balance || 0), account.credit_limit) > 90
-                                    ? 'error'
-                                    : getCreditUtilization(Number(account.balance || 0), account.credit_limit) > 70
-                                    ? 'warning'
-                                    : 'primary'
-                                }
-                                sx={{ height: 6, borderRadius: 3 }}
-                              />
-                            </Box>
-                          </>
-                        )}
-                        {account.bill_generation_date && (
-                          <Typography variant="caption" display="block" mt={1}>
-                            Bill Date: {account.bill_generation_date}th of month
-                          </Typography>
-                        )}
-                        {account.payment_due_date && (
-                          <Typography variant="caption" display="block">
-                            Payment Due: {account.payment_due_date}th of month
-                          </Typography>
-                        )}
-                        {rewardSummaryMap[account.id] && (
-                          <Box mt={1} pt={1} sx={{ borderTop: 1, borderColor: 'divider' }}>
-                            <Typography variant="caption" color="text.secondary" display="block" fontWeight="bold">
-                              Reward Points
-                            </Typography>
-                            <Box display="flex" gap={0.5} mt={0.5} flexWrap="wrap">
-                              <Chip
-                                label={`Earned: ${rewardSummaryMap[account.id].total_earned.toLocaleString()}`}
-                                size="small"
-                                color="success"
-                                variant="outlined"
-                              />
-                              <Chip
-                                label={`Redeemed: ${rewardSummaryMap[account.id].total_redeemed.toLocaleString()}`}
-                                size="small"
-                                color="warning"
-                                variant="outlined"
-                              />
-                              <Chip
-                                label={`Available: ${rewardSummaryMap[account.id].net_available.toLocaleString()}`}
-                                size="small"
-                                color="primary"
-                                variant="filled"
-                              />
-                            </Box>
-                          </Box>
-                        )}
-                      </Box>
-                    )}
-                    {account.type === 'ppf' && account.interest_rate && (
-                      <Box mt={1}>
-                        <Typography variant="caption" display="block">
-                          Interest Rate: {account.interest_rate}% per annum
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                  <Box>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleOpenDialog(account)}
-                    >
-                      <Edit />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleRecalculateBalances(account)}
-                      disabled={isRecalculating}
-                      title="Recalculate transaction balances"
-                    >
-                      {isRecalculating ? <CircularProgress size={16} /> : <Calculate />}
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDelete(account)}
-                      color="error"
-                    >
-                      <Delete />
-                    </IconButton>
-                  </Box>
+              <Box display="flex" alignItems="center" gap={1.25} sx={{ mb: 2 }}>
+                <Box
+                  sx={{
+                    width: 32, height: 32, borderRadius: 1.5,
+                    background: tt.gradient,
+                    color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    '& svg': { fontSize: '1.1rem' },
+                  }}
+                >
+                  {tt.icon}
                 </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-                ))}
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  {formatAccountType(type)}
+                </Typography>
+                <Chip
+                  label={accountsOfType.length}
+                  size="small"
+                  sx={{ height: 20, fontWeight: 700, bgcolor: alpha(tt.accent, 0.12), color: tt.accent }}
+                />
+              </Box>
+              <Grid container spacing={3}>
+                {accountsOfType.map((account) => renderAccountCard(account))}
               </Grid>
             </Box>
           );

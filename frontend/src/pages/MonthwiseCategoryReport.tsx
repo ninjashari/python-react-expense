@@ -19,13 +19,17 @@ import {
   CircularProgress,
   Alert,
 } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
 import {
   Download,
   ShowChart,
+  TrendingUp,
+  TrendingDown,
+  AccountBalanceWallet,
+  CalendarMonth,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { transactionsApi, accountsApi } from '../services/api';
-import ReportHeader from '../components/ReportHeader';
 import MultiSelectDropdown, { Option } from '../components/MultiSelectDropdown';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
 import { formatCurrency } from '../utils/formatters';
@@ -82,6 +86,7 @@ const defaultFilters: MonthwiseReportFilters = {
 const MonthwiseCategoryReport: React.FC = () => {
   usePageTitle({ title: 'Month-wise Category Report' });
   const navigate = useNavigate();
+  const theme = useTheme();
   const { filters, setFilters } = usePersistentFilters<MonthwiseReportFilters>(
     'monthwise-category-filters-v2',
     defaultFilters
@@ -166,13 +171,18 @@ const MonthwiseCategoryReport: React.FC = () => {
 
     const rows = categories.map(cat => {
       const isExpenseCategory = (cat.expense || 0) > (cat.income || 0);
+      // Net amount in the category's dominant direction (matches the Reports page,
+      // where a category with both income and expense nets them out).
+      const netTotal = isExpenseCategory
+        ? (cat.expense || 0) - (cat.income || 0)
+        : (cat.income || 0) - (cat.expense || 0);
       const row: any = {
         id: cat.id,
         name: cat.name,
         color: cat.color,
         income: cat.income || 0,
         expense: cat.expense || 0,
-        total: cat.total_amount || 0,
+        total: netTotal,
         isExpenseCategory,
         byMonth: {},
       };
@@ -183,7 +193,10 @@ const MonthwiseCategoryReport: React.FC = () => {
 
       if (cat.monthly_trend) {
         cat.monthly_trend.forEach((m: any) => {
-          row.byMonth[m.month] = m.amount || 0;
+          // Net per month in the category's dominant direction
+          row.byMonth[m.month] = isExpenseCategory
+            ? (m.expense || 0) - (m.income || 0)
+            : (m.income || 0) - (m.expense || 0);
         });
       }
 
@@ -199,16 +212,17 @@ const MonthwiseCategoryReport: React.FC = () => {
       };
     });
 
-    rows.forEach(row => {
-      months.forEach(month => {
-        const amount = row.byMonth[month];
-        totalsByMonth[month].total += amount;
-        if (row.isExpenseCategory) {
-          totalsByMonth[month].expense += amount;
-        } else {
-          totalsByMonth[month].income += amount;
-        }
+    // Accumulate gross income/expense per month from the raw category trends
+    categories.forEach((cat: any) => {
+      if (!cat.monthly_trend) return;
+      cat.monthly_trend.forEach((m: any) => {
+        if (!totalsByMonth[m.month]) return;
+        totalsByMonth[m.month].income += m.income || 0;
+        totalsByMonth[m.month].expense += m.expense || 0;
       });
+    });
+    months.forEach(month => {
+      totalsByMonth[month].total = totalsByMonth[month].income - totalsByMonth[month].expense;
     });
 
     const grandTotal = {
@@ -320,15 +334,130 @@ const MonthwiseCategoryReport: React.FC = () => {
     );
   }
 
+  const periodLabel = filters.month
+    ? `${MONTH_OPTIONS.find((m) => m.value === filters.month)?.label ?? ''} ${filters.year}`
+    : `Year ${filters.year}`;
+  const accountsLabel =
+    filters.accountIds.length === 0
+      ? 'All accounts'
+      : filters.accountIds.map((a) => a.label).join(', ');
+
+  // Theme-aware income/expense colors
+  const incomeColor = theme.palette.success.main;
+  const expenseColor = theme.palette.error.main;
+  const paperBg = theme.palette.background.paper;
+
+  // Sticky-cell background that blends with the row beneath it
+  const stickyBg = (base?: string) => base ?? paperBg;
+
+  const summaryCards = [
+    {
+      label: 'Total Income',
+      value: totals.grandTotal.income,
+      icon: <TrendingUp />,
+      color: incomeColor,
+    },
+    {
+      label: 'Total Expenses',
+      value: totals.grandTotal.expense,
+      icon: <TrendingDown />,
+      color: expenseColor,
+    },
+    {
+      label: 'Net',
+      value: totals.grandTotal.total,
+      icon: <AccountBalanceWallet />,
+      color: totals.grandTotal.total >= 0 ? incomeColor : expenseColor,
+    },
+  ];
+
   return (
     <Box p={3}>
-      <ReportHeader
-        title="Month-wise Category Analysis"
-        startDate={startDate}
-        endDate={endDate}
-        selectedAccounts={filters.accountIds}
-      />
+      {/* Header */}
+      <Box
+        display="flex"
+        justifyContent="space-between"
+        alignItems="flex-start"
+        flexWrap="wrap"
+        gap={2}
+        mb={3}
+      >
+        <Box>
+          <Typography variant="h4" fontWeight={700}>
+            Month-wise Analysis
+          </Typography>
+          <Box display="flex" alignItems="center" gap={0.75} mt={0.5} color="text.secondary">
+            <CalendarMonth sx={{ fontSize: '1rem' }} />
+            <Typography variant="body2">
+              {periodLabel} · {accountsLabel}
+            </Typography>
+          </Box>
+        </Box>
+        <Button variant="contained" startIcon={<Download />} onClick={handleExport}>
+          Export CSV
+        </Button>
+      </Box>
 
+      {/* Summary KPI cards */}
+      <Grid container spacing={3} mb={1}>
+        {summaryCards.map((card) => (
+          <Grid item xs={12} sm={4} key={card.label}>
+            <Card
+              sx={{
+                position: 'relative',
+                overflow: 'hidden',
+                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                '&:hover': {
+                  transform: 'translateY(-4px)',
+                  boxShadow:
+                    theme.palette.mode === 'light'
+                      ? '0 12px 24px -8px rgba(0,0,0,0.12)'
+                      : '0 12px 24px -8px rgba(0,0,0,0.5)',
+                },
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: 4,
+                  height: '100%',
+                  bgcolor: card.color,
+                },
+              }}
+            >
+              <CardContent sx={{ p: 3 }}>
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+                  <Box>
+                    <Typography variant="body2" color="text.secondary" fontWeight={500} gutterBottom>
+                      {card.label}
+                    </Typography>
+                    <Typography variant="h5" fontWeight={700} color={card.color}>
+                      {formatCurrency(card.value)}
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 2.5,
+                      background: `linear-gradient(135deg, ${alpha(card.color, 0.18)}, ${alpha(card.color, 0.08)})`,
+                      color: card.color,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {card.icon}
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+
+      {/* Filters */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Grid container spacing={2} alignItems="center">
@@ -363,7 +492,7 @@ const MonthwiseCategoryReport: React.FC = () => {
                 ))}
               </TextField>
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={6}>
               <MultiSelectDropdown
                 label="Accounts"
                 options={accountOptions}
@@ -372,119 +501,242 @@ const MonthwiseCategoryReport: React.FC = () => {
                 placeholder="All accounts"
               />
             </Grid>
-            <Grid item xs={12} md={2}>
-              <Button
-                variant="contained"
-                startIcon={<Download />}
-                onClick={handleExport}
-                fullWidth
-              >
-                Export
-              </Button>
-            </Grid>
           </Grid>
         </CardContent>
       </Card>
 
-      <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+      {/* Table section header */}
+      <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
         <ShowChart sx={{ color: 'primary.main' }} />
-        <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-          Combined View
+        <Typography variant="h6" fontWeight={700}>
+          Category Breakdown
         </Typography>
       </Box>
 
-      <TableContainer component={Paper} sx={{ maxHeight: '70vh' }}>
-        <Table stickyHeader size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell
-                sx={{
-                  fontWeight: 'bold',
-                  position: 'sticky',
-                  left: 0,
-                  backgroundColor: '#fff',
-                  zIndex: 3,
-                  minWidth: 180,
-                }}
-              >
-                Category
-              </TableCell>
-              {monthColumns.map((month) => (
+      {filteredRows.length === 0 ? (
+        <Alert severity="info">No category activity found for {periodLabel}.</Alert>
+      ) : (
+        <TableContainer
+          component={Paper}
+          sx={{
+            maxHeight: '70vh',
+            borderRadius: 3,
+            border: `1px solid ${theme.palette.divider}`,
+            boxShadow: 'none',
+          }}
+        >
+          <Table stickyHeader size="small">
+            <TableHead>
+              <TableRow>
                 <TableCell
-                  key={month.key}
-                  align="right"
-                  sx={{ fontWeight: 'bold', minWidth: 100 }}
+                  sx={{
+                    fontWeight: 700,
+                    position: 'sticky',
+                    left: 0,
+                    backgroundColor: paperBg,
+                    zIndex: 3,
+                    minWidth: 200,
+                  }}
                 >
-                  <Box>
-                    <Typography variant="caption" display="block">
+                  Category
+                </TableCell>
+                {monthColumns.map((month) => (
+                  <TableCell key={month.key} align="right" sx={{ fontWeight: 700, minWidth: 100 }}>
+                    <Typography variant="caption" fontWeight={700} display="block">
                       {month.label}
                     </Typography>
                     <Typography variant="caption" display="block" color="text.secondary">
                       {month.year}
                     </Typography>
-                  </Box>
+                  </TableCell>
+                ))}
+                <TableCell
+                  align="right"
+                  sx={{
+                    fontWeight: 700,
+                    position: 'sticky',
+                    right: 0,
+                    backgroundColor: paperBg,
+                    zIndex: 3,
+                    minWidth: 120,
+                  }}
+                >
+                  Overall
                 </TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filteredRows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  hover
+                  sx={{ '&:hover .sticky-cell': { backgroundColor: alpha(theme.palette.primary.main, 0.04) } }}
+                >
+                  <TableCell
+                    className="sticky-cell"
+                    sx={{
+                      position: 'sticky',
+                      left: 0,
+                      backgroundColor: paperBg,
+                      zIndex: 1,
+                    }}
+                  >
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Box
+                        sx={{
+                          width: 10,
+                          height: 10,
+                          backgroundColor: row.color,
+                          borderRadius: '50%',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <Typography variant="body2" fontWeight={500}>{row.name}</Typography>
+                    </Box>
+                  </TableCell>
+                  {monthColumns.map((month) => {
+                    const amount: number = row.byMonth[month.key];
+                    const color = amount === 0 ? 'text.disabled' : (row.isExpenseCategory ? expenseColor : incomeColor);
+                    return (
+                      <TableCell key={month.key} align="right">
+                        {amount !== 0 ? (
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              color,
+                              cursor: 'pointer',
+                              borderRadius: 1,
+                              transition: 'background-color 0.15s ease',
+                              '&:hover': { backgroundColor: alpha(color as string, 0.12) },
+                            }}
+                            onClick={() => handleCategoryClick(row.id, row.name, month.key)}
+                          >
+                            {formatCurrency(amount)}
+                          </Typography>
+                        ) : (
+                          <Typography variant="body2" color="text.disabled">—</Typography>
+                        )}
+                      </TableCell>
+                    );
+                  })}
+                  <TableCell
+                    className="sticky-cell"
+                    align="right"
+                    sx={{
+                      position: 'sticky',
+                      right: 0,
+                      backgroundColor: paperBg,
+                      zIndex: 1,
+                    }}
+                  >
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: row.isExpenseCategory ? expenseColor : incomeColor,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        '&:hover': { textDecoration: 'underline' },
+                      }}
+                      onClick={() => handleCategoryClick(row.id, row.name)}
+                    >
+                      {formatCurrency(row.total)}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
               ))}
-              <TableCell
-                align="right"
-                sx={{
-                  fontWeight: 'bold',
-                  position: 'sticky',
-                  right: 0,
-                  backgroundColor: '#fff',
-                  zIndex: 3,
-                  minWidth: 120,
-                }}
-              >
-                Overall
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredRows.map((row) => (
-              <TableRow key={row.id} hover>
+
+              {/* Expenses summary row */}
+              <TableRow sx={{ backgroundColor: alpha(expenseColor, 0.06) }}>
                 <TableCell
                   sx={{
+                    fontWeight: 700,
                     position: 'sticky',
                     left: 0,
-                    backgroundColor: '#fff',
+                    backgroundColor: stickyBg(theme.palette.mode === 'light' ? '#fdeded' : '#3a1f1f'),
                     zIndex: 1,
                   }}
                 >
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Box
-                      sx={{
-                        width: 12,
-                        height: 12,
-                        backgroundColor: row.color,
-                        borderRadius: '2px',
-                        flexShrink: 0,
-                      }}
-                    />
-                    <Typography variant="body2">{row.name}</Typography>
-                  </Box>
+                  Expenses
+                </TableCell>
+                {monthColumns.map((month) => (
+                  <TableCell key={month.key} align="right">
+                    <Typography variant="body2" fontWeight={700} color={expenseColor}>
+                      {formatCurrency(totals.byMonth[month.key]?.expense || 0)}
+                    </Typography>
+                  </TableCell>
+                ))}
+                <TableCell
+                  align="right"
+                  sx={{
+                    position: 'sticky',
+                    right: 0,
+                    backgroundColor: stickyBg(theme.palette.mode === 'light' ? '#fdeded' : '#3a1f1f'),
+                    zIndex: 1,
+                  }}
+                >
+                  <Typography variant="body2" fontWeight={700} color={expenseColor}>
+                    {formatCurrency(totals.grandTotal.expense)}
+                  </Typography>
+                </TableCell>
+              </TableRow>
+
+              {/* Income summary row */}
+              <TableRow sx={{ backgroundColor: alpha(incomeColor, 0.06) }}>
+                <TableCell
+                  sx={{
+                    fontWeight: 700,
+                    position: 'sticky',
+                    left: 0,
+                    backgroundColor: stickyBg(theme.palette.mode === 'light' ? '#edf7ed' : '#1f3a26'),
+                    zIndex: 1,
+                  }}
+                >
+                  Income
+                </TableCell>
+                {monthColumns.map((month) => (
+                  <TableCell key={month.key} align="right">
+                    <Typography variant="body2" fontWeight={700} color={incomeColor}>
+                      {formatCurrency(totals.byMonth[month.key]?.income || 0)}
+                    </Typography>
+                  </TableCell>
+                ))}
+                <TableCell
+                  align="right"
+                  sx={{
+                    position: 'sticky',
+                    right: 0,
+                    backgroundColor: stickyBg(theme.palette.mode === 'light' ? '#edf7ed' : '#1f3a26'),
+                    zIndex: 1,
+                  }}
+                >
+                  <Typography variant="body2" fontWeight={700} color={incomeColor}>
+                    {formatCurrency(totals.grandTotal.income)}
+                  </Typography>
+                </TableCell>
+              </TableRow>
+
+              {/* Net total row */}
+              <TableRow sx={{ backgroundColor: alpha(theme.palette.primary.main, 0.1) }}>
+                <TableCell
+                  sx={{
+                    fontWeight: 700,
+                    position: 'sticky',
+                    left: 0,
+                    backgroundColor: theme.palette.mode === 'light'
+                      ? alpha(theme.palette.primary.main, 0.12)
+                      : alpha(theme.palette.primary.main, 0.25),
+                    zIndex: 1,
+                  }}
+                >
+                  Net Total
                 </TableCell>
                 {monthColumns.map((month) => {
-                  const amount: number = row.byMonth[month.key];
-                  const color = amount === 0 ? 'text.primary' : (row.isExpenseCategory ? '#d32f2f' : '#2e7d32');
-                  
+                  const displayAmount = totals.byMonth[month.key]?.total || 0;
                   return (
                     <TableCell key={month.key} align="right">
-                      {amount !== 0 && (
-                        <Typography
-                          variant="body2"
-                          sx={{ 
-                            color,
-                            cursor: 'pointer',
-                            '&:hover': {
-                              textDecoration: 'underline',
-                            },
-                          }}
-                          onClick={() => handleCategoryClick(row.id, row.name, month.key)}
-                        >
-                          {formatCurrency(amount)}
-                        </Typography>
-                      )}
+                      <Typography variant="body2" fontWeight={700}>
+                        {formatCurrency(displayAmount)}
+                      </Typography>
                     </TableCell>
                   );
                 })}
@@ -493,136 +745,21 @@ const MonthwiseCategoryReport: React.FC = () => {
                   sx={{
                     position: 'sticky',
                     right: 0,
-                    backgroundColor: '#fff',
+                    backgroundColor: theme.palette.mode === 'light'
+                      ? alpha(theme.palette.primary.main, 0.12)
+                      : alpha(theme.palette.primary.main, 0.25),
                     zIndex: 1,
-                    fontWeight: 'medium',
                   }}
                 >
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      color: row.isExpenseCategory ? '#d32f2f' : '#2e7d32',
-                      fontWeight: 'bold',
-                      cursor: 'pointer',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                      },
-                    }}
-                    onClick={() => handleCategoryClick(row.id, row.name)}
-                  >
-                    {formatCurrency(row.total)}
+                  <Typography variant="body2" fontWeight={700} color="primary.main">
+                    {formatCurrency(totals.grandTotal.total)}
                   </Typography>
                 </TableCell>
               </TableRow>
-            ))}
-            
-            <>
-                <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
-                  <TableCell
-                    sx={{
-                      fontWeight: 'bold',
-                      position: 'sticky',
-                      left: 0,
-                      backgroundColor: '#f5f5f5',
-                      zIndex: 1,
-                    }}
-                  >
-                    Expenses
-                  </TableCell>
-                  {monthColumns.map((month) => (
-                    <TableCell key={month.key} align="right">
-                      <Typography variant="body2" fontWeight="bold" color="#d32f2f">
-                        {formatCurrency(totals.byMonth[month.key]?.expense || 0)}
-                      </Typography>
-                    </TableCell>
-                  ))}
-                  <TableCell
-                    align="right"
-                    sx={{
-                      position: 'sticky',
-                      right: 0,
-                      backgroundColor: '#f5f5f5',
-                      zIndex: 1,
-                    }}
-                  >
-                    <Typography variant="body2" fontWeight="bold" color="#d32f2f">
-                      {formatCurrency(totals.grandTotal.expense)}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-                <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
-                  <TableCell
-                    sx={{
-                      fontWeight: 'bold',
-                      position: 'sticky',
-                      left: 0,
-                      backgroundColor: '#f5f5f5',
-                      zIndex: 1,
-                    }}
-                  >
-                    Income
-                  </TableCell>
-                  {monthColumns.map((month) => (
-                    <TableCell key={month.key} align="right">
-                      <Typography variant="body2" fontWeight="bold" color="#2e7d32">
-                        {formatCurrency(totals.byMonth[month.key]?.income || 0)}
-                      </Typography>
-                    </TableCell>
-                  ))}
-                  <TableCell
-                    align="right"
-                    sx={{
-                      position: 'sticky',
-                      right: 0,
-                      backgroundColor: '#f5f5f5',
-                      zIndex: 1,
-                    }}
-                  >
-                    <Typography variant="body2" fontWeight="bold" color="#2e7d32">
-                      {formatCurrency(totals.grandTotal.income)}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              </>
-            <TableRow sx={{ backgroundColor: '#e0e0e0' }}>
-              <TableCell
-                sx={{
-                  fontWeight: 'bold',
-                  position: 'sticky',
-                  left: 0,
-                  backgroundColor: '#e0e0e0',
-                  zIndex: 1,
-                }}
-              >
-                Total
-              </TableCell>
-              {monthColumns.map((month) => {
-                const displayAmount = totals.byMonth[month.key]?.total || 0;
-                return (
-                  <TableCell key={month.key} align="right">
-                    <Typography variant="body2" fontWeight="bold">
-                      {formatCurrency(displayAmount)}
-                    </Typography>
-                  </TableCell>
-                );
-              })}
-              <TableCell
-                align="right"
-                sx={{
-                  position: 'sticky',
-                  right: 0,
-                  backgroundColor: '#e0e0e0',
-                  zIndex: 1,
-                }}
-              >
-                <Typography variant="body2" fontWeight="bold">
-                  {formatCurrency(totals.grandTotal.total)}
-                </Typography>
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
     </Box>
   );
 };

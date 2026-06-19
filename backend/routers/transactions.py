@@ -1570,6 +1570,8 @@ def get_transactions_by_category(
             category_data[category_id]["monthly_data"][month_key] = {
                 "amount": 0,
                 "count": 0,
+                "income": 0,
+                "expense": 0,
                 "month_name": transaction.date.strftime("%B %Y")
             }
 
@@ -1578,6 +1580,10 @@ def get_transactions_by_category(
         category_data[category_id]["transaction_count"] += 1
         category_data[category_id]["monthly_data"][month_key]["amount"] += amount
         category_data[category_id]["monthly_data"][month_key]["count"] += 1
+        if transaction.type == "income":
+            category_data[category_id]["monthly_data"][month_key]["income"] += amount
+        elif transaction.type == "expense":
+            category_data[category_id]["monthly_data"][month_key]["expense"] += amount
 
         # Update date range
         if transaction.date < category_data[category_id]["first_transaction"]:

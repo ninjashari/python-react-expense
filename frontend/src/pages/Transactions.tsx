@@ -31,8 +31,18 @@ import {
   Switch,
   FormControlLabel,
   Alert,
+  Menu,
+  ListItemIcon,
+  ListItemText,
+  Badge,
+  Tooltip,
 } from '@mui/material';
-import { Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward, CleaningServices, Calculate, AutoFixHigh } from '@mui/icons-material';
+import { alpha, useTheme } from '@mui/material/styles';
+import {
+  Add, Edit, Delete, FilterList, Clear, ArrowUpward, ArrowDownward,
+  CleaningServices, Calculate, AutoFixHigh, MoreVert, Close,
+  TrendingUp, TrendingDown, AccountBalanceWallet, ReceiptLong,
+} from '@mui/icons-material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
@@ -140,7 +150,9 @@ type SortDirection = 'asc' | 'desc';
 
 const Transactions: React.FC = () => {
   usePageTitle(getPageTitle('transactions', 'Income & Expenses'));
+  const theme = useTheme();
   const { showError, showSuccess } = useToast();
+  const [actionsAnchor, setActionsAnchor] = useState<null | HTMLElement>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const defaultFilters: TransactionFilters = {
@@ -247,6 +259,27 @@ const Transactions: React.FC = () => {
       setFilters(prev => ({ ...prev, showAll: false, page: 1 }));
     }
   }, [transactionData?.total, filters.showAll]);
+
+  // Summary across the full filtered set (not just the current page)
+  const { data: txnSummary } = useQuery({
+    queryKey: ['transactions', 'summary', {
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      accountId: filters.accountId,
+      categoryIds: filters.categoryIds,
+      payeeIds: filters.payeeIds,
+      transactionType: filters.transactionType,
+      descriptionSearch: filters.descriptionSearch,
+    }],
+    queryFn: () => transactionsApi.getSummary({
+      start_date: filters.startDate,
+      end_date: filters.endDate,
+      account_ids: filters.accountId,
+      category_ids: filters.categoryIds?.join(','),
+      payee_ids: filters.payeeIds?.join(','),
+      transaction_type: filters.transactionType,
+    }),
+  });
 
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
@@ -1018,6 +1051,16 @@ const Transactions: React.FC = () => {
   }, [transactionData?.items, filters.sortField, filters.sortDirection, payees, categories]);
 
   const hasActiveFilters = filters.startDate || filters.endDate || filters.accountId || (filters.categoryIds && filters.categoryIds.length > 0) || (filters.payeeIds && filters.payeeIds.length > 0) || filters.descriptionSearch || filters.transactionType || selectedMonth || selectedYear;
+
+  const activeFilterCount = [
+    filters.startDate,
+    filters.endDate,
+    filters.accountId,
+    filters.descriptionSearch,
+    filters.transactionType,
+    filters.categoryIds && filters.categoryIds.length > 0 ? 'x' : '',
+    filters.payeeIds && filters.payeeIds.length > 0 ? 'x' : '',
+  ].filter(Boolean).length;
   
 
 
@@ -1029,85 +1072,115 @@ const Transactions: React.FC = () => {
     );
   }
 
+  const netAmount = txnSummary?.net_amount ?? 0;
+  const summaryCards = [
+    { label: 'Income', value: txnSummary?.total_income ?? 0, icon: <TrendingUp />, color: theme.palette.success.main },
+    { label: 'Expenses', value: txnSummary?.total_expense ?? 0, icon: <TrendingDown />, color: theme.palette.error.main },
+    { label: 'Net', value: netAmount, icon: <AccountBalanceWallet />, color: netAmount >= 0 ? theme.palette.success.main : theme.palette.error.main },
+    { label: 'Transactions', value: txnSummary?.transaction_count ?? transactionData?.total ?? 0, icon: <ReceiptLong />, color: theme.palette.primary.main, count: true },
+  ];
+
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Transactions</Typography>
+      {/* Header toolbar */}
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3} flexWrap="wrap" gap={2}>
         <Box>
-          <Button
-            variant="outlined"
-            startIcon={<FilterList />}
-            sx={{ mr: 2 }}
-            onClick={() => setShowFilters(!showFilters)}
-            color={hasActiveFilters ? 'primary' : 'inherit'}
-          >
-            Filters
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<CleaningServices />}
-            sx={{ mr: 2 }}
-            onClick={handleCleanupDescriptions}
-            disabled={isCleaningUp}
-            color="secondary"
-            title="Remove '| ' and trim whitespaces from ALL transaction descriptions"
-          >
-            {isCleaningUp ? 'Cleaning...' : 'Clean Descriptions'}
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<Calculate />}
-            sx={{ mr: 2 }}
-            onClick={handleRecalculateBalances}
-            disabled={isRecalculatingBalances || !filters.accountId}
-            color="info"
-          >
-            {isRecalculatingBalances ? 'Recalculating...' : 'Recalculate Balances'}
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => handleOpenDialog()}
-          >
+          <Typography variant="h4" fontWeight={700}>Transactions</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {transactionData
+              ? `${transactionData.total.toLocaleString()} transaction${transactionData.total === 1 ? '' : 's'}`
+              : 'Income & expenses'}
+            {hasActiveFilters ? ' · filtered' : ''}
+          </Typography>
+        </Box>
+        <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
+          <Badge badgeContent={activeFilterCount} color="primary">
+            <Button
+              variant="outlined"
+              startIcon={<FilterList />}
+              onClick={() => setShowFilters(!showFilters)}
+              color={hasActiveFilters ? 'primary' : 'inherit'}
+            >
+              Filters
+            </Button>
+          </Badge>
+          <Button variant="contained" startIcon={<Add />} onClick={() => handleOpenDialog()}>
             Add Transaction
           </Button>
-          {selectedTransactions.size > 0 && (
-            <>
-              <Button
-                variant={bulkEditMode ? "contained" : "outlined"}
-                color="primary"
-                startIcon={<Edit />}
-                onClick={() => setBulkEditMode(!bulkEditMode)}
-                sx={{ ml: 2 }}
-                title={selectedTransactions.size > 1 && bulkEditMode 
-                  ? "Bulk edit mode is automatically enabled when multiple transactions are selected. Click to disable."
-                  : "Click to enable bulk edit mode for selected transactions"
-                }
-              >
-                {bulkEditMode ? 'Exit Bulk Edit' : 'Enable Bulk Edit'} ({selectedTransactions.size})
-              </Button>
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={<Delete />}
-                onClick={handleBatchDelete}
-                sx={{ ml: 2 }}
-              >
-                Delete Selected ({selectedTransactions.size})
-              </Button>
-              <Button
-                variant="outlined"
-                color="primary"
-                startIcon={<AutoFixHigh />}
-                onClick={() => setBulkReassignDialogOpen(true)}
-                sx={{ ml: 2 }}
-              >
-                AI Reassign ({selectedTransactions.size})
-              </Button>
-            </>
-          )}
+          <Tooltip title="More actions">
+            <IconButton
+              onClick={(e) => setActionsAnchor(e.currentTarget)}
+              sx={{ border: 1, borderColor: 'divider', borderRadius: 2 }}
+            >
+              <MoreVert />
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
+
+      {/* Summary KPI cards */}
+      <Grid container spacing={3} mb={3}>
+        {summaryCards.map((card) => (
+          <Grid item xs={6} md={3} key={card.label}>
+            <Card
+              sx={{
+                position: 'relative',
+                overflow: 'hidden',
+                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                '&:hover': { transform: 'translateY(-3px)' },
+                '&::before': {
+                  content: '""', position: 'absolute', top: 0, left: 0,
+                  width: 4, height: '100%', bgcolor: card.color,
+                },
+              }}
+            >
+              <CardContent sx={{ p: 2.5 }}>
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" color="text.secondary" fontWeight={500} gutterBottom noWrap>
+                      {card.label}
+                    </Typography>
+                    <Typography variant="h6" fontWeight={700} color={card.color} noWrap>
+                      {card.count ? card.value.toLocaleString() : formatCurrency(card.value)}
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      width: 40, height: 40, borderRadius: 2, flexShrink: 0,
+                      background: `linear-gradient(135deg, ${alpha(card.color, 0.18)}, ${alpha(card.color, 0.08)})`,
+                      color: card.color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    {card.icon}
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+
+      {/* Maintenance actions menu */}
+      <Menu anchorEl={actionsAnchor} open={Boolean(actionsAnchor)} onClose={() => setActionsAnchor(null)}>
+        <MenuItem
+          onClick={() => { setActionsAnchor(null); handleCleanupDescriptions(); }}
+          disabled={isCleaningUp}
+        >
+          <ListItemIcon><CleaningServices fontSize="small" /></ListItemIcon>
+          <ListItemText>{isCleaningUp ? 'Cleaning...' : 'Clean Descriptions'}</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => { setActionsAnchor(null); handleRecalculateBalances(); }}
+          disabled={isRecalculatingBalances || !filters.accountId}
+        >
+          <ListItemIcon><Calculate fontSize="small" /></ListItemIcon>
+          <ListItemText
+            primary={isRecalculatingBalances ? 'Recalculating...' : 'Recalculate Balances'}
+            secondary={!filters.accountId ? 'Select an account first' : undefined}
+          />
+        </MenuItem>
+      </Menu>
 
       {/* Filters Card */}
       {showFilters && (
@@ -1377,10 +1450,72 @@ const Transactions: React.FC = () => {
         </Alert>
       )}
 
-      <TableContainer component={Paper}>
+      {/* Contextual bulk action bar */}
+      {selectedTransactions.size > 0 && (
+        <Paper
+          elevation={0}
+          sx={{
+            p: 1.5,
+            mb: 2,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            flexWrap: 'wrap',
+            borderRadius: 3,
+            bgcolor: alpha(theme.palette.primary.main, 0.08),
+            border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
+          }}
+        >
+          <Typography fontWeight={700} color="primary.main" sx={{ mr: 1 }}>
+            {selectedTransactions.size} selected
+          </Typography>
+          <Button
+            size="small"
+            variant={bulkEditMode ? 'contained' : 'outlined'}
+            startIcon={<Edit />}
+            onClick={() => setBulkEditMode(!bulkEditMode)}
+            title={bulkEditMode
+              ? 'Editing a field applies to all selected. Click to disable.'
+              : 'Enable bulk edit for selected transactions'}
+          >
+            {bulkEditMode ? 'Exit Bulk Edit' : 'Bulk Edit'}
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="primary"
+            startIcon={<AutoFixHigh />}
+            onClick={() => setBulkReassignDialogOpen(true)}
+          >
+            AI Reassign
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<Delete />}
+            onClick={handleBatchDelete}
+          >
+            Delete
+          </Button>
+          <Box flexGrow={1} />
+          <Button size="small" color="inherit" startIcon={<Close />} onClick={handleClearSelection}>
+            Clear
+          </Button>
+        </Paper>
+      )}
+
+      <TableContainer
+        component={Paper}
+        sx={{
+          borderRadius: 3,
+          border: `1px solid ${theme.palette.divider}`,
+          boxShadow: 'none',
+        }}
+      >
         <Table>
           <TableHead>
-            <TableRow>
+            <TableRow sx={{ '& .MuiTableCell-root': { backgroundColor: theme.palette.action.hover } }}>
               <ResizableTableCell 
                 padding="checkbox" 
                 column="checkbox" 
@@ -1527,19 +1662,16 @@ const Transactions: React.FC = () => {
                 key={transaction.id}
                 sx={{
                   backgroundColor: showBulkEditHighlight
-                    ? 'primary.50'
+                    ? alpha(theme.palette.primary.main, 0.1)
                     : isSelected
                     ? 'action.selected'
                     : 'inherit',
                   '&:hover': {
                     backgroundColor: showBulkEditHighlight
-                      ? 'primary.100'
-                      : isSelected
-                      ? 'action.hover'
-                      : 'action.hover'
+                      ? alpha(theme.palette.primary.main, 0.16)
+                      : 'action.hover',
                   },
-                  border: showBulkEditHighlight ? 2 : 0,
-                  borderColor: showBulkEditHighlight ? 'primary.main' : 'transparent'
+                  transition: 'background-color 0.15s ease',
                 }}
               >
                 <TableCell padding="checkbox" sx={{ width: columnWidths.checkbox, minWidth: columnWidths.checkbox, maxWidth: columnWidths.checkbox }}>
@@ -2168,7 +2300,7 @@ const Transactions: React.FC = () => {
             Are you sure you want to delete this transaction?
           </Typography>
           {transactionToDelete && (
-            <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.50', borderRadius: 1 }}>
+            <Box sx={{ mt: 2, p: 2, backgroundColor: 'action.hover', borderRadius: 1 }}>
               <Typography variant="body2" color="text.secondary">
                 <strong>Date:</strong> {new Date(transactionToDelete.date).toLocaleDateString()}
               </Typography>
@@ -2230,7 +2362,7 @@ const Transactions: React.FC = () => {
                     sx={{ 
                       p: 1, 
                       mb: 1, 
-                      backgroundColor: 'grey.50', 
+                      backgroundColor: 'action.hover', 
                       borderRadius: 1,
                       display: 'flex',
                       justifyContent: 'space-between'
@@ -2303,7 +2435,7 @@ const Transactions: React.FC = () => {
                     sx={{ 
                       p: 1, 
                       mb: 1, 
-                      backgroundColor: 'grey.50', 
+                      backgroundColor: 'action.hover', 
                       borderRadius: 1,
                       display: 'flex',
                       justifyContent: 'space-between'
