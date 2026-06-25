@@ -1,5 +1,4 @@
-import React, { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
 import {
   Box,
   Card,
@@ -15,6 +14,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TableSortLabel,
   Paper,
   CircularProgress,
   Alert,
@@ -85,7 +85,6 @@ const defaultFilters: MonthwiseReportFilters = {
 
 const MonthwiseCategoryReport: React.FC = () => {
   usePageTitle({ title: 'Month-wise Category Report' });
-  const navigate = useNavigate();
   const theme = useTheme();
   const { filters, setFilters } = usePersistentFilters<MonthwiseReportFilters>(
     'monthwise-category-filters-v2',
@@ -239,10 +238,27 @@ const MonthwiseCategoryReport: React.FC = () => {
     };
   }, [categoryData]);
 
+  // Sort state: col is 'category', 'overall', or a month key (e.g. '2025-04')
+  const [sort, setSort] = useState<{ col: string; dir: 'asc' | 'desc' }>({ col: 'overall', dir: 'desc' });
+
+  const handleSort = (col: string) =>
+    setSort((prev) => ({ col, dir: prev.col === col && prev.dir === 'desc' ? 'asc' : 'desc' }));
+
   const filteredRows = useMemo(() => {
-    // Show all categories sorted by total amount
-    return categoryRows.sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
-  }, [categoryRows]);
+    const rows = [...categoryRows];
+    const mul = sort.dir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      if (sort.col === 'category') {
+        return mul * a.name.localeCompare(b.name);
+      }
+      if (sort.col === 'overall') {
+        return mul * (a.total - b.total);
+      }
+      // Month column: compare that month's value
+      return mul * ((a.byMonth[sort.col] || 0) - (b.byMonth[sort.col] || 0));
+    });
+    return rows;
+  }, [categoryRows, sort]);
 
   const handleCategoryClick = (categoryId: string, categoryName: string, monthKey?: string) => {
     let clickStartDate = startDate;
@@ -272,8 +288,10 @@ const MonthwiseCategoryReport: React.FC = () => {
       page: 1,
       size: 50,
     };
+    // Persist the filter so the Reports page picks it up, then open in a new tab.
+    // localStorage is shared across same-origin tabs, so the new tab reads these filters on load.
     localStorage.setItem('filtered-transactions-filters', JSON.stringify(reportFilters));
-    navigate('/reports');
+    window.open('/reports', '_blank', 'noopener');
   };
 
   const handleExport = () => {
@@ -529,6 +547,7 @@ const MonthwiseCategoryReport: React.FC = () => {
             <TableHead>
               <TableRow>
                 <TableCell
+                  sortDirection={sort.col === 'category' ? sort.dir : false}
                   sx={{
                     fontWeight: 700,
                     position: 'sticky',
@@ -538,20 +557,40 @@ const MonthwiseCategoryReport: React.FC = () => {
                     minWidth: 200,
                   }}
                 >
-                  Category
+                  <TableSortLabel
+                    active={sort.col === 'category'}
+                    direction={sort.col === 'category' ? sort.dir : 'asc'}
+                    onClick={() => handleSort('category')}
+                  >
+                    Category
+                  </TableSortLabel>
                 </TableCell>
                 {monthColumns.map((month) => (
-                  <TableCell key={month.key} align="right" sx={{ fontWeight: 700, minWidth: 100 }}>
-                    <Typography variant="caption" fontWeight={700} display="block">
-                      {month.label}
-                    </Typography>
-                    <Typography variant="caption" display="block" color="text.secondary">
-                      {month.year}
-                    </Typography>
+                  <TableCell
+                    key={month.key}
+                    align="right"
+                    sortDirection={sort.col === month.key ? sort.dir : false}
+                    sx={{ fontWeight: 700, minWidth: 100 }}
+                  >
+                    <TableSortLabel
+                      active={sort.col === month.key}
+                      direction={sort.col === month.key ? sort.dir : 'asc'}
+                      onClick={() => handleSort(month.key)}
+                    >
+                      <Box>
+                        <Typography variant="caption" fontWeight={700} display="block">
+                          {month.label}
+                        </Typography>
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          {month.year}
+                        </Typography>
+                      </Box>
+                    </TableSortLabel>
                   </TableCell>
                 ))}
                 <TableCell
                   align="right"
+                  sortDirection={sort.col === 'overall' ? sort.dir : false}
                   sx={{
                     fontWeight: 700,
                     position: 'sticky',
@@ -561,7 +600,13 @@ const MonthwiseCategoryReport: React.FC = () => {
                     minWidth: 120,
                   }}
                 >
-                  Overall
+                  <TableSortLabel
+                    active={sort.col === 'overall'}
+                    direction={sort.col === 'overall' ? sort.dir : 'asc'}
+                    onClick={() => handleSort('overall')}
+                  >
+                    Overall
+                  </TableSortLabel>
                 </TableCell>
               </TableRow>
             </TableHead>
