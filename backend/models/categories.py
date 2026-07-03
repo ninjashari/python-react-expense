@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -13,6 +13,7 @@ class Category(Base):
     name = Column(String(100), nullable=False)
     slug = Column(String(100), nullable=False, index=True)
     color = Column(String(7), default='#6366f1')
+    is_investment = Column(Boolean, nullable=False, default=False, server_default='false')
     created_at = Column(DateTime, server_default=func.current_timestamp())
     updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     

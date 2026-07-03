@@ -22,7 +22,7 @@ import {
 import {
   Add, Edit, Delete, Refresh, Calculate, FileDownload, FileUpload,
   AccountBalanceWallet, Savings, CreditCard, Payments, AccountBalance,
-  CalendarToday, Loyalty, Percent,
+  CalendarToday, Loyalty, Percent, TrendingUp,
 } from '@mui/icons-material';
 import { alpha } from '@mui/material/styles';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -37,6 +37,7 @@ const accountTypes = [
   { value: 'savings', label: 'Savings' },
   { value: 'credit', label: 'Credit Card' },
   { value: 'cash', label: 'Cash' },
+  { value: 'investment', label: 'Investment' },
   { value: 'ppf', label: 'PPF (Public Provident Fund)' },
 ];
 
@@ -72,6 +73,11 @@ const TYPE_THEME: Record<string, TypeTheme> = {
     gradient: 'linear-gradient(135deg, #db2777 0%, #ec4899 100%)',
     accent: '#db2777',
     icon: <AccountBalance />,
+  },
+  investment: {
+    gradient: 'linear-gradient(135deg, #6a1b9a 0%, #ba68c8 100%)',
+    accent: '#6a1b9a',
+    icon: <TrendingUp />,
   },
 };
 
@@ -758,7 +764,7 @@ const Accounts: React.FC = () => {
         });
 
         // Define order of account types
-        const typeOrder = ['checking', 'savings', 'credit', 'cash', 'ppf'];
+        const typeOrder = ['checking', 'savings', 'credit', 'cash', 'investment', 'ppf'];
         
         return typeOrder.map((type) => {
           const accountsOfType = groupedAccounts[type];

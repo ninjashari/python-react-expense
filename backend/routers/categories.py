@@ -42,6 +42,7 @@ def create_category(
             name=category.name,
             slug=slug,
             color=color,
+            is_investment=category.is_investment or False,
             user_id=current_user.id
         )
         db.add(db_category)

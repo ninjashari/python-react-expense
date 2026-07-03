@@ -35,6 +35,7 @@ import {
   AccountBalanceWallet,
   Brightness4,
   Brightness7,
+  TrendingUp,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -75,6 +76,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'Insights',
     items: [
+      { text: 'Investments', icon: <TrendingUp fontSize="small" />, path: '/investments' },
       { text: 'Reward Points', icon: <Loyalty fontSize="small" />, path: '/reward-points' },
       { text: 'AI Learning', icon: <Psychology fontSize="small" />, path: '/learning' },
     ],
@@ -96,6 +98,7 @@ const pageTitles: Record<string, string> = {
   '/transactions': 'Transactions',
   '/reports': 'Reports',
   '/reports/monthwise': 'Month-wise Reports',
+  '/investments': 'Investments',
   '/reward-points': 'Reward Points',
   '/reward-points/history': 'Points History',
   '/learning': 'AI Learning',

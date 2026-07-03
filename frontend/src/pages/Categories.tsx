@@ -20,6 +20,8 @@ import {
   CircularProgress,
   Alert,
   Tooltip,
+  Checkbox,
+  FormControlLabel,
 } from '@mui/material';
 import { Add, Edit, Delete, Palette, CleaningServices, Check, Close, FileDownload, FileUpload, Search } from '@mui/icons-material';
 import { InputAdornment } from '@mui/material';
@@ -51,6 +53,7 @@ const Categories: React.FC = () => {
     defaultValues: {
       name: '',
       color: '',
+      is_investment: false,
     },
   });
 
@@ -92,12 +95,14 @@ const Categories: React.FC = () => {
       reset({
         name: category.name,
         color: category.color,
+        is_investment: category.is_investment,
       });
     } else {
       setEditingCategory(null);
       reset({
         name: '',
         color: '',
+        is_investment: false,
       });
     }
     setDialogOpen(true);
@@ -480,6 +485,7 @@ const Categories: React.FC = () => {
             <TableRow>
               <TableCell>Name</TableCell>
               <TableCell>Color</TableCell>
+              <TableCell>Investment</TableCell>
               <TableCell>Created At</TableCell>
               <TableCell align="center">Actions</TableCell>
             </TableRow>
@@ -490,7 +496,7 @@ const Categories: React.FC = () => {
               .sort((a, b) => a.name.localeCompare(b.name))
               .length === 0 && searchQuery !== '' ? (
               <TableRow>
-                <TableCell colSpan={4} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                <TableCell colSpan={5} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                   No categories match "{searchQuery}"
                 </TableCell>
               </TableRow>
@@ -586,8 +592,21 @@ const Categories: React.FC = () => {
                     />
                   </Box>
                 </TableCell>
+                <TableCell>
+                  {category.is_investment ? (
+                    <Chip label="Investment" size="small" color="primary" variant="outlined" />
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">—</Typography>
+                  )}
+                </TableCell>
                 <TableCell>{formatDateTime(category.created_at)}</TableCell>
                 <TableCell align="center">
+                  <IconButton
+                    size="small"
+                    onClick={() => handleOpenDialog(category)}
+                  >
+                    <Edit fontSize="small" />
+                  </IconButton>
                   <IconButton
                     size="small"
                     onClick={() => handleDelete(category.id)}
@@ -637,6 +656,23 @@ const Categories: React.FC = () => {
                   margin="normal"
                   InputLabelProps={{ shrink: true }}
                   helperText="Leave empty to auto-generate a unique color"
+                />
+              )}
+            />
+
+            <Controller
+              name="is_investment"
+              control={control}
+              render={({ field }) => (
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={!!field.value}
+                      onChange={(e) => field.onChange(e.target.checked)}
+                    />
+                  }
+                  label="Investment category"
+                  sx={{ mt: 1 }}
                 />
               )}
             />

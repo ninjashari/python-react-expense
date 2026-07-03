@@ -1,7 +1,7 @@
 export interface Account {
   id: string;
   name: string;
-  type: 'checking' | 'savings' | 'credit' | 'cash' | 'ppf';
+  type: 'checking' | 'savings' | 'credit' | 'cash' | 'investment' | 'ppf';
   balance: number;
   opening_date: string;
   
@@ -40,6 +40,7 @@ export interface Category {
   id: string;
   name: string;
   color: string;
+  is_investment: boolean;
   created_at: string;
   updated_at?: string;
 }
@@ -99,6 +100,59 @@ export interface CreatePayeeDto {
 export interface CreateCategoryDto {
   name: string;
   color?: string;
+  is_investment?: boolean;
+}
+
+export interface InvestmentAccountSummary {
+  id: string;
+  name: string;
+  type: Account['type'];
+  balance: number;
+  interest_rate?: number;
+  status: 'active' | 'inactive' | 'closed';
+  opening_date?: string;
+  net_invested: number;
+  implied_gain_loss: number;
+}
+
+export interface GroupATotals {
+  total_balance: number;
+  total_net_invested: number;
+  total_implied_gain_loss: number;
+}
+
+export interface GroupASummary {
+  accounts: InvestmentAccountSummary[];
+  totals: GroupATotals;
+}
+
+export interface InvestmentCategorySummary {
+  id: string;
+  name: string;
+  color: string;
+  period_invested: number;
+  period_withdrawn: number;
+  lifetime_invested: number;
+  lifetime_withdrawn: number;
+  transaction_count: number;
+}
+
+export interface GroupBTotals {
+  period_invested: number;
+  period_withdrawn: number;
+  period_net: number;
+  lifetime_invested: number;
+  lifetime_withdrawn: number;
+}
+
+export interface GroupBSummary {
+  categories: InvestmentCategorySummary[];
+  totals: GroupBTotals;
+}
+
+export interface InvestmentsSummary {
+  group_a: GroupASummary;
+  group_b: GroupBSummary;
 }
 
 export interface CreateTransactionDto {

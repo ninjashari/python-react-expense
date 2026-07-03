@@ -3,7 +3,7 @@ import warnings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import accounts, transactions, payees, categories, import_data, auth, learning, reward_points
+from routers import accounts, transactions, payees, categories, import_data, auth, learning, reward_points, investments
 import models
 
 # Suppress PyTorch deprecation warnings from transformers library
@@ -57,6 +57,7 @@ app.include_router(categories.router, prefix="/api/categories", tags=["categorie
 app.include_router(import_data.router, prefix="/api/import", tags=["import"])
 app.include_router(learning.router, prefix="/api/learning", tags=["learning"])
 app.include_router(reward_points.router, prefix="/api/reward-points", tags=["reward-points"])
+app.include_router(investments.router, prefix="/api/investments", tags=["investments"])
 
 
 @app.get("/")

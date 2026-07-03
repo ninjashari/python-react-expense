@@ -14,6 +14,7 @@ import {
   CreateRewardPointBonusDto,
   RewardPointsSummaryItem,
   RewardPointHistoryItem,
+  InvestmentsSummary,
 } from '../types';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api';
@@ -335,6 +336,11 @@ export const rewardPointsApi = {
     api.post('/reward-points/import', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     }).then(res => res.data),
+};
+
+export const investmentsApi = {
+  getSummary: (params?: { start_date?: string; end_date?: string }): Promise<InvestmentsSummary> =>
+    api.get('/investments/summary', { params }).then(res => res.data),
 };
 
 export default api;
