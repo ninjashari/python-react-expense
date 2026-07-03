@@ -54,8 +54,11 @@ def get_investments_summary(
         primary_rows = (
             db.query(
                 Transaction.account_id,
+                # Only outflows count here — an 'income' transaction posted directly on a
+                # balance-tracked account is interest/growth credited by the institution,
+                # not principal the user contributed, so it must NOT add to net_invested
+                # (it's exactly the amount the gain/loss figure is meant to capture).
                 func.coalesce(func.sum(case(
-                    (Transaction.type == 'income', Transaction.amount),
                     (Transaction.type.in_(['expense', 'transfer']), -Transaction.amount),
                     else_=0
                 )), 0).label("net_primary")
