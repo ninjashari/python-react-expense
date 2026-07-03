@@ -584,8 +584,9 @@ def get_transaction_summary(
 ):
     # Build base query
     query = db.query(Transaction)
-    
+
     # Apply filters (same logic as get_transactions)
+    account_id_list: Optional[List[uuid.UUID]] = None
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
         if exclude_accounts:
@@ -702,6 +703,23 @@ def get_transaction_summary(
     expense_sum = query.filter(Transaction.type == 'expense').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
     transfer_sum = query.filter(Transaction.type == 'transfer').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
     transaction_count = query.count()
+
+    # Fold transfers into income/expense: the source account (account_id) treats a
+    # transfer as money leaving (expense), the destination account (to_account_id)
+    # treats it as money arriving (income). With no account filter, every transfer's
+    # source and destination are both in scope, so it counts on both sides (net
+    # effect on net_amount is zero, but Income/Expense reflect all money movement).
+    if account_id_list:
+        account_filter = (~Transaction.account_id.in_(account_id_list)) if exclude_accounts else Transaction.account_id.in_(account_id_list)
+        to_account_filter = (~Transaction.to_account_id.in_(account_id_list)) if exclude_accounts else Transaction.to_account_id.in_(account_id_list)
+        transfer_expense_sum = query.filter(Transaction.type == 'transfer', account_filter).with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
+        transfer_income_sum = query.filter(Transaction.type == 'transfer', to_account_filter).with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
+    else:
+        transfer_expense_sum = transfer_sum
+        transfer_income_sum = transfer_sum
+
+    income_sum += transfer_income_sum
+    expense_sum += transfer_expense_sum
     net_amount = income_sum - expense_sum
     
     return TransactionSummary(
