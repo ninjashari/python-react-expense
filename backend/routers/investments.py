@@ -125,8 +125,12 @@ def get_investments_summary(
                 Category.id,
                 Category.name,
                 Category.color,
-                func.coalesce(func.sum(case((Transaction.type == 'income', Transaction.amount), else_=0)), 0).label("invested"),
-                func.coalesce(func.sum(case((Transaction.type == 'expense', Transaction.amount), else_=0)), 0).label("withdrawn"),
+                # These categories live on non-investment accounts (checking/savings/credit/cash).
+                # An 'expense' there is money leaving the account to buy an investment (invested);
+                # an 'income' there is money coming back — a dividend, redemption, or closure
+                # proceeds (withdrawn). This is the opposite of a plain spending category.
+                func.coalesce(func.sum(case((Transaction.type == 'expense', Transaction.amount), else_=0)), 0).label("invested"),
+                func.coalesce(func.sum(case((Transaction.type == 'income', Transaction.amount), else_=0)), 0).label("withdrawn"),
                 func.count(Transaction.id).label("transaction_count"),
             )
             .join(Transaction, Transaction.category_id == Category.id)
