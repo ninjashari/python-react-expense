@@ -43,7 +43,7 @@ import {
   CleaningServices, Calculate, AutoFixHigh, MoreVert, Close,
   TrendingUp, TrendingDown, AccountBalanceWallet, ReceiptLong,
 } from '@mui/icons-material';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
 import { Transaction, CreateTransactionDto, PaginatedResponse } from '../types';
@@ -60,6 +60,7 @@ import InlineSelectEdit from '../components/InlineSelectEdit';
 import { useEnhancedSuggestions, useLlmSuggestions, useLearningMetrics } from '../hooks/useLearning';
 import { SuggestionItem } from '../services/learningApi';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 // Resizable TableCell component
 const ResizableTableCell = ({ 
@@ -234,21 +235,39 @@ const Transactions: React.FC = () => {
 
   const watchTransactionType = watch('type');
 
+  // Debounce the typed filter fields so every keystroke doesn't fire a new
+  // network request / change the react-query key (which otherwise made the
+  // whole page flash to a loading spinner on every character typed).
+  const debouncedStartDate = useDebouncedValue(filters.startDate, 400);
+  const debouncedEndDate = useDebouncedValue(filters.endDate, 400);
+  const debouncedDescriptionSearch = useDebouncedValue(filters.descriptionSearch, 400);
+
+  const debouncedFilters = useMemo(
+    () => ({
+      ...filters,
+      startDate: debouncedStartDate,
+      endDate: debouncedEndDate,
+      descriptionSearch: debouncedDescriptionSearch,
+    }),
+    [filters, debouncedStartDate, debouncedEndDate, debouncedDescriptionSearch]
+  );
+
   const { data: transactionData, isLoading: transactionsLoading } = useQuery<PaginatedResponse<Transaction>>({
-    queryKey: ['transactions', filters],
+    queryKey: ['transactions', debouncedFilters],
     queryFn: ({ signal }) => transactionsApi.getAll({
-      page: filters.showAll ? 1 : filters.page,
-      size: filters.showAll ? 1000 : filters.size, // Cap show-all at 1000 (was 10000)
-      start_date: filters.startDate,
-      end_date: filters.endDate,
-      account_ids: filters.accountId,
-      category_ids: filters.categoryIds?.join(','),
-      payee_ids: filters.payeeIds?.join(','),
-      description: filters.descriptionSearch,
-      transaction_type: filters.transactionType,
-      sort_by: filters.sortField,
-      sort_order: filters.sortDirection,
+      page: debouncedFilters.showAll ? 1 : debouncedFilters.page,
+      size: debouncedFilters.showAll ? 1000 : debouncedFilters.size, // Cap show-all at 1000 (was 10000)
+      start_date: debouncedFilters.startDate,
+      end_date: debouncedFilters.endDate,
+      account_ids: debouncedFilters.accountId,
+      category_ids: debouncedFilters.categoryIds?.join(','),
+      payee_ids: debouncedFilters.payeeIds?.join(','),
+      description: debouncedFilters.descriptionSearch,
+      transaction_type: debouncedFilters.transactionType,
+      sort_by: debouncedFilters.sortField,
+      sort_order: debouncedFilters.sortDirection,
     }, signal), // signal cancels the HTTP request when queryKey changes
+    placeholderData: keepPreviousData, // keep showing the old table while the new page loads, instead of blanking to a spinner
   });
 
   // Auto-disable showAll if total transactions > 250.
@@ -263,22 +282,23 @@ const Transactions: React.FC = () => {
   // Summary across the full filtered set (not just the current page)
   const { data: txnSummary } = useQuery({
     queryKey: ['transactions', 'summary', {
-      startDate: filters.startDate,
-      endDate: filters.endDate,
-      accountId: filters.accountId,
-      categoryIds: filters.categoryIds,
-      payeeIds: filters.payeeIds,
-      transactionType: filters.transactionType,
-      descriptionSearch: filters.descriptionSearch,
+      startDate: debouncedFilters.startDate,
+      endDate: debouncedFilters.endDate,
+      accountId: debouncedFilters.accountId,
+      categoryIds: debouncedFilters.categoryIds,
+      payeeIds: debouncedFilters.payeeIds,
+      transactionType: debouncedFilters.transactionType,
+      descriptionSearch: debouncedFilters.descriptionSearch,
     }],
     queryFn: () => transactionsApi.getSummary({
-      start_date: filters.startDate,
-      end_date: filters.endDate,
-      account_ids: filters.accountId,
-      category_ids: filters.categoryIds?.join(','),
-      payee_ids: filters.payeeIds?.join(','),
-      transaction_type: filters.transactionType,
+      start_date: debouncedFilters.startDate,
+      end_date: debouncedFilters.endDate,
+      account_ids: debouncedFilters.accountId,
+      category_ids: debouncedFilters.categoryIds?.join(','),
+      payee_ids: debouncedFilters.payeeIds?.join(','),
+      transaction_type: debouncedFilters.transactionType,
     }),
+    placeholderData: keepPreviousData,
   });
 
   const { data: accounts } = useQuery({
