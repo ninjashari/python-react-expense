@@ -17,23 +17,34 @@ import {
   CircularProgress,
   Alert,
   Divider,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
 import {
   TrendingUp,
   TrendingDown,
   AccountBalance,
   PieChart as PieChartIcon,
+  Savings,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
-import { investmentsApi } from '../services/api';
+import { investmentsApi, accountsApi, categoriesApi } from '../services/api';
 import CategoryPieChart from '../components/CategoryPieChart';
+import InvestmentTimelineChart from '../components/InvestmentTimelineChart';
+import InvestmentActivityFeed from '../components/InvestmentActivityFeed';
+import MultiSelectDropdown, { Option } from '../components/MultiSelectDropdown';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
 import { formatCurrency, formatDate, formatAccountType } from '../utils/formatters';
 import { usePageTitle } from '../hooks/usePageTitle';
 
+type Direction = 'invested' | 'withdrawn' | 'both';
+
 interface InvestmentsFilters {
   startDate: string;
   endDate: string;
+  accountIds: Option[];
+  categoryIds: Option[];
+  direction: Direction;
 }
 
 const getCurrentFinancialYear = () => {
@@ -56,6 +67,9 @@ const getCurrentFinancialYear = () => {
 const defaultFilters: InvestmentsFilters = {
   startDate: getCurrentFinancialYear().start,
   endDate: getCurrentFinancialYear().end,
+  accountIds: [],
+  categoryIds: [],
+  direction: 'both',
 };
 
 const SummaryCard: React.FC<{
@@ -87,25 +101,62 @@ const SummaryCard: React.FC<{
   </Card>
 );
 
+const gainLossGradient = (value: number) =>
+  value >= 0
+    ? 'linear-gradient(135deg, #6a1b9a 0%, #ba68c8 100%)'
+    : 'linear-gradient(135deg, #c62828 0%, #ef5350 100%)';
+
 const Investments: React.FC = () => {
   usePageTitle({ title: 'Investments' });
 
-  const { filters, setFilters } = usePersistentFilters<InvestmentsFilters>(
+  const { filters, setFilters, clearSavedFilters } = usePersistentFilters<InvestmentsFilters>(
     'investments-filters',
     defaultFilters
   );
 
+  const { data: accounts } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: accountsApi.getAll,
+  });
+
+  const { data: categories } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => categoriesApi.getAll(),
+  });
+
+  const accountOptions: Option[] = useMemo(
+    () => (accounts ?? []).map(a => ({ value: a.id, label: a.name })),
+    [accounts]
+  );
+  const investmentCategoryOptions: Option[] = useMemo(
+    () => (categories ?? []).filter(c => c.is_investment).map(c => ({ value: c.id, label: c.name, color: c.color })),
+    [categories]
+  );
+
+  const apiParams = useMemo(
+    () => ({
+      start_date: filters.startDate,
+      end_date: filters.endDate,
+      account_ids: filters.accountIds.length > 0 ? filters.accountIds.map(o => o.value).join(',') : undefined,
+      category_ids: filters.categoryIds.length > 0 ? filters.categoryIds.map(o => o.value).join(',') : undefined,
+      direction: filters.direction,
+    }),
+    [filters]
+  );
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['investments-summary', filters.startDate, filters.endDate],
-    queryFn: () =>
-      investmentsApi.getSummary({
-        start_date: filters.startDate,
-        end_date: filters.endDate,
-      }),
+    queryKey: ['investments-summary', apiParams],
+    queryFn: () => investmentsApi.getSummary(apiParams),
+  });
+
+  const { data: timeline, isLoading: timelineLoading } = useQuery({
+    queryKey: ['investments-timeline', apiParams],
+    queryFn: () => investmentsApi.getTimeline(apiParams),
   });
 
   const groupA = data?.group_a;
   const groupB = data?.group_b;
+  const timelineEvents = timeline?.events ?? [];
 
   const incomeCategoryChartData = useMemo(
     () =>
@@ -137,7 +188,7 @@ const Investments: React.FC = () => {
     [groupB]
   );
 
-  const handleFilterChange = (field: keyof InvestmentsFilters, value: string) => {
+  const handleFilterChange = (field: keyof InvestmentsFilters, value: any) => {
     setFilters(prev => ({ ...prev, [field]: value }));
   };
 
@@ -159,15 +210,113 @@ const Investments: React.FC = () => {
 
   const hasBalanceTrackedAccounts = (groupA?.accounts.length ?? 0) > 0;
   const hasInvestmentCategories = (groupB?.categories.length ?? 0) > 0;
+  const hasActiveScopeFilters = filters.accountIds.length > 0 || filters.categoryIds.length > 0;
 
   return (
     <Box p={3}>
-      <Box mb={3}>
-        <Typography variant="h4" fontWeight="bold">Investments</Typography>
-        <Typography variant="body2" color="text.secondary">
-          {groupA?.accounts.length ?? 0} balance-tracked account{(groupA?.accounts.length ?? 0) !== 1 ? 's' : ''} • {groupB?.categories.length ?? 0} investment categor{(groupB?.categories.length ?? 0) !== 1 ? 'ies' : 'y'}
-        </Typography>
+      <Box mb={3} display="flex" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={1}>
+        <Box>
+          <Typography variant="h4" fontWeight="bold">Investments</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {groupA?.accounts.length ?? 0} balance-tracked account{(groupA?.accounts.length ?? 0) !== 1 ? 's' : ''} • {groupB?.categories.length ?? 0} investment categor{(groupB?.categories.length ?? 0) !== 1 ? 'ies' : 'y'}
+          </Typography>
+        </Box>
       </Box>
+
+      {/* Filters */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Grid container spacing={2} alignItems="flex-start">
+            <Grid item xs={12} sm={6} md={2.5}>
+              <TextField
+                label="Start Date"
+                type="date"
+                value={filters.startDate}
+                onChange={e => handleFilterChange('startDate', e.target.value)}
+                fullWidth
+                size="small"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={2.5}>
+              <TextField
+                label="End Date"
+                type="date"
+                value={filters.endDate}
+                onChange={e => handleFilterChange('endDate', e.target.value)}
+                fullWidth
+                size="small"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <MultiSelectDropdown
+                label="Accounts"
+                options={accountOptions}
+                value={filters.accountIds}
+                onChange={(value) => handleFilterChange('accountIds', Array.from(value))}
+                placeholder="All accounts"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <MultiSelectDropdown
+                label="Investment Categories"
+                options={investmentCategoryOptions}
+                value={filters.categoryIds}
+                onChange={(value) => handleFilterChange('categoryIds', Array.from(value))}
+                placeholder="All categories"
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={1}>
+              <Typography variant="body2" sx={{ mb: 1, fontWeight: 500 }}>Direction</Typography>
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={filters.direction}
+                onChange={(_e, value) => value && handleFilterChange('direction', value)}
+                orientation="vertical"
+                fullWidth
+              >
+                <ToggleButton value="both">Both</ToggleButton>
+                <ToggleButton value="invested">Invested</ToggleButton>
+                <ToggleButton value="withdrawn">Withdrawn</ToggleButton>
+              </ToggleButtonGroup>
+            </Grid>
+          </Grid>
+          {(filters.accountIds.length > 0 || filters.categoryIds.length > 0 || filters.direction !== 'both') && (
+            <Box mt={1}>
+              <Chip size="small" label="Clear filters" onClick={() => clearSavedFilters()} variant="outlined" />
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Combined headline cards — always lifetime figures, unaffected by date range */}
+      <Grid container spacing={2} sx={{ mb: 1 }}>
+        <Grid item xs={12} sm={6}>
+          <SummaryCard
+            title="Lifetime Profit / Loss"
+            value={data?.lifetime_profit_loss ?? 0}
+            color={gainLossGradient(data?.lifetime_profit_loss ?? 0)}
+            icon={<TrendingUp />}
+            subtitle="Balance-tracked gain/loss + realized cash-flow profit (lifetime)"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <SummaryCard
+            title="Currently Invested"
+            value={data?.currently_invested ?? 0}
+            color="linear-gradient(135deg, #1565c0 0%, #42a5f5 100%)"
+            icon={<Savings />}
+            subtitle="Principal still deployed, not yet withdrawn (lifetime)"
+          />
+        </Grid>
+      </Grid>
+      {hasActiveScopeFilters && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+          These figures reflect your account/category selection above. Date range and direction don't affect them — they're always lifetime totals.
+        </Typography>
+      )}
 
       {/* Group A summary cards */}
       <Grid container spacing={2} sx={{ mb: 1 }}>
@@ -193,11 +342,7 @@ const Investments: React.FC = () => {
           <SummaryCard
             title="Implied Gain / Loss"
             value={groupA?.totals.total_implied_gain_loss ?? 0}
-            color={
-              (groupA?.totals.total_implied_gain_loss ?? 0) >= 0
-                ? 'linear-gradient(135deg, #6a1b9a 0%, #ba68c8 100%)'
-                : 'linear-gradient(135deg, #c62828 0%, #ef5350 100%)'
-            }
+            color={gainLossGradient(groupA?.totals.total_implied_gain_loss ?? 0)}
             icon={<TrendingDown />}
             subtitle="Portfolio value minus net invested"
           />
@@ -290,7 +435,7 @@ const Investments: React.FC = () => {
       <Box mb={2}>
         <Typography variant="h6">Investment-Tagged Cash Flows (Other Accounts)</Typography>
         <Typography variant="body2" color="text.secondary">
-          Transactions in categories marked "Investment" on accounts other than the ones above. Cash flow only — not included in the gain/loss figures above, since there's no tracked balance for these to compare against.
+          Transactions in categories marked "Investment" on accounts other than the ones above. "Currently Invested" and "Realized P&amp;L" come from a running-principal replay: a withdrawal that exceeds what's still deployed in a category is treated as realized profit, closing that cycle out.
         </Typography>
       </Box>
 
@@ -300,35 +445,6 @@ const Investments: React.FC = () => {
         </Alert>
       ) : (
         <>
-          <Card sx={{ mb: 3 }}>
-            <CardContent>
-              <Grid container spacing={2} alignItems="center">
-                <Grid item xs={12} sm={6} md={3}>
-                  <TextField
-                    label="Start Date"
-                    type="date"
-                    value={filters.startDate}
-                    onChange={e => handleFilterChange('startDate', e.target.value)}
-                    fullWidth
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <TextField
-                    label="End Date"
-                    type="date"
-                    value={filters.endDate}
-                    onChange={e => handleFilterChange('endDate', e.target.value)}
-                    fullWidth
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-
           <Grid container spacing={2} sx={{ mb: 3 }}>
             <Grid item xs={12} sm={6} md={3}>
               <SummaryCard
@@ -350,20 +466,20 @@ const Investments: React.FC = () => {
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <SummaryCard
-                title="Lifetime Invested"
-                value={groupB?.totals.lifetime_invested ?? 0}
+                title="Currently Invested"
+                value={groupB?.totals.total_running_principal ?? 0}
                 color="linear-gradient(135deg, #1565c0 0%, #42a5f5 100%)"
                 icon={<PieChartIcon />}
-                subtitle="All-time"
+                subtitle="Lifetime — running principal"
               />
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <SummaryCard
-                title="Lifetime Withdrawn"
-                value={groupB?.totals.lifetime_withdrawn ?? 0}
+                title="Realized Profit"
+                value={groupB?.totals.total_realized_gain_loss ?? 0}
                 color="linear-gradient(135deg, #6a1b9a 0%, #ba68c8 100%)"
                 icon={<PieChartIcon />}
-                subtitle="All-time"
+                subtitle="Lifetime — see note above"
               />
             </Grid>
           </Grid>
@@ -397,7 +513,7 @@ const Investments: React.FC = () => {
             )}
           </Grid>
 
-          <TableContainer component={Paper}>
+          <TableContainer component={Paper} sx={{ mb: 4 }}>
             <Table size="small">
               <TableHead>
                 <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
@@ -406,6 +522,8 @@ const Investments: React.FC = () => {
                   <TableCell align="right"><Typography fontWeight="bold">Period Withdrawn</Typography></TableCell>
                   <TableCell align="right"><Typography fontWeight="bold">Lifetime Invested</Typography></TableCell>
                   <TableCell align="right"><Typography fontWeight="bold">Lifetime Withdrawn</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight="bold">Currently Invested</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight="bold">Realized P&amp;L</Typography></TableCell>
                   <TableCell align="right"><Typography fontWeight="bold">Transactions</Typography></TableCell>
                 </TableRow>
               </TableHead>
@@ -431,6 +549,14 @@ const Investments: React.FC = () => {
                       <Typography variant="body2" color="text.secondary">{formatCurrency(cat.lifetime_withdrawn)}</Typography>
                     </TableCell>
                     <TableCell align="right">
+                      <Typography variant="body2" fontWeight="medium">{formatCurrency(cat.running_principal)}</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" fontWeight="medium" color={cat.realized_gain_loss > 0 ? 'success.main' : 'text.secondary'}>
+                        {formatCurrency(cat.realized_gain_loss)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right">
                       <Chip size="small" label={cat.transaction_count} variant="outlined" />
                     </TableCell>
                   </TableRow>
@@ -438,6 +564,77 @@ const Investments: React.FC = () => {
               </TableBody>
             </Table>
           </TableContainer>
+
+          <Box mb={2}>
+            <Typography variant="h6">Investment Cash Flow by Funding Account</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Same transactions, grouped by the account the money moved through instead of category. Cash flow only — attributing realized profit to a single funding account isn't possible when a category's invest and withdraw legs land in different accounts.
+            </Typography>
+          </Box>
+          <TableContainer component={Paper} sx={{ mb: 4 }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                  <TableCell><Typography fontWeight="bold">Account</Typography></TableCell>
+                  <TableCell><Typography fontWeight="bold">Type</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight="bold">Period Invested</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight="bold">Period Withdrawn</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight="bold">Lifetime Invested</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight="bold">Lifetime Withdrawn</Typography></TableCell>
+                  <TableCell align="right"><Typography fontWeight="bold">Transactions</Typography></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(groupB?.accounts ?? []).map(acc => (
+                  <TableRow key={acc.account_id} hover>
+                    <TableCell><Typography variant="body2" fontWeight="medium">{acc.account_name}</Typography></TableCell>
+                    <TableCell>
+                      <Chip size="small" label={formatAccountType(acc.account_type)} variant="outlined" />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" color="success.main">{formatCurrency(acc.period_invested)}</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" color="error.main">{formatCurrency(acc.period_withdrawn)}</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" color="text.secondary">{formatCurrency(acc.lifetime_invested)}</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Typography variant="body2" color="text.secondary">{formatCurrency(acc.lifetime_withdrawn)}</Typography>
+                    </TableCell>
+                    <TableCell align="right">
+                      <Chip size="small" label={acc.transaction_count} variant="outlined" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </>
+      )}
+
+      <Divider sx={{ mb: 3 }} />
+
+      <Box mb={2}>
+        <Typography variant="h6">Timeline</Typography>
+        <Typography variant="body2" color="text.secondary">
+          When you invested and withdrew, from/to where, per category — respects all filters above.
+        </Typography>
+      </Box>
+
+      {timelineLoading ? (
+        <Box display="flex" justifyContent="center" py={4}>
+          <CircularProgress size={28} />
+        </Box>
+      ) : (
+        <>
+          <Card sx={{ mb: 3 }}>
+            <CardContent>
+              <InvestmentTimelineChart events={timelineEvents} />
+            </CardContent>
+          </Card>
+          <InvestmentActivityFeed events={timelineEvents} />
         </>
       )}
     </Box>
