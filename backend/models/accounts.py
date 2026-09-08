@@ -13,6 +13,7 @@ class Account(Base):
     name = Column(String(255), nullable=False)
     type = Column(String(50), nullable=False)
     balance = Column(Numeric(12, 2), default=0.00)
+    opening_balance = Column(Numeric(12, 2), nullable=False, server_default='0.00')
     created_at = Column(DateTime, server_default=func.current_timestamp())
     updated_at = Column(DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     

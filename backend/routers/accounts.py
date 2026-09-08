@@ -196,8 +196,9 @@ def recalculate_all_balances(
         updated_accounts = []
         
         for account in accounts:
-            # Reset balance to 0
-            account.balance = Decimal('0.00')
+            # Reset balance to the account's opening balance (the balance that
+            # predates the transactions stored in the DB), not zero.
+            account.balance = account.opening_balance if account.opening_balance is not None else Decimal('0.00')
             db.commit()
             
             # Get all transactions for this account in chronological order
@@ -205,22 +206,31 @@ def recalculate_all_balances(
             transactions = db.query(Transaction).filter(
                 (Transaction.account_id == account.id) | 
                 (Transaction.to_account_id == account.id)
-            ).order_by(Transaction.date, Transaction.created_at).all()
+            ).order_by(Transaction.date, Transaction.created_at, Transaction.id).all()
             
-            # Apply each transaction to recalculate balance
+            # Apply each transaction to recalculate balance, stamping the running
+            # balance snapshot onto each transaction row as we go. balance_after_transaction
+            # always reflects the state of `account_id`'s account; to_account_balance_after
+            # reflects the state of `to_account_id`'s account (transfers only) - this matches
+            # the semantics used elsewhere (see calculate_balance_after_transaction_for_account
+            # and recalculate_subsequent_balances in routers/transactions.py).
             for txn in transactions:
                 if txn.type in ['income', 'expense'] and txn.account_id == account.id:
                     # Regular income/expense transaction where this account is the source
                     update_account_balance(db, account.id, float(txn.amount), txn.type)
+                    txn.balance_after_transaction = account.balance
                 elif txn.type == 'transfer':
                     if txn.account_id == account.id:
                         # This account is the source (debit/expense side)
                         update_account_balance(db, account.id, float(txn.amount), 'expense')
+                        txn.balance_after_transaction = account.balance
                     elif txn.to_account_id == account.id:
                         # This account is the destination (credit/income side)
                         update_account_balance(db, account.id, float(txn.amount), 'income')
-            
-            # Get updated balance
+                        txn.to_account_balance_after = account.balance
+
+            # Persist the per-transaction snapshots together with the final account balance
+            db.commit()
             db.refresh(account)
             updated_accounts.append({
                 "account_id": account.id,
