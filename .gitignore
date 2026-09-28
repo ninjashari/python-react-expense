@@ -194,6 +194,7 @@ Thumbs.db
 *.tmp
 *.temp
 test_*.py
+!backend/tests/test_*.py
 debug_*.py
 *_debug.py
 validate_*.py
