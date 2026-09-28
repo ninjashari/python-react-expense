@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
@@ -25,6 +25,7 @@ from schemas.reward_points import (
     RewardPointHistoryItem,
 )
 from utils.auth import get_current_active_user
+from services import mongo_sync
 
 router = APIRouter()
 
@@ -210,6 +211,7 @@ def _parse_date(value):
 
 @router.post("/import")
 def import_reward_points(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -280,6 +282,8 @@ def import_reward_points(
         created_bonuses = 0
         skipped = 0
         errors: list[str] = []
+        imported_redemptions: list[RewardPointRedemption] = []
+        imported_bonuses: list[RewardPointBonus] = []
 
         # ── Redemptions ────────────────────────────────────────────────
         if 'redemptions' in sheets:
@@ -315,14 +319,16 @@ def import_reward_points(
                         skipped += 1
                         continue
 
-                    db.add(RewardPointRedemption(
+                    new_redemption = RewardPointRedemption(
                         user_id=current_user.id,
                         account_id=account.id,
                         date=rec_date,
                         points_used=points,
                         description=description,
-                    ))
+                    )
+                    db.add(new_redemption)
                     created_redemptions += 1
+                    imported_redemptions.append(new_redemption)
                 except Exception as row_error:
                     errors.append(f"Redemptions row {index + 2}: {str(row_error)}")
                     continue
@@ -363,20 +369,27 @@ def import_reward_points(
                         skipped += 1
                         continue
 
-                    db.add(RewardPointBonus(
+                    new_bonus = RewardPointBonus(
                         user_id=current_user.id,
                         account_id=account.id,
                         date=rec_date,
                         points=points,
                         description=description,
                         source_file=source_file,
-                    ))
+                    )
+                    db.add(new_bonus)
                     created_bonuses += 1
+                    imported_bonuses.append(new_bonus)
                 except Exception as row_error:
                     errors.append(f"Bonuses row {index + 2}: {str(row_error)}")
                     continue
 
         db.commit()
+
+        for redemption in imported_redemptions:
+            background_tasks.add_task(mongo_sync.mirror_reward_redemption_upsert, db, redemption.id)
+        for bonus in imported_bonuses:
+            background_tasks.add_task(mongo_sync.mirror_reward_bonus_upsert, db, bonus.id)
 
         return {
             "message": "Import completed successfully",
@@ -412,6 +425,7 @@ def get_redemptions(
 @router.post("/", response_model=RewardPointRedemptionResponse, status_code=status.HTTP_201_CREATED)
 def create_redemption(
     redemption: RewardPointRedemptionCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -435,6 +449,7 @@ def create_redemption(
     db.add(db_obj)
     db.commit()
     db.refresh(db_obj)
+    background_tasks.add_task(mongo_sync.mirror_reward_redemption_upsert, db, db_obj.id)
     # Reload with relationship
     db.refresh(db_obj)
     db_obj_with_account = (
@@ -450,6 +465,7 @@ def create_redemption(
 def update_redemption(
     redemption_id: uuid.UUID,
     updates: RewardPointRedemptionUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -464,6 +480,7 @@ def update_redemption(
     for field, value in updates.model_dump(exclude_unset=True).items():
         setattr(db_obj, field, value)
     db.commit()
+    background_tasks.add_task(mongo_sync.mirror_reward_redemption_upsert, db, db_obj.id)
 
     return (
         db.query(RewardPointRedemption)
@@ -476,6 +493,7 @@ def update_redemption(
 @router.delete("/{redemption_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_redemption(
     redemption_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -488,6 +506,7 @@ def delete_redemption(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Redemption not found")
     db.delete(db_obj)
     db.commit()
+    background_tasks.add_task(mongo_sync.mirror_reward_redemption_delete, redemption_id)
 
 
 @router.get("/history", response_model=List[RewardPointHistoryItem])
@@ -630,6 +649,7 @@ def get_bonuses(
 @router.post("/bonuses", response_model=RewardPointBonusResponse, status_code=status.HTTP_201_CREATED)
 def create_bonus(
     bonus: RewardPointBonusCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -646,6 +666,7 @@ def create_bonus(
     db.add(db_obj)
     db.commit()
     db.refresh(db_obj)
+    background_tasks.add_task(mongo_sync.mirror_reward_bonus_upsert, db, db_obj.id)
     return (
         db.query(RewardPointBonus)
         .options(joinedload(RewardPointBonus.account))
@@ -658,6 +679,7 @@ def create_bonus(
 def update_bonus(
     bonus_id: uuid.UUID,
     updates: RewardPointBonusUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -672,6 +694,7 @@ def update_bonus(
     for field, value in updates.model_dump(exclude_unset=True).items():
         setattr(db_obj, field, value)
     db.commit()
+    background_tasks.add_task(mongo_sync.mirror_reward_bonus_upsert, db, db_obj.id)
 
     return (
         db.query(RewardPointBonus)
@@ -684,6 +707,7 @@ def update_bonus(
 @router.delete("/bonuses/{bonus_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_bonus(
     bonus_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -696,3 +720,4 @@ def delete_bonus(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bonus entry not found")
     db.delete(db_obj)
     db.commit()
+    background_tasks.add_task(mongo_sync.mirror_reward_bonus_delete, bonus_id)

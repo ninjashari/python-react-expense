@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -15,12 +15,14 @@ from schemas.payees import PayeeCreate, PayeeUpdate, PayeeResponse
 from utils.auth import get_current_active_user
 from utils.slug import create_slug
 from utils.color_generator import assign_unique_colors_bulk, generate_unique_color
+from services import mongo_sync
 
 router = APIRouter()
 
 @router.post("/", response_model=PayeeResponse)
 def create_payee(
-    payee: PayeeCreate, 
+    payee: PayeeCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -65,6 +67,7 @@ def create_payee(
         db.add(db_payee)
         db.commit()
         db.refresh(db_payee)
+        background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, db_payee.id)
         return db_payee
     except HTTPException:
         raise
@@ -111,6 +114,7 @@ def get_payees(
 
 @router.delete("/unused")
 def delete_unused_payees(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -158,7 +162,10 @@ def delete_unused_payees(
             db.delete(payee)
 
         db.commit()
-        
+
+        for deleted in deleted_payees:
+            background_tasks.add_task(mongo_sync.mirror_payee_delete, deleted["id"])
+
         return {
             "message": f"Successfully deleted {len(unused_payees)} unused payee(s)",
             "deleted_count": len(unused_payees),
@@ -231,9 +238,10 @@ def get_payee(
 
 @router.put("/{payee_id}", response_model=PayeeResponse)
 def update_payee(
-    payee_id: uuid.UUID, 
-    payee_update: PayeeUpdate, 
-    db: Session = Depends(get_db), 
+    payee_id: uuid.UUID,
+    payee_update: PayeeUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     try:
@@ -268,6 +276,7 @@ def update_payee(
         
         db.commit()
         db.refresh(payee)
+        background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, payee.id)
         return payee
     except HTTPException:
         raise
@@ -284,20 +293,22 @@ def update_payee(
 
 @router.delete("/{payee_id}")
 def delete_payee(
-    payee_id: uuid.UUID, 
-    db: Session = Depends(get_db), 
+    payee_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     try:
         payee = db.query(Payee).filter(
-            Payee.id == payee_id, 
+            Payee.id == payee_id,
             Payee.user_id == current_user.id
         ).first()
         if payee is None:
             raise HTTPException(status_code=404, detail="Payee not found")
-        
+
         db.delete(payee)
         db.commit()
+        background_tasks.add_task(mongo_sync.mirror_payee_delete, payee_id)
         return {"message": "Payee deleted successfully"}
     except HTTPException:
         raise
@@ -307,6 +318,7 @@ def delete_payee(
 
 @router.post("/reassign-colors")
 def reassign_payee_colors(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -359,7 +371,10 @@ def reassign_payee_colors(
                 colors_assigned += 1
         
         db.commit()
-        
+
+        for payee in sorted_payees:
+            background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, payee.id)
+
         return {
             "message": f"Color distribution complete - {colors_assigned} unique colors assigned",
             "payees_updated": colors_assigned,
@@ -374,11 +389,13 @@ def reassign_payee_colors(
 
 @router.post("/import")
 def import_payees(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Import payees from Excel/CSV file"""
+    touched_payees = []
     try:
         # Validate file type
         if not file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
@@ -444,6 +461,7 @@ def import_payees(
                     if color and color != existing_payee.color:
                         existing_payee.color = color
                         updated_count += 1
+                        touched_payees.append(existing_payee)
                     else:
                         skipped_count += 1
                 else:
@@ -472,14 +490,18 @@ def import_payees(
                     )
                     db.add(new_payee)
                     created_count += 1
-                    
+                    touched_payees.append(new_payee)
+
             except Exception as row_error:
                 errors.append(f"Row {index + 2}: {str(row_error)}")
                 continue
-        
+
         # Commit all changes
         db.commit()
-        
+
+        for payee in touched_payees:
+            background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, payee.id)
+
         return {
             "message": f"Import completed successfully",
             "total_rows": len(df),
@@ -489,7 +511,7 @@ def import_payees(
             "error_count": len(errors),
             "errors": errors[:10]  # Limit to first 10 errors
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:

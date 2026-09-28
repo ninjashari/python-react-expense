@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -15,6 +15,7 @@ from models.users import User
 from schemas.accounts import AccountCreate, AccountUpdate, AccountResponse
 from utils.auth import get_current_active_user
 from routers.transactions import update_account_balance
+from services import mongo_sync
 
 router = APIRouter()
 
@@ -23,7 +24,8 @@ VALID_STATUS_VALUES = {'active', 'inactive', 'closed'}
 
 @router.post("/", response_model=AccountResponse)
 def create_account(
-    account: AccountCreate, 
+    account: AccountCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -31,14 +33,15 @@ def create_account(
         # Validate status
         if account.status and account.status not in VALID_STATUS_VALUES:
             raise HTTPException(
-                status_code=422, 
+                status_code=422,
                 detail=f"Invalid status value. Must be one of: {', '.join(VALID_STATUS_VALUES)}"
             )
-        
+
         db_account = Account(**account.dict(), user_id=current_user.id)
         db.add(db_account)
         db.commit()
         db.refresh(db_account)
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, db_account.id)
         return db_account
     except HTTPException:
         raise
@@ -128,8 +131,9 @@ def get_account(
 
 @router.put("/{account_id}", response_model=AccountResponse)
 def update_account(
-    account_id: uuid.UUID, 
-    account_update: AccountUpdate, 
+    account_id: uuid.UUID,
+    account_update: AccountUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -140,20 +144,21 @@ def update_account(
         ).first()
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
-        
+
         # Validate status if being updated
         update_data = account_update.dict(exclude_unset=True)
         if 'status' in update_data and update_data['status'] not in VALID_STATUS_VALUES:
             raise HTTPException(
-                status_code=422, 
+                status_code=422,
                 detail=f"Invalid status value. Must be one of: {', '.join(VALID_STATUS_VALUES)}"
             )
-        
+
         for field, value in update_data.items():
             setattr(account, field, value)
-        
+
         db.commit()
         db.refresh(account)
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account.id)
         return account
     except HTTPException:
         raise
@@ -163,7 +168,8 @@ def update_account(
 
 @router.delete("/{account_id}")
 def delete_account(
-    account_id: uuid.UUID, 
+    account_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -174,9 +180,10 @@ def delete_account(
         ).first()
         if account is None:
             raise HTTPException(status_code=404, detail="Account not found")
-        
+
         db.delete(account)
         db.commit()
+        background_tasks.add_task(mongo_sync.mirror_account_delete, account_id)
         return {"message": "Account deleted successfully"}
     except HTTPException:
         raise
@@ -186,6 +193,7 @@ def delete_account(
 
 @router.post("/recalculate-balances")
 def recalculate_all_balances(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -232,6 +240,8 @@ def recalculate_all_balances(
             # Persist the per-transaction snapshots together with the final account balance
             db.commit()
             db.refresh(account)
+            background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account.id)
+            background_tasks.add_task(mongo_sync.mirror_account_transactions, db, account.id)
             updated_accounts.append({
                 "account_id": account.id,
                 "account_name": account.name,
@@ -251,11 +261,13 @@ def recalculate_all_balances(
 
 @router.post("/import")
 def import_accounts(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Import accounts from Excel/CSV file"""
+    imported_account_ids = []
     try:
         # Validate file type
         if not file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
@@ -389,6 +401,7 @@ def import_accounts(
                     
                     if updated:
                         updated_count += 1
+                        imported_account_ids.append(existing_account.id)
                     else:
                         skipped_count += 1
                 else:
@@ -455,14 +468,19 @@ def import_accounts(
                     new_account = Account(**account_data)
                     db.add(new_account)
                     created_count += 1
-                    
+                    imported_account_ids.append(new_account)
+
             except Exception as row_error:
                 errors.append(f"Row {index + 2}: {str(row_error)}")
                 continue
-        
+
         # Commit all changes
         db.commit()
-        
+
+        for entry in imported_account_ids:
+            account_id = entry.id if hasattr(entry, "id") else entry
+            background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+
         return {
             "message": f"Import completed successfully",
             "total_rows": len(df),

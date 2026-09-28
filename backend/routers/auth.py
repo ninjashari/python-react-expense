@@ -1,21 +1,22 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from database import get_db
 from models.users import User
 from schemas.users import UserCreate, UserLogin, UserResponse, Token, ChangePassword
 from utils.auth import (
-    verify_password, 
-    get_password_hash, 
+    verify_password,
+    get_password_hash,
     create_access_token,
     get_current_active_user,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
+from services import mongo_sync
 
 router = APIRouter()
 
 @router.post("/register", response_model=UserResponse)
-def register(user: UserCreate, db: Session = Depends(get_db)):
+def register(user: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Register a new user"""
     try:
         # Check if email already exists
@@ -25,7 +26,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
-        
+
         # Create new user
         hashed_password = get_password_hash(user.password)
         db_user = User(
@@ -36,6 +37,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
+        background_tasks.add_task(mongo_sync.mirror_user_upsert, db, db_user.id)
         return db_user
     except HTTPException:
         raise
@@ -85,6 +87,7 @@ def logout():
 @router.post("/change-password")
 def change_password(
     password_data: ChangePassword,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -108,7 +111,8 @@ def change_password(
         new_password_hash = get_password_hash(password_data.new_password)
         current_user.password_hash = new_password_hash
         db.commit()
-        
+        background_tasks.add_task(mongo_sync.mirror_user_upsert, db, current_user.id)
+
         return {"message": "Password changed successfully"}
         
     except HTTPException:

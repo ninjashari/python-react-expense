@@ -24,6 +24,8 @@ from schemas.transactions import (
 )
 from utils.auth import get_current_active_user
 from services.learning_service import TransactionLearningService
+from services.balance_logic import compute_balance_after
+from services import mongo_sync
 
 router = APIRouter()
 
@@ -32,29 +34,16 @@ def update_account_balance(db: Session, account_id: uuid.UUID, amount: float, tr
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
-    # Convert amount to Decimal to match the database field type
-    amount_decimal = Decimal(str(amount))
-    multiplier = -1 if is_reversal else 1
-    
-    if account.type == 'credit':
-        # For credit cards: balance represents amount owed
-        # Income (payments) reduces the balance, Expense (charges) increases the balance
-        if transaction_type == "income":  # Payment to credit card
-            account.balance -= amount_decimal * multiplier  # Reduces debt
-        elif transaction_type == "expense":  # Charge on credit card
-            account.balance += amount_decimal * multiplier  # Increases debt
+
+    if is_reversal:
+        # A reversal walks the balance back by the opposite transaction type
+        # (income <-> expense); transfers are reversed via their "expense"/"income"
+        # sub-calls, which already have their own transaction_type, not a separate
+        # reversal type, so flip the sign by negating the amount instead.
+        account.balance = compute_balance_after(account.balance, -amount, account.type, transaction_type)
     else:
-        # For regular accounts: balance represents money available
-        if transaction_type == "income":
-            account.balance += amount_decimal * multiplier
-        elif transaction_type in ("expense", "transfer"):
-            # Transfers are always called here for the SOURCE account (the account
-            # whose statement is being imported), so they reduce the balance just
-            # like an expense.  The destination account is handled separately when
-            # its own statement is imported.
-            account.balance -= amount_decimal * multiplier
-    
+        account.balance = compute_balance_after(account.balance, amount, account.type, transaction_type)
+
     db.commit()
     return account
 
@@ -63,29 +52,8 @@ def calculate_balance_after_transaction(db: Session, account_id: uuid.UUID, amou
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
-    # Convert amount to Decimal to match the database field type
-    amount_decimal = Decimal(str(amount))
-    current_balance = account.balance
-    
-    if account.type == 'credit':
-        # For credit cards: balance represents amount owed
-        if transaction_type == "income":  # Payment to credit card
-            new_balance = current_balance - amount_decimal  # Reduces debt
-        elif transaction_type == "expense":  # Charge on credit card
-            new_balance = current_balance + amount_decimal  # Increases debt
-        else:
-            new_balance = current_balance
-    else:
-        # For regular accounts: balance represents money available
-        if transaction_type == "income":
-            new_balance = current_balance + amount_decimal
-        elif transaction_type == "expense":
-            new_balance = current_balance - amount_decimal
-        else:
-            new_balance = current_balance
-    
-    return new_balance
+
+    return compute_balance_after(account.balance, amount, account.type, transaction_type)
 
 def calculate_balance_after_transaction_for_account(account_id: str, account_type: str, 
                                                   current_balance: Decimal, 
@@ -369,7 +337,12 @@ async def create_transaction(
             account_type=account.type,
             selection_method='form_create'
         )
-    
+
+    background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, db_transaction.id)
+    background_tasks.add_task(mongo_sync.mirror_account_upsert, db, transaction.account_id)
+    if transaction.to_account_id:
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, transaction.to_account_id)
+
     return db_transaction
 
 @router.get("/", response_model=PaginatedTransactionsResponse)
@@ -881,7 +854,10 @@ async def bulk_update_transactions(
         # Refresh all updated transactions
         for transaction in updated_transactions:
             db.refresh(transaction)
-        
+            background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+        for account_id in all_affected_account_ids:
+            background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+
         return updated_transactions
     
     except Exception as e:
@@ -1174,12 +1150,17 @@ async def update_transaction(
             'timestamp': datetime.now()
         }
     )
-    
+
+    background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+    for account_id in affected_account_ids:
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+
     return transaction
 
 @router.post("/recalculate-balances/{account_id}")
 async def recalculate_account_balances(
     account_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1246,7 +1227,10 @@ async def recalculate_account_balances(
                 db.add(account)
         
         db.commit()
-        
+
+        background_tasks.add_task(mongo_sync.mirror_account_transactions, db, account_id)
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+
         return {
             "success": True,
             "message": f"Successfully recalculated balances for account {account.name}",
@@ -1265,7 +1249,8 @@ async def recalculate_account_balances(
 
 @router.delete("/{transaction_id}")
 def delete_transaction(
-    transaction_id: uuid.UUID, 
+    transaction_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1275,7 +1260,10 @@ def delete_transaction(
     ).first()
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    
+
+    account_id = transaction.account_id
+    to_account_id = transaction.to_account_id
+
     # Reverse balance changes
     if transaction.type in ["income", "expense"]:
         update_account_balance(db, transaction.account_id, transaction.amount, transaction.type, is_reversal=True)
@@ -1291,11 +1279,18 @@ def delete_transaction(
     
     db.delete(transaction)
     db.commit()
+
+    background_tasks.add_task(mongo_sync.mirror_transaction_delete, transaction_id)
+    background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+    if to_account_id:
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, to_account_id)
+
     return {"message": "Transaction deleted successfully"}
 
 
 @router.post("/cleanup-descriptions")
 async def cleanup_transaction_descriptions(
+    background_tasks: BackgroundTasks,
     filters: Optional[dict] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -1333,9 +1328,10 @@ async def cleanup_transaction_descriptions(
             # Update the transaction if any changes were made
             if modified_description != original_description:
                 transaction.description = modified_description
-    
+                background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+
     db.commit()
-    
+
     return {
         "message": "Transaction descriptions cleaned up successfully for ALL transactions",
         "pipe_symbol_removals": pipe_removals,
@@ -1346,6 +1342,7 @@ async def cleanup_transaction_descriptions(
 
 @router.post("/clear-fields")
 async def clear_transaction_fields(
+    background_tasks: BackgroundTasks,
     filters: Optional[dict] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -1378,15 +1375,20 @@ async def clear_transaction_fields(
     
     # Clear payee and category fields
     for transaction in filtered_transactions:
+        changed = False
         if transaction.payee_id:
             transaction.payee_id = None
             payee_clearings += 1
+            changed = True
         if transaction.category_id:
             transaction.category_id = None
             category_clearings += 1
-    
+            changed = True
+        if changed:
+            background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+
     db.commit()
-    
+
     return {
         "message": "Transaction fields cleared successfully",
         "payee_clearings": payee_clearings,
@@ -1398,6 +1400,7 @@ async def clear_transaction_fields(
 @router.post("/bulk-reassign")
 async def bulk_reassign_transactions(
     transaction_ids: List[str],
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1518,7 +1521,10 @@ async def bulk_reassign_transactions(
     
     # Commit all changes
     db.commit()
-    
+
+    for transaction in transactions:
+        background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+
     return {
         "message": f"Bulk reassignment completed successfully",
         "total_transactions": len(transactions),

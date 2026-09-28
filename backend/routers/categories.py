@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -15,12 +15,14 @@ from schemas.categories import CategoryCreate, CategoryUpdate, CategoryResponse
 from utils.auth import get_current_active_user
 from utils.color_generator import assign_unique_colors_bulk, generate_unique_color
 from utils.slug import create_slug
+from services import mongo_sync
 
 router = APIRouter()
 
 @router.post("/", response_model=CategoryResponse)
 def create_category(
-    category: CategoryCreate, 
+    category: CategoryCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -31,13 +33,13 @@ def create_category(
         ).first()
         if existing_category:
             raise HTTPException(status_code=400, detail="Category with this name already exists")
-        
+
         # Generate slug from name
         slug = create_slug(category.name)
-        
+
         # Generate color if not provided
         color = category.color or generate_unique_color(db, category.name, str(current_user.id), "categories")
-        
+
         db_category = Category(
             name=category.name,
             slug=slug,
@@ -48,6 +50,7 @@ def create_category(
         db.add(db_category)
         db.commit()
         db.refresh(db_category)
+        background_tasks.add_task(mongo_sync.mirror_category_upsert, db, db_category.id)
         return db_category
     except HTTPException:
         raise
@@ -87,6 +90,7 @@ def get_categories(
 
 @router.delete("/unused")
 def delete_unused_categories(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -134,7 +138,10 @@ def delete_unused_categories(
             db.delete(category)
 
         db.commit()
-        
+
+        for deleted in deleted_categories:
+            background_tasks.add_task(mongo_sync.mirror_category_delete, deleted["id"])
+
         return {
             "message": f"Successfully deleted {len(unused_categories)} unused category(s)",
             "deleted_count": len(unused_categories),
@@ -207,8 +214,9 @@ def get_category(
 
 @router.put("/{category_id}", response_model=CategoryResponse)
 def update_category(
-    category_id: uuid.UUID, 
-    category_update: CategoryUpdate, 
+    category_id: uuid.UUID,
+    category_update: CategoryUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -219,18 +227,19 @@ def update_category(
         ).first()
         if category is None:
             raise HTTPException(status_code=404, detail="Category not found")
-        
+
         update_data = category_update.dict(exclude_unset=True)
-        
+
         # If name is being updated, regenerate slug
         if 'name' in update_data:
             update_data['slug'] = create_slug(update_data['name'])
-        
+
         for field, value in update_data.items():
             setattr(category, field, value)
-        
+
         db.commit()
         db.refresh(category)
+        background_tasks.add_task(mongo_sync.mirror_category_upsert, db, category.id)
         return category
     except HTTPException:
         raise
@@ -240,7 +249,8 @@ def update_category(
 
 @router.delete("/{category_id}")
 def delete_category(
-    category_id: uuid.UUID, 
+    category_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -251,9 +261,10 @@ def delete_category(
         ).first()
         if category is None:
             raise HTTPException(status_code=404, detail="Category not found")
-        
+
         db.delete(category)
         db.commit()
+        background_tasks.add_task(mongo_sync.mirror_category_delete, category_id)
         return {"message": "Category deleted successfully"}
     except HTTPException:
         raise
@@ -263,6 +274,7 @@ def delete_category(
 
 @router.post("/reassign-colors")
 def reassign_category_colors(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -315,7 +327,10 @@ def reassign_category_colors(
                 colors_assigned += 1
         
         db.commit()
-        
+
+        for category in sorted_categories:
+            background_tasks.add_task(mongo_sync.mirror_category_upsert, db, category.id)
+
         return {
             "message": f"Color distribution complete - {colors_assigned} unique colors assigned",
             "categories_updated": colors_assigned,
@@ -330,11 +345,13 @@ def reassign_category_colors(
 
 @router.post("/import")
 def import_categories(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Import categories from Excel/CSV file"""
+    touched_categories = []
     try:
         # Validate file type
         if not file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
@@ -400,6 +417,7 @@ def import_categories(
                     if color and color != existing_category.color:
                         existing_category.color = color
                         updated_count += 1
+                        touched_categories.append(existing_category)
                     else:
                         skipped_count += 1
                 else:
@@ -428,14 +446,18 @@ def import_categories(
                     )
                     db.add(new_category)
                     created_count += 1
-                    
+                    touched_categories.append(new_category)
+
             except Exception as row_error:
                 errors.append(f"Row {index + 2}: {str(row_error)}")
                 continue
-        
+
         # Commit all changes
         db.commit()
-        
+
+        for category in touched_categories:
+            background_tasks.add_task(mongo_sync.mirror_category_upsert, db, category.id)
+
         return {
             "message": f"Import completed successfully",
             "total_rows": len(df),
@@ -445,7 +467,7 @@ def import_categories(
             "error_count": len(errors),
             "errors": errors[:10]  # Limit to first 10 errors
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:

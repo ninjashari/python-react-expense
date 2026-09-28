@@ -1,17 +1,33 @@
+import logging
 import os
 import warnings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
+from database_mongo import init_mongo
 from routers import accounts, transactions, payees, categories, import_data, auth, learning, reward_points, investments
 import models
 
 # Suppress PyTorch deprecation warnings from transformers library
 warnings.filterwarnings("ignore", message="torch.utils._pytree._register_pytree_node is deprecated")
 
+logger = logging.getLogger("mongo_sync")
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Expense Manager API", version="1.0.0")
+
+
+@app.on_event("startup")
+async def startup_mongo():
+    """Bring up the MongoDB mirror used for dual-write during the Postgres -> Mongo
+    migration. Postgres (create_all above) remains the source of truth, so a Mongo
+    outage here is logged, not fatal - the app must still serve Postgres-backed requests.
+    """
+    try:
+        await init_mongo()
+    except Exception:
+        logger.exception("Failed to initialize MongoDB on startup; dual-write mirroring will be skipped")
 
 # CORS configuration for development and production
 origins = [
