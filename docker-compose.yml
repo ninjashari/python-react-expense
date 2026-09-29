@@ -40,7 +40,9 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      MONGODB_URL: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB}?authSource=admin
+      # MONGODB_URL in .env (e.g. a MongoDB Atlas SRV string) takes precedence;
+      # otherwise falls back to the local `mongo` service below.
+      MONGODB_URL: ${MONGODB_URL:-mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB}?authSource=admin}
       MONGO_DB: ${MONGO_DB}
       SECRET_KEY: ${SECRET_KEY}
       ALGORITHM: HS256
