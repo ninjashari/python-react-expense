@@ -60,13 +60,19 @@ async def reconcile_user(db, user_id) -> bool:
             print(f"  MISMATCH {name}: postgres={pg_count} mongo={mongo_count}")
             ok = False
 
+    def _num(v):
+        # Postgres Decimal and Mongo float stringify differently for the same
+        # value (Decimal('200.00') vs 200.0) - normalize to a fixed-precision
+        # float string so equal values checksum equal regardless of source type.
+        return "" if v is None else f"{float(v):.2f}"
+
     pg_rows = [
-        (str(t.id), str(t.amount), t.type, str(t.date), str(t.balance_after_transaction))
+        (str(t.id), _num(t.amount), t.type, str(t.date), _num(t.balance_after_transaction))
         for t in db.query(Transaction).filter(Transaction.user_id == user_id).all()
     ]
     mongo_txns = await TransactionDocument.find(TransactionDocument.user_id == user_id_str).to_list()
     mongo_rows = [
-        (t.id, str(t.amount), t.type, str(t.date), str(t.balance_after_transaction))
+        (t.id, _num(t.amount), t.type, str(t.date), _num(t.balance_after_transaction))
         for t in mongo_txns
     ]
     pg_checksum = _transaction_checksum(pg_rows)

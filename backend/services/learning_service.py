@@ -1,3 +1,4 @@
+import asyncio
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
@@ -9,6 +10,20 @@ from models.learning import UserTransactionPattern, UserSelectionHistory, UserCo
 from models.transactions import Transaction
 from models.payees import Payee
 from models.categories import Category
+from services import mongo_sync
+
+
+def _mirror(coro) -> None:
+    """Best-effort fire of an async mongo_sync mirror call from sync code.
+
+    Safe here because every caller in this module runs off the event loop
+    (FastAPI BackgroundTasks or a `def` endpoint - both executed in a
+    threadpool), so there's never a running loop to conflict with.
+    """
+    try:
+        asyncio.run(coro)
+    except Exception:
+        pass
 
 
 class TransactionLearningService:
@@ -49,7 +64,8 @@ class TransactionLearningService:
         
         db.add(selection_record)
         db.commit()
-        
+        _mirror(mongo_sync.mirror_selection_history_upsert(db, selection_record.id))
+
         # If this was a suggestion that was corrected, record the correction pattern
         if (was_suggested and original_suggestion_name and 
             selected_value_name != original_suggestion_name):
@@ -89,14 +105,17 @@ class TransactionLearningService:
             if len(all_selections) > 200:
                 selections_to_delete = all_selections[200:]  # Keep first 200 (newest), delete rest
                 
+                deleted_ids = [selection.id for selection in selections_to_delete]
                 for selection in selections_to_delete:
                     db.delete(selection)
-                
+
                 db.commit()
-                
+                for selection_id in deleted_ids:
+                    _mirror(mongo_sync.mirror_selection_history_delete(selection_id))
+
         except Exception as e:
             db.rollback()
-    
+
     @staticmethod
     def _record_correction_pattern(
         db: Session,
@@ -150,12 +169,15 @@ class TransactionLearningService:
                 )
                 
                 db.add(correction_pattern)
-            
+
             db.commit()
-            
+            _mirror(mongo_sync.mirror_correction_pattern_upsert(
+                db, existing_pattern.id if existing_pattern else correction_pattern.id
+            ))
+
         except Exception as e:
             db.rollback()
-    
+
     @staticmethod
     def _update_learning_patterns(
         db: Session, 
@@ -230,9 +252,12 @@ class TransactionLearningService:
                 account_types=[selection.account_type] if selection.account_type else None
             )
             db.add(new_pattern)
-        
+
         db.commit()
-    
+        _mirror(mongo_sync.mirror_learning_pattern_upsert(
+            db, existing_pattern.id if existing_pattern else new_pattern.id
+        ))
+
     @staticmethod
     def _extract_keywords(description: str) -> List[str]:
         """Extract meaningful keywords from transaction description.
@@ -488,23 +513,27 @@ class TransactionLearningService:
             users_with_history = db.query(UserSelectionHistory.user_id).distinct().all()
             
             total_cleaned = 0
-            
+            all_deleted_ids = []
+
             for (user_id,) in users_with_history:
                 # Get all selections for this user
                 all_selections = db.query(UserSelectionHistory).filter(
                     UserSelectionHistory.user_id == user_id
                 ).order_by(UserSelectionHistory.created_at.desc()).all()
-                
+
                 # If more than 200, delete the oldest ones
                 if len(all_selections) > 200:
                     selections_to_delete = all_selections[200:]
-                    
+
                     for selection in selections_to_delete:
+                        all_deleted_ids.append(selection.id)
                         db.delete(selection)
-                    
+
                     total_cleaned += len(selections_to_delete)
-            
+
             db.commit()
+            for selection_id in all_deleted_ids:
+                _mirror(mongo_sync.mirror_selection_history_delete(selection_id))
             
             return {
                 "message": f"Successfully cleaned up {total_cleaned} old selection history entries",

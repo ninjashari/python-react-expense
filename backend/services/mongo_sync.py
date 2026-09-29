@@ -410,6 +410,30 @@ async def mirror_learning_pattern_delete(pattern_id) -> None:
         logger.exception("mongo_sync: failed to delete mirrored learning pattern %s", pattern_id)
 
 
+async def mirror_patterns_reset(user_id) -> None:
+    """Delete all learning documents for a user - mirrors the /patterns/reset bulk delete."""
+    try:
+        if not await ensure_mongo_ready():
+            return
+        uid = str(user_id)
+        await UserTransactionPatternDocument.find(UserTransactionPatternDocument.user_id == uid).delete()
+        await UserSelectionHistoryDocument.find(UserSelectionHistoryDocument.user_id == uid).delete()
+        await UserCorrectionPatternDocument.find(UserCorrectionPatternDocument.user_id == uid).delete()
+    except Exception:
+        logger.exception("mongo_sync: failed to reset mirrored learning data for user %s", user_id)
+
+
+async def mirror_selection_history_delete(selection_id) -> None:
+    try:
+        if not await ensure_mongo_ready():
+            return
+        existing = await UserSelectionHistoryDocument.get(str(selection_id))
+        if existing:
+            await existing.delete()
+    except Exception:
+        logger.exception("mongo_sync: failed to delete mirrored selection history %s", selection_id)
+
+
 async def mirror_selection_history_upsert(db: Session, selection_id) -> None:
     try:
         if not await ensure_mongo_ready():

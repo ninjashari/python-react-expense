@@ -22,6 +22,7 @@ from services.learning_service import TransactionLearningService
 from services.ai_trainer import TransactionAITrainer
 from services.ollama_service import get_llm_suggestions
 from services.ai_cache import record_selection_and_maybe_retrain
+from services import mongo_sync
 from utils.auth import get_current_active_user
 
 router = APIRouter()
@@ -229,6 +230,7 @@ def record_learning_feedback(
 
 @router.get("/statistics", response_model=LearningStatisticsResponse)
 def get_learning_statistics(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -253,7 +255,8 @@ def get_learning_statistics(
         db.add(stats)
         db.commit()
         db.refresh(stats)
-    
+        background_tasks.add_task(mongo_sync.mirror_learning_statistics_upsert, db, current_user.id)
+
     return LearningStatisticsResponse(
         total_suggestions_made=stats.total_suggestions_made,
         total_suggestions_accepted=stats.total_suggestions_accepted,
@@ -267,51 +270,55 @@ def get_learning_statistics(
 @router.delete("/patterns/{pattern_id}")
 def delete_learning_pattern(
     pattern_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Delete a specific learning pattern"""
-    
+
     from models.learning import UserTransactionPattern
-    
+
     pattern = db.query(UserTransactionPattern).filter(
         UserTransactionPattern.id == pattern_id,
         UserTransactionPattern.user_id == current_user.id
     ).first()
-    
+
     if not pattern:
         raise HTTPException(status_code=404, detail="Pattern not found")
-    
+
     db.delete(pattern)
     db.commit()
-    
+    background_tasks.add_task(mongo_sync.mirror_learning_pattern_delete, pattern_id)
+
     return {"status": "success", "message": "Learning pattern deleted"}
 
 
 @router.post("/patterns/reset")
 def reset_learning_patterns(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Reset all learning patterns for the current user"""
-    
+
     from models.learning import UserTransactionPattern, UserSelectionHistory, UserCorrectionPattern
-    
+
     # Delete all user's learning data
     db.query(UserTransactionPattern).filter(
         UserTransactionPattern.user_id == current_user.id
     ).delete()
-    
+
     db.query(UserSelectionHistory).filter(
         UserSelectionHistory.user_id == current_user.id
     ).delete()
-    
+
     db.query(UserCorrectionPattern).filter(
         UserCorrectionPattern.user_id == current_user.id
     ).delete()
-    
+
     db.commit()
-    
+    background_tasks.add_task(mongo_sync.mirror_patterns_reset, current_user.id)
+
     return {"status": "success", "message": "All learning patterns reset"}
 
 
@@ -572,11 +579,12 @@ def get_accuracy_analytics(
 
 @router.post("/auto-categorize")
 def auto_categorize_transactions(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Automatically categorize uncategorized transactions using high-confidence patterns"""
-    
+
     from models.transactions import Transaction
     from models.learning import UserTransactionPattern
     from sqlalchemy import and_
@@ -590,7 +598,8 @@ def auto_categorize_transactions(
     ).all()
     
     auto_categorized = []
-    
+    updated_transaction_ids = []
+
     for transaction in uncategorized_transactions:
         # Get suggestions for this transaction
         suggestions = TransactionLearningService.get_suggestions_for_description(
@@ -628,7 +637,8 @@ def auto_categorize_transactions(
         if updates:
             for field, value in updates.items():
                 setattr(transaction, field, value)
-            
+            updated_transaction_ids.append(transaction.id)
+
             # Record the auto-categorization for learning
             TransactionLearningService.record_user_selection(
                 db=db,
@@ -653,7 +663,9 @@ def auto_categorize_transactions(
             })
     
     db.commit()
-    
+    for txn_id in updated_transaction_ids:
+        background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, txn_id)
+
     return {
         "status": "success",
         "message": f"Auto-categorized {len(auto_categorized)} transactions",
@@ -665,6 +677,7 @@ def auto_categorize_transactions(
 @router.post("/auto-categorize-filtered")
 def auto_categorize_filtered_transactions(
     filters: dict,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -718,6 +731,7 @@ def auto_categorize_filtered_transactions(
     
     # Step 3: Enhanced training and prediction
     auto_categorized = []
+    updated_transaction_ids = []
     training_stats = {
         "training_transactions_count": len(training_transactions),
         "target_transactions_count": len(target_transactions),
@@ -765,7 +779,8 @@ def auto_categorize_filtered_transactions(
         if updates:
             for field, value in updates.items():
                 setattr(transaction, field, value)
-            
+            updated_transaction_ids.append(transaction.id)
+
             training_stats["predictions_made"] += len(applied_predictions)
             training_stats["high_confidence_applied"] += 1
             
@@ -798,7 +813,9 @@ def auto_categorize_filtered_transactions(
                 )
     
     db.commit()
-    
+    for txn_id in updated_transaction_ids:
+        background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, txn_id)
+
     return {
         "status": "success",
         "message": f"Enhanced auto-categorization completed: {training_stats['high_confidence_applied']} transactions categorized",

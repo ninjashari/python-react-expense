@@ -28,6 +28,7 @@ from services.ai_trainer import TransactionAITrainer
 from services.ai_cache import get_cached_trainer, retrain_in_background
 from utils.auth import get_current_active_user
 from routers.transactions import update_account_balance
+from services import mongo_sync
 
 router = APIRouter()
 
@@ -184,15 +185,16 @@ def process_transactions_data(
     deposit_column: Optional[str] = None,
     default_transaction_type: str = "expense",
     reward_points_column: Optional[str] = None
-) -> tuple[int, List[str]]:
+) -> tuple[int, List[str], int, List[uuid.UUID]]:
     """Process DataFrame rows and create transactions with AI categorization"""
-    
+
     # Use cached trained model — no training during import
     ai_trainer = get_cached_trainer(db, current_user.id)
 
     transactions_created = 0
     errors = []
     ai_predictions_made = 0
+    created_transaction_ids: List[uuid.UUID] = []
 
     for index, row in df.iterrows():
         try:
@@ -283,19 +285,20 @@ def process_transactions_data(
                 reward_points=reward_points
             )
             
-            db_transaction = Transaction(**transaction_data.model_dump(), user_id=current_user.id)
+            db_transaction = Transaction(**transaction_data.model_dump(), user_id=current_user.id, id=uuid.uuid4())
             db.add(db_transaction)
-            
+            created_transaction_ids.append(db_transaction.id)
+
             # Update account balance for imported transaction
             update_account_balance(db, account_id, abs(amount), transaction_type)
-            
+
             transactions_created += 1
-            
+
         except Exception as e:
             errors.append(f"Row {index + 1}: {str(e)}")
-    
+
     print(f"AI made {ai_predictions_made} predictions for payees and categories")
-    return transactions_created, errors, ai_predictions_made
+    return transactions_created, errors, ai_predictions_made, created_transaction_ids
 
 @router.post("/csv")
 async def import_csv(
@@ -333,7 +336,7 @@ async def import_csv(
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
     # Process transactions using common utility function
-    transactions_created, errors, ai_predictions_made = process_transactions_data(
+    transactions_created, errors, ai_predictions_made, created_transaction_ids = process_transactions_data(
         df=df,
         db=db,
         current_user=current_user,
@@ -358,6 +361,8 @@ async def import_csv(
 
     if background_tasks is not None:
         background_tasks.add_task(retrain_in_background, current_user.id)
+        for txn_id in created_transaction_ids:
+            background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, txn_id)
 
     training_notice = None
     if transactions_created >= 100:
@@ -425,7 +430,7 @@ async def import_excel(
         raise HTTPException(status_code=400, detail=f"Missing columns: {missing_columns}")
     
     # Process transactions using common utility function
-    transactions_created, errors, ai_predictions_made = process_transactions_data(
+    transactions_created, errors, ai_predictions_made, created_transaction_ids = process_transactions_data(
         df=df,
         db=db,
         current_user=current_user,
@@ -450,6 +455,8 @@ async def import_excel(
 
     if background_tasks is not None:
         background_tasks.add_task(retrain_in_background, current_user.id)
+        for txn_id in created_transaction_ids:
+            background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, txn_id)
 
     training_notice = None
     if transactions_created >= 100:
@@ -700,6 +707,7 @@ async def import_pdf_with_llm(
         transactions_created = 0
         errors = []
         ai_predictions_made = 0
+        created_transaction_ids: List[uuid.UUID] = []
 
         for transaction_data in result["transactions"]:
             try:
@@ -738,12 +746,13 @@ async def import_pdf_with_llm(
                     category_id=category_id
                 )
                 
-                db_transaction = Transaction(**transaction_create.model_dump(), user_id=current_user.id)
+                db_transaction = Transaction(**transaction_create.model_dump(), user_id=current_user.id, id=uuid.uuid4())
                 db.add(db_transaction)
-                
+                created_transaction_ids.append(db_transaction.id)
+
                 # Update account balance
                 update_account_balance(db, account_id, llm_transaction.amount, llm_transaction.transaction_type)
-                
+
                 transactions_created += 1
                 
             except Exception as e:
@@ -758,6 +767,8 @@ async def import_pdf_with_llm(
 
         if background_tasks is not None:
             background_tasks.add_task(retrain_in_background, current_user.id)
+            for txn_id in created_transaction_ids:
+                background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, txn_id)
 
         # Update result with import statistics
         result["transactions_created"] = transactions_created
@@ -797,6 +808,7 @@ async def import_transactions_batch(
     transactions_created = 0
     errors = []
     ai_predictions_made = 0
+    created_transaction_ids: List[uuid.UUID] = []
 
     try:
         print(f"Starting batch import of {len(request.transactions_data)} transactions")
@@ -847,10 +859,11 @@ async def import_transactions_batch(
                 
                 db.add(transaction)
                 db.flush()
-                
+                created_transaction_ids.append(transaction.id)
+
                 # Update account balance
                 update_account_balance(db, request.account_id, float(transaction_data.amount), transaction_data.transaction_type)
-                
+
                 transactions_created += 1
                 print(f"Successfully created transaction {i + 1}")
                 
@@ -868,6 +881,8 @@ async def import_transactions_batch(
 
         if background_tasks is not None:
             background_tasks.add_task(retrain_in_background, current_user.id)
+            for txn_id in created_transaction_ids:
+                background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, txn_id)
 
         return {
             "transactions_created": transactions_created,
@@ -985,6 +1000,7 @@ async def import_xls_with_llm(
         transactions_created = 0
         errors = []
         ai_predictions_made = 0
+        created_transaction_ids: List[uuid.UUID] = []
 
         try:
             print(f"Starting import of {len(result['transactions'])} transactions from XLS")
@@ -1040,10 +1056,11 @@ async def import_xls_with_llm(
                     
                     db.add(transaction)
                     db.flush()
-                    
+                    created_transaction_ids.append(transaction.id)
+
                     # Update account balance
                     update_account_balance(db, account_id, float(transaction_obj.amount), transaction_obj.transaction_type)
-                    
+
                     transactions_created += 1
                     print(f"Successfully created transaction {i + 1}")
                     
@@ -1059,6 +1076,8 @@ async def import_xls_with_llm(
 
             if background_tasks is not None:
                 background_tasks.add_task(retrain_in_background, current_user.id)
+                for txn_id in created_transaction_ids:
+                    background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, txn_id)
 
         except Exception as e:
             db.rollback()
