@@ -57,4 +57,7 @@ class TransactionDocument(Document):
             IndexModel([("user_id", 1), ("date", -1)]),
             IndexModel([("user_id", 1), ("account_id", 1), ("date", -1)]),
             IndexModel([("user_id", 1), ("category_id", 1)]),
+            IndexModel([("user_id", 1), ("payee_id", 1)]),
+            IndexModel([("user_id", 1), ("to_account_id", 1)]),
+            IndexModel([("user_id", 1), ("type", 1)]),
         ]
