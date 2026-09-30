@@ -1,14 +1,17 @@
 import os
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Union
 from jose import JWTError, jwt
 import bcrypt
 from fastapi import HTTPException, status, Depends
+from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from database import get_db
 from models.users import User
+from models_mongo.users import UserDocument
 from schemas.users import TokenData
+from config import READ_SOURCE
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
@@ -61,21 +64,41 @@ def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(s
         raise credentials_exception
     return token_data
 
-def get_current_user(
-    token: TokenData = Depends(verify_token), 
+def _lookup_pg_user(db: Session, email: str) -> Optional[User]:
+    """Blocking Postgres lookup. Must run via run_in_threadpool: this function
+    (get_current_user) is async and FastAPI awaits it directly on the event
+    loop, so a bare synchronous db.query() call here would block the loop for
+    every authenticated request - this was hit as a real hang during Stage 1
+    development, not a theoretical concern."""
+    return db.query(User).filter(User.email == email).first()
+
+
+async def get_current_user(
+    token: TokenData = Depends(verify_token),
     db: Session = Depends(get_db)
-) -> User:
-    """Get current authenticated user"""
+) -> Union[User, UserDocument]:
+    """Get current authenticated user.
+
+    Reads from Mongo or Postgres depending on READ_SOURCE (see config.py) -
+    other, not-yet-converted routers keep working against either result since
+    a plain string `.id` filters Postgres UUID columns transparently (verified
+    empirically before this change landed).
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    user = db.query(User).filter(User.email == token.email).first()
+    if READ_SOURCE == "mongo":
+        user = await UserDocument.find_one(UserDocument.email == token.email)
+    else:
+        user = await run_in_threadpool(_lookup_pg_user, db, token.email)
     if user is None:
         raise credentials_exception
     return user
 
-def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
+async def get_current_active_user(
+    current_user: Union[User, UserDocument] = Depends(get_current_user)
+) -> Union[User, UserDocument]:
     """Get current active user"""
     return current_user
