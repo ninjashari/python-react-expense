@@ -21,7 +21,7 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#1976d2",
+  "theme_color": "#4f46e5",
   "background_color": "#ffffff",
   "categories": ["finance", "productivity", "business"]
 }
