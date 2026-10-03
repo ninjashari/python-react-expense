@@ -129,6 +129,16 @@ const pageSizeOptions = [
   { value: 200, label: '200 per page' },
 ];
 
+// The API now returns full date/time (e.g. "2026-10-02T14:35:00") but the UI only
+// ever shows/edits the date portion — these keep the time-of-day intact across edits
+// instead of silently resetting it to midnight whenever just the date is touched.
+const toDateOnly = (dateTimeStr: string) => dateTimeStr.split('T')[0];
+
+const combineDateWithOriginalTime = (newDateOnly: string, originalDateTimeStr: string) => {
+  const timePart = originalDateTimeStr.includes('T') ? originalDateTimeStr.split('T')[1] : '00:00:00';
+  return `${newDateOnly}T${timePart}`;
+};
+
 interface TransactionFilters {
   startDate?: string;
   endDate?: string;
@@ -508,8 +518,10 @@ const Transactions: React.FC = () => {
     }
   };
 
-  const handleInlineDateChange = async (transactionId: string, date: string) => {
-    await handleInlineUpdate(transactionId, 'date', date);
+  const handleInlineDateChange = async (transactionId: string, newDateOnly: string) => {
+    const original = transactionData?.items?.find(t => t.id === transactionId);
+    const newDate = original ? combineDateWithOriginalTime(newDateOnly, original.date) : newDateOnly;
+    await handleInlineUpdate(transactionId, 'date', newDate);
   };
 
   const handleInlineAccountChange = async (transactionId: string, accountId: string | null) => {
@@ -528,7 +540,7 @@ const Transactions: React.FC = () => {
       setFormDescription(transaction.description || '');
       setFormAmount(transaction.amount);
       reset({
-        date: transaction.date,
+        date: toDateOnly(transaction.date),
         amount: transaction.amount,
         description: transaction.description,
         type: transaction.type,
@@ -567,6 +579,9 @@ const Transactions: React.FC = () => {
   const onSubmit = (data: CreateTransactionDto) => {
     const submitData = {
       ...data,
+      // The form only edits the date part; keep the original time-of-day for
+      // existing transactions instead of resetting it to midnight on every edit.
+      date: editingTransaction ? combineDateWithOriginalTime(data.date, editingTransaction.date) : data.date,
       payee_id: data.payee_id || undefined,
       category_id: data.category_id || undefined,
       to_account_id: data.to_account_id || undefined,
@@ -1702,7 +1717,7 @@ const Transactions: React.FC = () => {
                 </TableCell>
                 <TableCell sx={{ width: columnWidths.date, minWidth: columnWidths.date, maxWidth: columnWidths.date }}>
                   <InlineDateEdit
-                    value={transaction.date}
+                    value={toDateOnly(transaction.date)}
                     onSave={(newValue) => handleInlineDateChange(transaction.id, newValue)}
                     isSaving={savingTransactions.has(transaction.id)}
                   />

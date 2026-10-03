@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Date, DateTime, Numeric, Text, ForeignKey, Integer, Float
+from sqlalchemy import Column, String, DateTime, Numeric, Text, ForeignKey, Integer, Float
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -24,7 +24,7 @@ class Transaction(Base):
     type = Column(String(10), nullable=False)
     description = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
-    date = Column(Date, nullable=False)
+    date = Column(DateTime, nullable=False)
     balance_after_transaction = Column(Numeric(12, 2), nullable=True)  # Account balance after this transaction
     to_account_balance_after = Column(Numeric(12, 2), nullable=True)  # To-account balance after transfer (for transfers only)
     reward_points = Column(Float, nullable=True)  # Reward points earned on this transaction (credit card only)

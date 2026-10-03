@@ -13,7 +13,7 @@ Two disjoint tracking mechanisms exist in this app, referred to as Group A and G
 """
 from dataclasses import dataclass, field
 from decimal import Decimal
-from datetime import date as DateType
+from datetime import date as DateType, datetime
 from typing import Dict, List, Optional, Set, Sequence, Any
 from collections import defaultdict
 import uuid
@@ -26,6 +26,12 @@ from models.categories import Category
 from models.transactions import Transaction
 
 BALANCE_TRACKED_TYPES = ['investment', 'ppf']
+
+
+def _as_date(value):
+    """Transaction.date is a datetime column; this module's date-only comparisons/grouping
+    need a plain date, same as before the column carried a time-of-day."""
+    return value.date() if isinstance(value, datetime) else value
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +153,7 @@ def replay_all_group_b_categories(txns: List[Transaction]) -> Dict[uuid.UUID, Ca
         direction = 'invested' if t.type == 'expense' else 'withdrawn'
         by_category[t.category_id].append(ReplayTxn(
             id=t.id,
-            date=t.date,
+            date=_as_date(t.date),
             direction=direction,
             amount=Decimal(t.amount),
             account_id=t.account_id,
@@ -304,7 +310,8 @@ def build_group_b_account_cashflow(
             )
         row = by_account[t.account_id]
         amount = Decimal(t.amount)
-        in_period = (start_date is None or t.date >= start_date) and (end_date is None or t.date <= end_date)
+        t_date = _as_date(t.date)
+        in_period = (start_date is None or t_date >= start_date) and (end_date is None or t_date <= end_date)
         if t.type == 'expense':
             row.lifetime_invested += amount
             if in_period:
@@ -365,7 +372,7 @@ def build_timeline(
             account_id, account_name = t.account_id, t.account.name if t.account else ''
         events.append(TimelineEventResult(
             id=t.id,
-            date=t.date,
+            date=_as_date(t.date),
             group='A',
             direction=direction,
             amount=Decimal(t.amount),

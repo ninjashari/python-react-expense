@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import date as DateType, datetime
+from datetime import datetime
 from typing import Optional, List
 from decimal import Decimal
 import uuid
@@ -32,7 +32,7 @@ class CategorySummary(BaseModel):
         from_attributes = True
 
 class TransactionBase(BaseModel):
-    date: DateType
+    date: datetime
     amount: Decimal
     type: str
     description: Optional[str] = None
@@ -47,7 +47,7 @@ class TransactionCreate(TransactionBase):
     pass
 
 class TransactionUpdate(BaseModel):
-    date: Optional[DateType] = None
+    date: Optional[datetime] = None
     amount: Optional[Decimal] = None
     type: Optional[str] = None
     description: Optional[str] = None

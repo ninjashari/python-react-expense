@@ -120,7 +120,7 @@ def recalculate_subsequent_balances(db: Session, account_ids: list, modified_tra
         subsequent_transactions = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
             Transaction.date >= modified_transaction_date
-        ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).all()
+        ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).all()
         
         if not subsequent_transactions:
             continue
@@ -134,7 +134,7 @@ def recalculate_subsequent_balances(db: Session, account_ids: list, modified_tra
         previous_transaction = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
             Transaction.date < modified_transaction_date
-        ).order_by(Transaction.date.desc(), Transaction.created_at.desc()).first()
+        ).order_by(Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc()).first()
         
         if previous_transaction:
             # Use the balance from the previous transaction
@@ -181,7 +181,7 @@ def get_account_starting_balance_for_recalc(db: Session, account_id: str) -> Dec
     initial_transaction = db.query(Transaction).filter(
         Transaction.account_id == account_id,
         Transaction.description.ilike('%initial%')
-    ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).first()
+    ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).first()
     
     if initial_transaction:
         # If there's an initial funding transaction, start from 0
@@ -193,7 +193,7 @@ def get_account_starting_balance_for_recalc(db: Session, account_id: str) -> Dec
         # For safety, let's calculate it by examining the pattern of transactions
         earliest_transaction = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id)
-        ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).first()
+        ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).first()
         
         if earliest_transaction and earliest_transaction.type == 'income' and 'initial' in (earliest_transaction.description or '').lower():
             # If the earliest transaction is an income with "initial" in description, start from 0
@@ -220,7 +220,7 @@ def get_account_balance_at_date(db: Session, account_id: str, target_date: str) 
     transactions_before = db.query(Transaction).filter(
         (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
         Transaction.date < target_date
-    ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).all()
+    ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).all()
     
     running_balance = starting_balance
     
@@ -480,7 +480,7 @@ def get_transactions(
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
-        query = query.filter(Transaction.date <= end_date)
+        query = query.filter(func.date(Transaction.date) <= end_date)
     
     # Filter by description (case-insensitive search)
     if description:
@@ -520,14 +520,26 @@ def get_transactions(
         else:
             sort_column = Transaction.date
         
+        # Sorting by date (explicitly or via the unrecognized-sort_by fallback above)
+        # needs created_at + id as tiebreakers for same-date rows: transactions bulk
+        # imported in one batch share an identical created_at down to the microsecond,
+        # so id is the only thing left to make the order deterministic. This has to
+        # match the tiebreak balance recalculation already uses, so "last" is
+        # consistent between this list and the stored account balance.
+        is_date_sort = sort_column is Transaction.date
+
         # Apply sort order
         if sort_order == 'asc':
             query = query.order_by(sort_column.asc())
+            if is_date_sort:
+                query = query.order_by(Transaction.created_at.asc(), Transaction.id.asc())
         else:
             query = query.order_by(sort_column.desc())
+            if is_date_sort:
+                query = query.order_by(Transaction.created_at.desc(), Transaction.id.desc())
     else:
-        # Default sort by date descending
-        query = query.order_by(Transaction.date.desc())
+        # Default sort by date, created_at, id descending
+        query = query.order_by(Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc())
     
     # Get paginated results
     transactions = query.offset(skip).limit(size).all()
@@ -666,7 +678,7 @@ def get_transaction_summary(
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
-        query = query.filter(Transaction.date <= end_date)
+        query = query.filter(func.date(Transaction.date) <= end_date)
     
     # Filter by current user
     query = query.filter(Transaction.user_id == current_user.id)
@@ -932,13 +944,13 @@ async def export_transactions(
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
-        query = query.filter(Transaction.date <= end_date)
+        query = query.filter(func.date(Transaction.date) <= end_date)
     
     # Filter by current user
     query = query.filter(Transaction.user_id == current_user.id)
     
     # Get all transactions (no pagination for export)
-    transactions = query.order_by(Transaction.date.desc()).all()
+    transactions = query.order_by(Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc()).all()
     
     # Convert to DataFrame
     data = []
@@ -1182,7 +1194,7 @@ async def recalculate_account_balances(
         earliest_transaction = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
             Transaction.user_id == current_user.id
-        ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).first()
+        ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).first()
         
         if not earliest_transaction:
             return {
@@ -1209,7 +1221,7 @@ async def recalculate_account_balances(
         last_transaction = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
             Transaction.user_id == current_user.id
-        ).order_by(Transaction.date.desc(), Transaction.created_at.desc()).first()
+        ).order_by(Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc()).first()
         
         if last_transaction:
             # Determine which balance field to use based on whether this account was source or destination
@@ -1553,7 +1565,7 @@ def get_transactions_by_category(
         if start_date:
             query = query.filter(Transaction.date >= start_date)
         if end_date:
-            query = query.filter(Transaction.date <= end_date)
+            query = query.filter(func.date(Transaction.date) <= end_date)
 
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
@@ -1677,7 +1689,7 @@ def get_transactions_by_payee(
         if start_date:
             query = query.filter(Transaction.date >= start_date)
         if end_date:
-            query = query.filter(Transaction.date <= end_date)
+            query = query.filter(func.date(Transaction.date) <= end_date)
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
         query = query.filter(Transaction.account_id.in_(account_id_list))
@@ -1793,7 +1805,7 @@ def get_transactions_by_account(
         if start_date:
             query = query.filter(Transaction.date >= start_date)
         if end_date:
-            query = query.filter(Transaction.date <= end_date)
+            query = query.filter(func.date(Transaction.date) <= end_date)
 
     transactions = query.options(joinedload(Transaction.account)).all()
 
@@ -1872,7 +1884,7 @@ def get_transactions_by_account(
         if start_date:
             incoming_transfers_query = incoming_transfers_query.filter(Transaction.date >= start_date)
         if end_date:
-            incoming_transfers_query = incoming_transfers_query.filter(Transaction.date <= end_date)
+            incoming_transfers_query = incoming_transfers_query.filter(func.date(Transaction.date) <= end_date)
     
     incoming_transfers = incoming_transfers_query.all()
 
@@ -1935,7 +1947,7 @@ def get_monthly_trend(
     query = db.query(Transaction).filter(
         Transaction.user_id == current_user.id,
         Transaction.date >= start_date,
-        Transaction.date <= end_date
+        func.date(Transaction.date) <= end_date
     )
 
     if account_ids:
@@ -1994,7 +2006,7 @@ def get_comprehensive_financial_analysis(
         joinedload(Transaction.category),
         joinedload(Transaction.payee),
         joinedload(Transaction.account)
-    ).order_by(Transaction.date).all()
+    ).order_by(Transaction.date, Transaction.created_at, Transaction.id).all()
 
     if not all_transactions:
         return {"message": "No transaction data available for analysis"}
@@ -2196,7 +2208,7 @@ def get_prediction_insights(
     ).options(
         joinedload(Transaction.category),
         joinedload(Transaction.payee)
-    ).order_by(Transaction.date).all()
+    ).order_by(Transaction.date, Transaction.created_at, Transaction.id).all()
 
     if len(all_transactions) < 10:
         return {"message": "Insufficient historical data for accurate predictions"}
