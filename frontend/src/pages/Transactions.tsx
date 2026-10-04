@@ -43,7 +43,7 @@ import {
   CleaningServices, Calculate, AutoFixHigh, MoreVert, Close,
   TrendingUp, TrendingDown, AccountBalanceWallet, ReceiptLong,
 } from '@mui/icons-material';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useForm, Controller } from 'react-hook-form';
 import { transactionsApi, accountsApi, payeesApi, categoriesApi } from '../services/api';
 import { Transaction, CreateTransactionDto, PaginatedResponse } from '../types';
@@ -60,6 +60,7 @@ import InlineSelectEdit from '../components/InlineSelectEdit';
 import { useEnhancedSuggestions, useLlmSuggestions, useLearningMetrics } from '../hooks/useLearning';
 import { SuggestionItem } from '../services/learningApi';
 import { usePersistentFilters } from '../hooks/usePersistentFilters';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 // Resizable TableCell component
 const ResizableTableCell = ({ 
@@ -127,6 +128,16 @@ const pageSizeOptions = [
   { value: 100, label: '100 per page' },
   { value: 200, label: '200 per page' },
 ];
+
+// The API now returns full date/time (e.g. "2026-10-02T14:35:00") but the UI only
+// ever shows/edits the date portion — these keep the time-of-day intact across edits
+// instead of silently resetting it to midnight whenever just the date is touched.
+const toDateOnly = (dateTimeStr: string) => dateTimeStr.split('T')[0];
+
+const combineDateWithOriginalTime = (newDateOnly: string, originalDateTimeStr: string) => {
+  const timePart = originalDateTimeStr.includes('T') ? originalDateTimeStr.split('T')[1] : '00:00:00';
+  return `${newDateOnly}T${timePart}`;
+};
 
 interface TransactionFilters {
   startDate?: string;
@@ -234,21 +245,39 @@ const Transactions: React.FC = () => {
 
   const watchTransactionType = watch('type');
 
+  // Debounce the typed filter fields so every keystroke doesn't fire a new
+  // network request / change the react-query key (which otherwise made the
+  // whole page flash to a loading spinner on every character typed).
+  const debouncedStartDate = useDebouncedValue(filters.startDate, 400);
+  const debouncedEndDate = useDebouncedValue(filters.endDate, 400);
+  const debouncedDescriptionSearch = useDebouncedValue(filters.descriptionSearch, 400);
+
+  const debouncedFilters = useMemo(
+    () => ({
+      ...filters,
+      startDate: debouncedStartDate,
+      endDate: debouncedEndDate,
+      descriptionSearch: debouncedDescriptionSearch,
+    }),
+    [filters, debouncedStartDate, debouncedEndDate, debouncedDescriptionSearch]
+  );
+
   const { data: transactionData, isLoading: transactionsLoading } = useQuery<PaginatedResponse<Transaction>>({
-    queryKey: ['transactions', filters],
+    queryKey: ['transactions', debouncedFilters],
     queryFn: ({ signal }) => transactionsApi.getAll({
-      page: filters.showAll ? 1 : filters.page,
-      size: filters.showAll ? 1000 : filters.size, // Cap show-all at 1000 (was 10000)
-      start_date: filters.startDate,
-      end_date: filters.endDate,
-      account_ids: filters.accountId,
-      category_ids: filters.categoryIds?.join(','),
-      payee_ids: filters.payeeIds?.join(','),
-      description: filters.descriptionSearch,
-      transaction_type: filters.transactionType,
-      sort_by: filters.sortField,
-      sort_order: filters.sortDirection,
+      page: debouncedFilters.showAll ? 1 : debouncedFilters.page,
+      size: debouncedFilters.showAll ? 1000 : debouncedFilters.size, // Cap show-all at 1000 (was 10000)
+      start_date: debouncedFilters.startDate,
+      end_date: debouncedFilters.endDate,
+      account_ids: debouncedFilters.accountId,
+      category_ids: debouncedFilters.categoryIds?.join(','),
+      payee_ids: debouncedFilters.payeeIds?.join(','),
+      description: debouncedFilters.descriptionSearch,
+      transaction_type: debouncedFilters.transactionType,
+      sort_by: debouncedFilters.sortField,
+      sort_order: debouncedFilters.sortDirection,
     }, signal), // signal cancels the HTTP request when queryKey changes
+    placeholderData: keepPreviousData, // keep showing the old table while the new page loads, instead of blanking to a spinner
   });
 
   // Auto-disable showAll if total transactions > 250.
@@ -263,22 +292,23 @@ const Transactions: React.FC = () => {
   // Summary across the full filtered set (not just the current page)
   const { data: txnSummary } = useQuery({
     queryKey: ['transactions', 'summary', {
-      startDate: filters.startDate,
-      endDate: filters.endDate,
-      accountId: filters.accountId,
-      categoryIds: filters.categoryIds,
-      payeeIds: filters.payeeIds,
-      transactionType: filters.transactionType,
-      descriptionSearch: filters.descriptionSearch,
+      startDate: debouncedFilters.startDate,
+      endDate: debouncedFilters.endDate,
+      accountId: debouncedFilters.accountId,
+      categoryIds: debouncedFilters.categoryIds,
+      payeeIds: debouncedFilters.payeeIds,
+      transactionType: debouncedFilters.transactionType,
+      descriptionSearch: debouncedFilters.descriptionSearch,
     }],
     queryFn: () => transactionsApi.getSummary({
-      start_date: filters.startDate,
-      end_date: filters.endDate,
-      account_ids: filters.accountId,
-      category_ids: filters.categoryIds?.join(','),
-      payee_ids: filters.payeeIds?.join(','),
-      transaction_type: filters.transactionType,
+      start_date: debouncedFilters.startDate,
+      end_date: debouncedFilters.endDate,
+      account_ids: debouncedFilters.accountId,
+      category_ids: debouncedFilters.categoryIds?.join(','),
+      payee_ids: debouncedFilters.payeeIds?.join(','),
+      transaction_type: debouncedFilters.transactionType,
     }),
+    placeholderData: keepPreviousData,
   });
 
   const { data: accounts } = useQuery({
@@ -488,8 +518,10 @@ const Transactions: React.FC = () => {
     }
   };
 
-  const handleInlineDateChange = async (transactionId: string, date: string) => {
-    await handleInlineUpdate(transactionId, 'date', date);
+  const handleInlineDateChange = async (transactionId: string, newDateOnly: string) => {
+    const original = transactionData?.items?.find(t => t.id === transactionId);
+    const newDate = original ? combineDateWithOriginalTime(newDateOnly, original.date) : newDateOnly;
+    await handleInlineUpdate(transactionId, 'date', newDate);
   };
 
   const handleInlineAccountChange = async (transactionId: string, accountId: string | null) => {
@@ -508,7 +540,7 @@ const Transactions: React.FC = () => {
       setFormDescription(transaction.description || '');
       setFormAmount(transaction.amount);
       reset({
-        date: transaction.date,
+        date: toDateOnly(transaction.date),
         amount: transaction.amount,
         description: transaction.description,
         type: transaction.type,
@@ -547,6 +579,9 @@ const Transactions: React.FC = () => {
   const onSubmit = (data: CreateTransactionDto) => {
     const submitData = {
       ...data,
+      // The form only edits the date part; keep the original time-of-day for
+      // existing transactions instead of resetting it to midnight on every edit.
+      date: editingTransaction ? combineDateWithOriginalTime(data.date, editingTransaction.date) : data.date,
       payee_id: data.payee_id || undefined,
       category_id: data.category_id || undefined,
       to_account_id: data.to_account_id || undefined,
@@ -1682,7 +1717,7 @@ const Transactions: React.FC = () => {
                 </TableCell>
                 <TableCell sx={{ width: columnWidths.date, minWidth: columnWidths.date, maxWidth: columnWidths.date }}>
                   <InlineDateEdit
-                    value={transaction.date}
+                    value={toDateOnly(transaction.date)}
                     onSave={(newValue) => handleInlineDateChange(transaction.id, newValue)}
                     isSaving={savingTransactions.has(transaction.id)}
                   />

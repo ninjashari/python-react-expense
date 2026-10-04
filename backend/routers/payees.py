@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
+import re
 import pandas as pd
 import io
 import json
@@ -11,16 +13,20 @@ from models.payees import Payee
 from models.users import User
 from models.transactions import Transaction
 from models.learning import UserTransactionPattern
+from models_mongo.payees import PayeeDocument
 from schemas.payees import PayeeCreate, PayeeUpdate, PayeeResponse
 from utils.auth import get_current_active_user
 from utils.slug import create_slug
 from utils.color_generator import assign_unique_colors_bulk, generate_unique_color
+from services import mongo_sync
+from config import READ_SOURCE
 
 router = APIRouter()
 
 @router.post("/", response_model=PayeeResponse)
 def create_payee(
-    payee: PayeeCreate, 
+    payee: PayeeCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -65,6 +71,7 @@ def create_payee(
         db.add(db_payee)
         db.commit()
         db.refresh(db_payee)
+        background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, db_payee.id)
         return db_payee
     except HTTPException:
         raise
@@ -79,38 +86,76 @@ def create_payee(
         else:
             raise HTTPException(status_code=400, detail=f"Failed to create payee: {error_msg}")
 
-@router.get("/", response_model=List[PayeeResponse])
-def get_payees(
-    search: str = "", 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    query = db.query(Payee).filter(Payee.user_id == current_user.id)
+def _get_payees_pg(db: Session, user_id, search: str) -> List[Payee]:
+    """Blocking Postgres read - must run via run_in_threadpool from the async endpoint."""
+    query = db.query(Payee).filter(Payee.user_id == user_id)
     if search:
         query = query.filter(Payee.name.ilike(f"%{search}%"))
-    
-    # Order by creation date descending (newest first) to ensure new payees appear
     query = query.order_by(Payee.created_at.desc())
-    
     payees = query.all()  # No pagination - return all results
-    
+
     # Auto-assign colors to payees that don't have them
     needs_update = False
     for payee in payees:
         if not payee.color:
             try:
-                payee.color = generate_unique_color(db, payee.name, str(current_user.id), "payees")
+                payee.color = generate_unique_color(db, payee.name, str(user_id), "payees")
                 needs_update = True
             except Exception as e:
                 print(f"Failed to generate color for payee {payee.name}: {e}")
-    
+
     if needs_update:
         db.commit()
-    
+
     return payees
+
+
+async def _backfill_color_mongo(db: Session, background_tasks: BackgroundTasks, doc: PayeeDocument, user_id: str):
+    """Mongo read-path color backfill: color uniqueness is still arbitrated via the
+    Postgres row (generate_unique_color's uniqueness source), written to Postgres
+    first (write source of truth), then mirrored."""
+    def _pg_write():
+        pg_payee = db.query(Payee).filter(Payee.id == uuid.UUID(doc.id)).first()
+        if pg_payee and not pg_payee.color:
+            pg_payee.color = generate_unique_color(db, pg_payee.name, user_id, "payees")
+            db.commit()
+            return pg_payee.color
+        return pg_payee.color if pg_payee else None
+
+    new_color = await run_in_threadpool(_pg_write)
+    if new_color:
+        doc.color = new_color
+        background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, uuid.UUID(doc.id))
+    return doc
+
+
+async def _get_payees_mongo(db: Session, background_tasks: BackgroundTasks, user_id: str, search: str) -> List[PayeeDocument]:
+    query = PayeeDocument.find(PayeeDocument.user_id == user_id)
+    if search:
+        query = query.find({"name": {"$regex": re.escape(search), "$options": "i"}})
+    payees = await query.sort(-PayeeDocument.created_at).to_list()
+
+    for i, payee in enumerate(payees):
+        if not payee.color:
+            payees[i] = await _backfill_color_mongo(db, background_tasks, payee, user_id)
+
+    return payees
+
+
+@router.get("/", response_model=List[PayeeResponse])
+async def get_payees(
+    background_tasks: BackgroundTasks,
+    search: str = "",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    if READ_SOURCE == "mongo":
+        return await _get_payees_mongo(db, background_tasks, str(current_user.id), search)
+    return await run_in_threadpool(_get_payees_pg, db, uuid.UUID(str(current_user.id)), search)
 
 @router.delete("/unused")
 def delete_unused_payees(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -158,7 +203,10 @@ def delete_unused_payees(
             db.delete(payee)
 
         db.commit()
-        
+
+        for deleted in deleted_payees:
+            background_tasks.add_task(mongo_sync.mirror_payee_delete, deleted["id"])
+
         return {
             "message": f"Successfully deleted {len(unused_payees)} unused payee(s)",
             "deleted_count": len(unused_payees),
@@ -215,25 +263,36 @@ def export_payees(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to export payees: {str(e)}")
 
-@router.get("/{payee_id}", response_model=PayeeResponse)
-def get_payee(
-    payee_id: uuid.UUID,
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_active_user)
-):
-    payee = db.query(Payee).filter(
-        Payee.id == payee_id, 
-        Payee.user_id == current_user.id
+def _get_payee_pg(db: Session, payee_id: uuid.UUID, user_id: uuid.UUID):
+    return db.query(Payee).filter(
+        Payee.id == payee_id,
+        Payee.user_id == user_id
     ).first()
+
+
+@router.get("/{payee_id}", response_model=PayeeResponse)
+async def get_payee(
+    payee_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    if READ_SOURCE == "mongo":
+        payee = await PayeeDocument.find_one(
+            PayeeDocument.id == str(payee_id),
+            PayeeDocument.user_id == str(current_user.id),
+        )
+    else:
+        payee = await run_in_threadpool(_get_payee_pg, db, payee_id, uuid.UUID(str(current_user.id)))
     if payee is None:
         raise HTTPException(status_code=404, detail="Payee not found")
     return payee
 
 @router.put("/{payee_id}", response_model=PayeeResponse)
 def update_payee(
-    payee_id: uuid.UUID, 
-    payee_update: PayeeUpdate, 
-    db: Session = Depends(get_db), 
+    payee_id: uuid.UUID,
+    payee_update: PayeeUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     try:
@@ -268,6 +327,7 @@ def update_payee(
         
         db.commit()
         db.refresh(payee)
+        background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, payee.id)
         return payee
     except HTTPException:
         raise
@@ -284,20 +344,22 @@ def update_payee(
 
 @router.delete("/{payee_id}")
 def delete_payee(
-    payee_id: uuid.UUID, 
-    db: Session = Depends(get_db), 
+    payee_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     try:
         payee = db.query(Payee).filter(
-            Payee.id == payee_id, 
+            Payee.id == payee_id,
             Payee.user_id == current_user.id
         ).first()
         if payee is None:
             raise HTTPException(status_code=404, detail="Payee not found")
-        
+
         db.delete(payee)
         db.commit()
+        background_tasks.add_task(mongo_sync.mirror_payee_delete, payee_id)
         return {"message": "Payee deleted successfully"}
     except HTTPException:
         raise
@@ -307,6 +369,7 @@ def delete_payee(
 
 @router.post("/reassign-colors")
 def reassign_payee_colors(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -359,7 +422,10 @@ def reassign_payee_colors(
                 colors_assigned += 1
         
         db.commit()
-        
+
+        for payee in sorted_payees:
+            background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, payee.id)
+
         return {
             "message": f"Color distribution complete - {colors_assigned} unique colors assigned",
             "payees_updated": colors_assigned,
@@ -374,11 +440,13 @@ def reassign_payee_colors(
 
 @router.post("/import")
 def import_payees(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """Import payees from Excel/CSV file"""
+    touched_payees = []
     try:
         # Validate file type
         if not file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
@@ -444,6 +512,7 @@ def import_payees(
                     if color and color != existing_payee.color:
                         existing_payee.color = color
                         updated_count += 1
+                        touched_payees.append(existing_payee)
                     else:
                         skipped_count += 1
                 else:
@@ -472,14 +541,18 @@ def import_payees(
                     )
                     db.add(new_payee)
                     created_count += 1
-                    
+                    touched_payees.append(new_payee)
+
             except Exception as row_error:
                 errors.append(f"Row {index + 2}: {str(row_error)}")
                 continue
-        
+
         # Commit all changes
         db.commit()
-        
+
+        for payee in touched_payees:
+            background_tasks.add_task(mongo_sync.mirror_payee_upsert, db, payee.id)
+
         return {
             "message": f"Import completed successfully",
             "total_rows": len(df),
@@ -489,7 +562,7 @@ def import_payees(
             "error_count": len(errors),
             "errors": errors[:10]  # Limit to first 10 errors
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:

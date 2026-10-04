@@ -1,8 +1,13 @@
 fastapi
 uvicorn
+watchfiles
 sqlalchemy
 psycopg2-binary
 alembic
+motor
+beanie
+pytest
+pytest-asyncio
 pydantic
 email-validator
 python-multipart

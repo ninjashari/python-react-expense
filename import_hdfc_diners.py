@@ -15,7 +15,7 @@ Handles:
 """
 
 import os, sys, argparse, uuid, glob
-from datetime import datetime, date
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 
 import openpyxl
@@ -90,14 +90,21 @@ def load_existing_keys(cur, account_id) -> set:
 
 # ── Date parsing ──────────────────────────────────────────────────────────────
 
-def parse_date(val) -> date:
-    """Parse DD/MM/YYYY HH:MM:SS, DD/MM/YYYY HH:MM, DD/MM/YYYY, YYYY-MM-DD -> date"""
+def parse_date(val) -> datetime:
+    """Parse DD/MM/YYYY HH:MM:SS, DD/MM/YYYY HH:MM, DD/MM/YYYY, YYYY-MM-DD -> datetime.
+
+    Keeps the time-of-day when the source has one; defaults to midnight otherwise.
+    """
     s = str(val).strip()
-    # Try stripping time part first — covers all datetime variants
-    date_part = s.split(" ")[0]
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+    for fmt in (
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+    ):
         try:
-            return datetime.strptime(date_part, fmt).date()
+            return datetime.strptime(s, fmt)
         except ValueError:
             pass
     raise ValueError(f"Cannot parse date: {repr(s)}")

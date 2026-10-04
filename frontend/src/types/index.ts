@@ -135,6 +135,20 @@ export interface InvestmentCategorySummary {
   lifetime_invested: number;
   lifetime_withdrawn: number;
   transaction_count: number;
+  // Running-principal replay results — always lifetime figures, unaffected by date range.
+  running_principal: number;
+  realized_gain_loss: number;
+}
+
+export interface GroupBAccountSummary {
+  account_id: string;
+  account_name: string;
+  account_type: Account['type'];
+  period_invested: number;
+  period_withdrawn: number;
+  lifetime_invested: number;
+  lifetime_withdrawn: number;
+  transaction_count: number;
 }
 
 export interface GroupBTotals {
@@ -143,16 +157,52 @@ export interface GroupBTotals {
   period_net: number;
   lifetime_invested: number;
   lifetime_withdrawn: number;
+  total_running_principal: number;
+  total_realized_gain_loss: number;
 }
 
 export interface GroupBSummary {
   categories: InvestmentCategorySummary[];
+  accounts: GroupBAccountSummary[];
   totals: GroupBTotals;
 }
 
 export interface InvestmentsSummary {
   group_a: GroupASummary;
   group_b: GroupBSummary;
+  lifetime_profit_loss: number;
+  currently_invested: number;
+}
+
+export interface InvestmentTimelineEvent {
+  id: string;
+  date: string;
+  group: 'A' | 'B';
+  direction: 'invested' | 'withdrawn';
+  amount: number;
+  account_id: string;
+  account_name: string;
+  to_account_id?: string;
+  to_account_name?: string;
+  category_id?: string;
+  category_name?: string;
+  category_color?: string;
+  running_principal_after?: number;
+  realized_gain_loss_delta?: number;
+  description?: string;
+}
+
+export interface InvestmentsTimeline {
+  events: InvestmentTimelineEvent[];
+  total_count: number;
+}
+
+export interface InvestmentsFilterParams {
+  start_date?: string;
+  end_date?: string;
+  account_ids?: string;
+  category_ids?: string;
+  direction?: 'invested' | 'withdrawn' | 'both';
 }
 
 export interface CreateTransactionDto {

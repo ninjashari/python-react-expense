@@ -593,11 +593,16 @@ const Categories: React.FC = () => {
                   </Box>
                 </TableCell>
                 <TableCell>
-                  {category.is_investment ? (
-                    <Chip label="Investment" size="small" color="primary" variant="outlined" />
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">—</Typography>
-                  )}
+                  <Checkbox
+                    checked={!!category.is_investment}
+                    onChange={(e) =>
+                      updateMutation.mutate({
+                        id: category.id,
+                        data: { is_investment: e.target.checked },
+                      })
+                    }
+                    size="small"
+                  />
                 </TableCell>
                 <TableCell>{formatDateTime(category.created_at)}</TableCell>
                 <TableCell align="center">

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
@@ -8,11 +8,15 @@ import uuid
 import io
 import pandas as pd
 
+from fastapi.concurrency import run_in_threadpool
 from database import get_db
 from models.reward_points import RewardPointRedemption, RewardPointBonus
 from models.transactions import Transaction
 from models.accounts import Account
 from models.users import User
+from models_mongo.reward_points import RewardPointRedemptionDocument, RewardPointBonusDocument
+from models_mongo.accounts import AccountDocument
+from models_mongo.transactions import TransactionDocument
 from schemas.reward_points import (
     RewardPointRedemptionCreate,
     RewardPointRedemptionUpdate,
@@ -25,16 +29,18 @@ from schemas.reward_points import (
     RewardPointHistoryItem,
 )
 from utils.auth import get_current_active_user
+from services import mongo_sync
+from config import READ_SOURCE
 
 router = APIRouter()
 
 
-@router.get("/summary", response_model=RewardPointsSummaryResponse)
-def get_summary(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Get reward points summary per credit card account (earned vs redeemed)."""
+async def _account_summary_map_mongo(user_id: str) -> dict:
+    accounts = await AccountDocument.find(AccountDocument.user_id == user_id).to_list()
+    return {a.id: {"id": a.id, "name": a.name, "type": a.type} for a in accounts}
+
+
+def _get_summary_pg(db: Session, user_id) -> RewardPointsSummaryResponse:
     # Aggregate points earned from transactions grouped by credit account
     earned_rows = (
         db.query(
@@ -43,7 +49,7 @@ def get_summary(
         )
         .join(Account, Account.id == Transaction.account_id)
         .filter(
-            Transaction.user_id == current_user.id,
+            Transaction.user_id == user_id,
             Account.type == 'credit',
             Transaction.reward_points.isnot(None)
         )
@@ -58,7 +64,7 @@ def get_summary(
             RewardPointBonus.account_id,
             func.coalesce(func.sum(RewardPointBonus.points), 0).label("total_bonus")
         )
-        .filter(RewardPointBonus.user_id == current_user.id)
+        .filter(RewardPointBonus.user_id == user_id)
         .group_by(RewardPointBonus.account_id)
         .all()
     )
@@ -70,7 +76,7 @@ def get_summary(
             RewardPointRedemption.account_id,
             func.coalesce(func.sum(RewardPointRedemption.points_used), 0).label("total_redeemed")
         )
-        .filter(RewardPointRedemption.user_id == current_user.id)
+        .filter(RewardPointRedemption.user_id == user_id)
         .group_by(RewardPointRedemption.account_id)
         .all()
     )
@@ -79,7 +85,7 @@ def get_summary(
     # All credit accounts for this user
     credit_accounts = (
         db.query(Account)
-        .filter(Account.user_id == current_user.id, Account.type == 'credit')
+        .filter(Account.user_id == user_id, Account.type == 'credit')
         .order_by(Account.name)
         .all()
     )
@@ -100,6 +106,61 @@ def get_summary(
         ))
 
     return RewardPointsSummaryResponse(items=items)
+
+
+async def _get_summary_mongo(user_id: str) -> RewardPointsSummaryResponse:
+    """Aggregation done in Python rather than a Mongo pipeline - reward points
+    datasets are small per user, same fetch-then-process approach used elsewhere
+    in this app for analytics (see investment_service.py, transactions analytics)."""
+    credit_accounts = sorted(
+        [a for a in await AccountDocument.find(AccountDocument.user_id == user_id).to_list() if a.type == 'credit'],
+        key=lambda a: a.name,
+    )
+    credit_ids = {a.id for a in credit_accounts}
+
+    earned_map: dict = {}
+    txns = await TransactionDocument.find(
+        TransactionDocument.user_id == user_id,
+        TransactionDocument.reward_points != None,  # noqa: E711 - Beanie query operator, not a Python None check
+    ).to_list()
+    for t in txns:
+        if t.account_id in credit_ids and t.reward_points:
+            earned_map[t.account_id] = earned_map.get(t.account_id, 0.0) + float(t.reward_points)
+
+    bonus_map: dict = {}
+    for b in await RewardPointBonusDocument.find(RewardPointBonusDocument.user_id == user_id).to_list():
+        bonus_map[b.account_id] = bonus_map.get(b.account_id, 0.0) + float(b.points)
+
+    redeemed_map: dict = {}
+    for r in await RewardPointRedemptionDocument.find(RewardPointRedemptionDocument.user_id == user_id).to_list():
+        redeemed_map[r.account_id] = redeemed_map.get(r.account_id, 0.0) + float(r.points_used)
+
+    items = []
+    for acc in credit_accounts:
+        earned = earned_map.get(acc.id, 0)
+        bonus = bonus_map.get(acc.id, 0)
+        redeemed = redeemed_map.get(acc.id, 0)
+        items.append(RewardPointsSummaryItem(
+            account_id=acc.id,
+            account_name=acc.name,
+            total_earned=earned,
+            total_bonus=bonus,
+            total_redeemed=redeemed,
+            net_available=earned + bonus - redeemed,
+        ))
+
+    return RewardPointsSummaryResponse(items=items)
+
+
+@router.get("/summary", response_model=RewardPointsSummaryResponse)
+async def get_summary(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """Get reward points summary per credit card account (earned vs redeemed)."""
+    if READ_SOURCE == "mongo":
+        return await _get_summary_mongo(str(current_user.id))
+    return await run_in_threadpool(_get_summary_pg, db, uuid.UUID(str(current_user.id)))
 
 
 @router.get("/export")
@@ -210,6 +271,7 @@ def _parse_date(value):
 
 @router.post("/import")
 def import_reward_points(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -280,6 +342,8 @@ def import_reward_points(
         created_bonuses = 0
         skipped = 0
         errors: list[str] = []
+        imported_redemptions: list[RewardPointRedemption] = []
+        imported_bonuses: list[RewardPointBonus] = []
 
         # ── Redemptions ────────────────────────────────────────────────
         if 'redemptions' in sheets:
@@ -315,14 +379,16 @@ def import_reward_points(
                         skipped += 1
                         continue
 
-                    db.add(RewardPointRedemption(
+                    new_redemption = RewardPointRedemption(
                         user_id=current_user.id,
                         account_id=account.id,
                         date=rec_date,
                         points_used=points,
                         description=description,
-                    ))
+                    )
+                    db.add(new_redemption)
                     created_redemptions += 1
+                    imported_redemptions.append(new_redemption)
                 except Exception as row_error:
                     errors.append(f"Redemptions row {index + 2}: {str(row_error)}")
                     continue
@@ -363,20 +429,27 @@ def import_reward_points(
                         skipped += 1
                         continue
 
-                    db.add(RewardPointBonus(
+                    new_bonus = RewardPointBonus(
                         user_id=current_user.id,
                         account_id=account.id,
                         date=rec_date,
                         points=points,
                         description=description,
                         source_file=source_file,
-                    ))
+                    )
+                    db.add(new_bonus)
                     created_bonuses += 1
+                    imported_bonuses.append(new_bonus)
                 except Exception as row_error:
                     errors.append(f"Bonuses row {index + 2}: {str(row_error)}")
                     continue
 
         db.commit()
+
+        for redemption in imported_redemptions:
+            background_tasks.add_task(mongo_sync.mirror_reward_redemption_upsert, db, redemption.id)
+        for bonus in imported_bonuses:
+            background_tasks.add_task(mongo_sync.mirror_reward_bonus_upsert, db, bonus.id)
 
         return {
             "message": "Import completed successfully",
@@ -394,24 +467,47 @@ def import_reward_points(
         raise HTTPException(status_code=500, detail=f"Failed to import reward points: {str(e)}")
 
 
-@router.get("/", response_model=List[RewardPointRedemptionResponse])
-def get_redemptions(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """List all reward point redemptions for the current user."""
+def _get_redemptions_pg(db: Session, user_id):
     return (
         db.query(RewardPointRedemption)
         .options(joinedload(RewardPointRedemption.account))
-        .filter(RewardPointRedemption.user_id == current_user.id)
+        .filter(RewardPointRedemption.user_id == user_id)
         .order_by(RewardPointRedemption.date.desc())
         .all()
     )
 
 
+async def _get_redemptions_mongo(user_id: str) -> List[dict]:
+    account_map = await _account_summary_map_mongo(user_id)
+    redemptions = await RewardPointRedemptionDocument.find(
+        RewardPointRedemptionDocument.user_id == user_id
+    ).sort(-RewardPointRedemptionDocument.date).to_list()
+    return [
+        {
+            "id": r.id, "user_id": r.user_id, "account_id": r.account_id,
+            "date": r.date, "points_used": r.points_used, "description": r.description,
+            "created_at": r.created_at, "updated_at": r.updated_at,
+            "account": account_map.get(r.account_id),
+        }
+        for r in redemptions
+    ]
+
+
+@router.get("/", response_model=List[RewardPointRedemptionResponse])
+async def get_redemptions(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """List all reward point redemptions for the current user."""
+    if READ_SOURCE == "mongo":
+        return await _get_redemptions_mongo(str(current_user.id))
+    return await run_in_threadpool(_get_redemptions_pg, db, uuid.UUID(str(current_user.id)))
+
+
 @router.post("/", response_model=RewardPointRedemptionResponse, status_code=status.HTTP_201_CREATED)
 def create_redemption(
     redemption: RewardPointRedemptionCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -435,6 +531,7 @@ def create_redemption(
     db.add(db_obj)
     db.commit()
     db.refresh(db_obj)
+    background_tasks.add_task(mongo_sync.mirror_reward_redemption_upsert, db, db_obj.id)
     # Reload with relationship
     db.refresh(db_obj)
     db_obj_with_account = (
@@ -450,6 +547,7 @@ def create_redemption(
 def update_redemption(
     redemption_id: uuid.UUID,
     updates: RewardPointRedemptionUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -464,6 +562,7 @@ def update_redemption(
     for field, value in updates.model_dump(exclude_unset=True).items():
         setattr(db_obj, field, value)
     db.commit()
+    background_tasks.add_task(mongo_sync.mirror_reward_redemption_upsert, db, db_obj.id)
 
     return (
         db.query(RewardPointRedemption)
@@ -476,6 +575,7 @@ def update_redemption(
 @router.delete("/{redemption_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_redemption(
     redemption_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -488,21 +588,85 @@ def delete_redemption(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Redemption not found")
     db.delete(db_obj)
     db.commit()
+    background_tasks.add_task(mongo_sync.mirror_reward_redemption_delete, redemption_id)
 
 
-@router.get("/history", response_model=List[RewardPointHistoryItem])
-def get_reward_points_history(
-    account_id: Optional[uuid.UUID] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    Unified chronological history of reward points earned, deducted (refunds),
-    and redeemed. Each row includes a per-account running balance after the event.
-    """
+async def _get_reward_points_history_mongo(user_id: str, account_id: Optional[uuid.UUID]) -> List[RewardPointHistoryItem]:
+    account_id_str = str(account_id) if account_id else None
+    all_credit_accounts = [
+        a for a in await AccountDocument.find(AccountDocument.user_id == user_id).to_list()
+        if a.type == 'credit'
+    ]
+    full_account_map = {a.id: a.name for a in all_credit_accounts}
+    credit_ids = set(full_account_map) if not account_id_str else (
+        {account_id_str} if account_id_str in full_account_map else set()
+    )
+
+    raw: list[dict] = []
+
+    if credit_ids:
+        txns = await TransactionDocument.find(
+            TransactionDocument.user_id == user_id,
+            TransactionDocument.reward_points != None,  # noqa: E711 - Beanie query operator
+        ).to_list()
+        for tx in txns:
+            if tx.account_id not in credit_ids or not tx.reward_points:
+                continue
+            pts = float(tx.reward_points)
+            raw.append({
+                'date': tx.date.date() if hasattr(tx.date, 'date') else tx.date,
+                'type': 'earned' if pts > 0 else 'deducted',
+                'points': abs(pts),
+                'description': tx.description,
+                'account_id': tx.account_id,
+                'account_name': full_account_map.get(tx.account_id, ''),
+                'source_id': tx.id,
+                '_delta': pts,
+            })
+
+    bonuses = await RewardPointBonusDocument.find(RewardPointBonusDocument.user_id == user_id).to_list()
+    for b in bonuses:
+        if account_id_str and b.account_id != account_id_str:
+            continue
+        pts = float(b.points)
+        raw.append({
+            'date': b.date, 'type': 'bonus', 'points': pts, 'description': b.description,
+            'account_id': b.account_id, 'account_name': full_account_map.get(b.account_id, ''),
+            'source_id': b.id, '_delta': pts,
+        })
+
+    redemptions = await RewardPointRedemptionDocument.find(RewardPointRedemptionDocument.user_id == user_id).to_list()
+    for r in redemptions:
+        if account_id_str and r.account_id != account_id_str:
+            continue
+        raw.append({
+            'date': r.date, 'type': 'redeemed', 'points': float(r.points_used), 'description': r.description,
+            'account_id': r.account_id, 'account_name': full_account_map.get(r.account_id, ''),
+            'source_id': r.id, '_delta': -float(r.points_used),
+        })
+
+    raw.sort(key=lambda x: (x['date'], x['source_id']))
+    account_balance: dict = {}
+    for item in raw:
+        acc = item['account_id']
+        account_balance[acc] = account_balance.get(acc, 0.0) + item['_delta']
+        item['balance'] = round(account_balance[acc], 2)
+
+    raw.reverse()
+    return [
+        RewardPointHistoryItem(
+            date=item['date'], type=item['type'], points=item['points'],
+            description=item.get('description'), account_id=item['account_id'],
+            account_name=item['account_name'], source_id=item['source_id'], balance=item['balance'],
+        )
+        for item in raw
+    ]
+
+
+def _get_reward_points_history_pg(db: Session, user_id, account_id):
     # Credit accounts for this user
     credit_accounts_q = db.query(Account).filter(
-        Account.user_id == current_user.id,
+        Account.user_id == user_id,
         Account.type == 'credit'
     )
     if account_id:
@@ -519,7 +683,7 @@ def get_reward_points_history(
         txns = (
             db.query(Transaction)
             .filter(
-                Transaction.user_id == current_user.id,
+                Transaction.user_id == user_id,
                 Transaction.reward_points.isnot(None),
                 Transaction.reward_points != 0,
                 Transaction.account_id.in_(credit_ids)
@@ -529,7 +693,10 @@ def get_reward_points_history(
         for tx in txns:
             pts = float(tx.reward_points)
             raw.append({
-                'date': tx.date,
+                # Transaction.date is a datetime, RewardPointBonus/Redemption.date are
+                # plain dates - normalize so the later raw.sort() doesn't compare across
+                # mixed types.
+                'date': tx.date.date() if isinstance(tx.date, datetime) else tx.date,
                 'type': 'earned' if pts > 0 else 'deducted',
                 'points': abs(pts),
                 'description': tx.description,
@@ -542,14 +709,14 @@ def get_reward_points_history(
     # Build a full account name map (needed for redemptions/bonuses that may span accounts
     # not in the optional account_id filter)
     all_credit_accounts = db.query(Account).filter(
-        Account.user_id == current_user.id,
+        Account.user_id == user_id,
         Account.type == 'credit'
     ).all()
     full_account_map = {str(acc.id): acc.name for acc in all_credit_accounts}
 
     # Bonus points (always increase balance)
     bonuses_q = db.query(RewardPointBonus).filter(
-        RewardPointBonus.user_id == current_user.id
+        RewardPointBonus.user_id == user_id
     )
     if account_id:
         bonuses_q = bonuses_q.filter(RewardPointBonus.account_id == account_id)
@@ -568,7 +735,7 @@ def get_reward_points_history(
 
     # Redemptions (always reduce balance)
     redemptions_q = db.query(RewardPointRedemption).filter(
-        RewardPointRedemption.user_id == current_user.id
+        RewardPointRedemption.user_id == user_id
     )
     if account_id:
         redemptions_q = redemptions_q.filter(RewardPointRedemption.account_id == account_id)
@@ -586,7 +753,7 @@ def get_reward_points_history(
         })
 
     # Sort oldest → newest to compute per-account running balance
-    raw.sort(key=lambda x: x['date'])
+    raw.sort(key=lambda x: (x['date'], x['source_id']))
     account_balance: dict[str, float] = {}
     for item in raw:
         acc = item['account_id']
@@ -610,26 +777,67 @@ def get_reward_points_history(
     ]
 
 
+@router.get("/history", response_model=List[RewardPointHistoryItem])
+async def get_reward_points_history(
+    account_id: Optional[uuid.UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """
+    Unified chronological history of reward points earned, deducted (refunds),
+    and redeemed. Each row includes a per-account running balance after the event.
+    """
+    if READ_SOURCE == "mongo":
+        return await _get_reward_points_history_mongo(str(current_user.id), account_id)
+    return await run_in_threadpool(
+        _get_reward_points_history_pg, db, uuid.UUID(str(current_user.id)), account_id
+    )
+
+
 # ── Bonus Points CRUD ─────────────────────────────────────────────────────────
 
-@router.get("/bonuses", response_model=List[RewardPointBonusResponse])
-def get_bonuses(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """List all bonus/milestone reward point entries for the current user."""
+def _get_bonuses_pg(db: Session, user_id):
     return (
         db.query(RewardPointBonus)
         .options(joinedload(RewardPointBonus.account))
-        .filter(RewardPointBonus.user_id == current_user.id)
+        .filter(RewardPointBonus.user_id == user_id)
         .order_by(RewardPointBonus.date.desc())
         .all()
     )
 
 
+async def _get_bonuses_mongo(user_id: str) -> List[dict]:
+    account_map = await _account_summary_map_mongo(user_id)
+    bonuses = await RewardPointBonusDocument.find(
+        RewardPointBonusDocument.user_id == user_id
+    ).sort(-RewardPointBonusDocument.date).to_list()
+    return [
+        {
+            "id": b.id, "user_id": b.user_id, "account_id": b.account_id,
+            "date": b.date, "points": b.points, "description": b.description,
+            "source_file": b.source_file,
+            "created_at": b.created_at, "updated_at": b.updated_at,
+            "account": account_map.get(b.account_id),
+        }
+        for b in bonuses
+    ]
+
+
+@router.get("/bonuses", response_model=List[RewardPointBonusResponse])
+async def get_bonuses(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """List all bonus/milestone reward point entries for the current user."""
+    if READ_SOURCE == "mongo":
+        return await _get_bonuses_mongo(str(current_user.id))
+    return await run_in_threadpool(_get_bonuses_pg, db, uuid.UUID(str(current_user.id)))
+
+
 @router.post("/bonuses", response_model=RewardPointBonusResponse, status_code=status.HTTP_201_CREATED)
 def create_bonus(
     bonus: RewardPointBonusCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -646,6 +854,7 @@ def create_bonus(
     db.add(db_obj)
     db.commit()
     db.refresh(db_obj)
+    background_tasks.add_task(mongo_sync.mirror_reward_bonus_upsert, db, db_obj.id)
     return (
         db.query(RewardPointBonus)
         .options(joinedload(RewardPointBonus.account))
@@ -658,6 +867,7 @@ def create_bonus(
 def update_bonus(
     bonus_id: uuid.UUID,
     updates: RewardPointBonusUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -672,6 +882,7 @@ def update_bonus(
     for field, value in updates.model_dump(exclude_unset=True).items():
         setattr(db_obj, field, value)
     db.commit()
+    background_tasks.add_task(mongo_sync.mirror_reward_bonus_upsert, db, db_obj.id)
 
     return (
         db.query(RewardPointBonus)
@@ -684,6 +895,7 @@ def update_bonus(
 @router.delete("/bonuses/{bonus_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_bonus(
     bonus_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -696,3 +908,4 @@ def delete_bonus(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bonus entry not found")
     db.delete(db_obj)
     db.commit()
+    background_tasks.add_task(mongo_sync.mirror_reward_bonus_delete, bonus_id)

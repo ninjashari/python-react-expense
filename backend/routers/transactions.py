@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func
@@ -6,7 +7,7 @@ from typing import List, Optional
 import uuid
 import math
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import pandas as pd
 import io
 from database import get_db
@@ -14,47 +15,169 @@ from models.transactions import Transaction
 from models.accounts import Account
 from models.users import User
 from models.learning import UserSelectionHistory
+from models_mongo.transactions import TransactionDocument
+from models_mongo.accounts import AccountDocument
+from models_mongo.payees import PayeeDocument
+from models_mongo.categories import CategoryDocument
 from schemas.transactions import (
-    TransactionCreate, 
-    TransactionUpdate, 
-    TransactionResponse, 
+    TransactionCreate,
+    TransactionUpdate,
+    TransactionResponse,
     PaginatedTransactionsResponse,
     TransactionSummary,
     TransactionBulkUpdate
 )
 from utils.auth import get_current_active_user
 from services.learning_service import TransactionLearningService
+from services.balance_logic import compute_balance_after
+from services import mongo_sync
+from config import READ_SOURCE
 
 router = APIRouter()
+
+
+def _build_mongo_transaction_filter(
+    user_id: str,
+    account_ids: Optional[str] = None,
+    exclude_accounts: bool = False,
+    category_ids: Optional[str] = None,
+    exclude_category_ids: Optional[str] = None,
+    payee_ids: Optional[str] = None,
+    exclude_payee_ids: Optional[str] = None,
+    transaction_type: Optional[str] = None,
+    exclude_types: bool = False,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    description: Optional[str] = None,
+) -> dict:
+    """Mirrors the Postgres filter logic in get_transactions/get_transaction_summary,
+    as a raw pymongo filter dict (Beanie's typed query builder doesn't compose the
+    OR/NOT/none-handling combinations here as cleanly as plain Mongo query syntax)."""
+    conditions: List[dict] = [{"user_id": user_id}]
+
+    if account_ids:
+        account_id_list = [id.strip() for id in account_ids.split(',') if id.strip()]
+        if exclude_accounts:
+            conditions.append({"account_id": {"$nin": account_id_list}})
+            conditions.append({"to_account_id": {"$nin": account_id_list}})
+        else:
+            conditions.append({"$or": [
+                {"account_id": {"$in": account_id_list}},
+                {"to_account_id": {"$in": account_id_list}},
+            ]})
+
+    if category_ids:
+        category_id_parts = [id.strip() for id in category_ids.split(',') if id.strip()]
+        if 'none' in category_id_parts:
+            other_ids = [id for id in category_id_parts if id != 'none']
+            if other_ids:
+                conditions.append({"$or": [
+                    {"category_id": None},
+                    {"category_id": {"$in": other_ids}},
+                ]})
+            else:
+                conditions.append({"category_id": None})
+        else:
+            conditions.append({"category_id": {"$in": category_id_parts}})
+
+    if exclude_category_ids:
+        exclude_category_id_parts = [id.strip() for id in exclude_category_ids.split(',') if id.strip()]
+        if 'none' in exclude_category_id_parts:
+            other_ids = [id for id in exclude_category_id_parts if id != 'none']
+            if other_ids:
+                conditions.append({"category_id": {"$ne": None, "$nin": other_ids}})
+            else:
+                conditions.append({"category_id": {"$ne": None}})
+        else:
+            conditions.append({"category_id": {"$nin": exclude_category_id_parts}})
+
+    if payee_ids:
+        payee_id_parts = [id.strip() for id in payee_ids.split(',') if id.strip()]
+        if 'none' in payee_id_parts:
+            other_ids = [id for id in payee_id_parts if id != 'none']
+            if other_ids:
+                conditions.append({"$or": [
+                    {"payee_id": None},
+                    {"payee_id": {"$in": other_ids}},
+                ]})
+            else:
+                conditions.append({"payee_id": None})
+        else:
+            conditions.append({"payee_id": {"$in": payee_id_parts}})
+
+    if exclude_payee_ids:
+        exclude_payee_id_parts = [id.strip() for id in exclude_payee_ids.split(',') if id.strip()]
+        if 'none' in exclude_payee_id_parts:
+            other_ids = [id for id in exclude_payee_id_parts if id != 'none']
+            if other_ids:
+                conditions.append({"payee_id": {"$ne": None, "$nin": other_ids}})
+            else:
+                conditions.append({"payee_id": {"$ne": None}})
+        else:
+            conditions.append({"payee_id": {"$nin": exclude_payee_id_parts}})
+
+    if transaction_type:
+        transaction_type_parts = [t.strip() for t in transaction_type.split(',') if t.strip()]
+        if len(transaction_type_parts) == 1:
+            conditions.append({"type": {"$ne": transaction_type_parts[0]}} if exclude_types else {"type": transaction_type_parts[0]})
+        else:
+            conditions.append({"type": {"$nin": transaction_type_parts}} if exclude_types else {"type": {"$in": transaction_type_parts}})
+
+    if start_date:
+        conditions.append({"date": {"$gte": datetime.combine(start_date, datetime.min.time())}})
+    if end_date:
+        conditions.append({"date": {"$lt": datetime.combine(end_date, datetime.min.time()) + timedelta(days=1)}})
+
+    if description:
+        import re as _re
+        conditions.append({"description": {"$regex": _re.escape(description), "$options": "i"}})
+
+    return {"$and": conditions} if len(conditions) > 1 else conditions[0]
+
+
+async def _lookup_maps_mongo(user_id: str):
+    """Account/payee/category lookup maps for building full TransactionResponse
+    nested objects - the embedded refs on TransactionDocument are trimmed display
+    snapshots (no balance/slug), not a full AccountSummary/PayeeSummary/CategorySummary."""
+    accounts = await AccountDocument.find(AccountDocument.user_id == user_id).to_list()
+    payees = await PayeeDocument.find(PayeeDocument.user_id == user_id).to_list()
+    categories = await CategoryDocument.find(CategoryDocument.user_id == user_id).to_list()
+    return (
+        {a.id: {"id": a.id, "name": a.name, "type": a.type, "balance": a.balance} for a in accounts},
+        {p.id: {"id": p.id, "name": p.name, "slug": p.slug} for p in payees},
+        {c.id: {"id": c.id, "name": c.name, "slug": c.slug, "color": c.color} for c in categories},
+    )
+
+
+def _transaction_doc_to_dict(doc: TransactionDocument, account_map: dict, payee_map: dict, category_map: dict) -> dict:
+    return {
+        "id": doc.id, "user_id": doc.user_id, "account_id": doc.account_id,
+        "to_account_id": doc.to_account_id, "category_id": doc.category_id, "payee_id": doc.payee_id,
+        "amount": doc.amount, "type": doc.type, "description": doc.description, "notes": doc.notes,
+        "date": doc.date, "balance_after_transaction": doc.balance_after_transaction,
+        "to_account_balance_after": doc.to_account_balance_after, "reward_points": doc.reward_points,
+        "created_at": doc.created_at, "updated_at": doc.updated_at,
+        "account": account_map.get(doc.account_id),
+        "to_account": account_map.get(doc.to_account_id) if doc.to_account_id else None,
+        "payee": payee_map.get(doc.payee_id) if doc.payee_id else None,
+        "category": category_map.get(doc.category_id) if doc.category_id else None,
+    }
 
 def update_account_balance(db: Session, account_id: uuid.UUID, amount: float, transaction_type: str, is_reversal: bool = False):
     """Update account balance based on transaction type and account type"""
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
-    # Convert amount to Decimal to match the database field type
-    amount_decimal = Decimal(str(amount))
-    multiplier = -1 if is_reversal else 1
-    
-    if account.type == 'credit':
-        # For credit cards: balance represents amount owed
-        # Income (payments) reduces the balance, Expense (charges) increases the balance
-        if transaction_type == "income":  # Payment to credit card
-            account.balance -= amount_decimal * multiplier  # Reduces debt
-        elif transaction_type == "expense":  # Charge on credit card
-            account.balance += amount_decimal * multiplier  # Increases debt
+
+    if is_reversal:
+        # A reversal walks the balance back by the opposite transaction type
+        # (income <-> expense); transfers are reversed via their "expense"/"income"
+        # sub-calls, which already have their own transaction_type, not a separate
+        # reversal type, so flip the sign by negating the amount instead.
+        account.balance = compute_balance_after(account.balance, -amount, account.type, transaction_type)
     else:
-        # For regular accounts: balance represents money available
-        if transaction_type == "income":
-            account.balance += amount_decimal * multiplier
-        elif transaction_type in ("expense", "transfer"):
-            # Transfers are always called here for the SOURCE account (the account
-            # whose statement is being imported), so they reduce the balance just
-            # like an expense.  The destination account is handled separately when
-            # its own statement is imported.
-            account.balance -= amount_decimal * multiplier
-    
+        account.balance = compute_balance_after(account.balance, amount, account.type, transaction_type)
+
     db.commit()
     return account
 
@@ -63,29 +186,8 @@ def calculate_balance_after_transaction(db: Session, account_id: uuid.UUID, amou
     account = db.query(Account).filter(Account.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
-    # Convert amount to Decimal to match the database field type
-    amount_decimal = Decimal(str(amount))
-    current_balance = account.balance
-    
-    if account.type == 'credit':
-        # For credit cards: balance represents amount owed
-        if transaction_type == "income":  # Payment to credit card
-            new_balance = current_balance - amount_decimal  # Reduces debt
-        elif transaction_type == "expense":  # Charge on credit card
-            new_balance = current_balance + amount_decimal  # Increases debt
-        else:
-            new_balance = current_balance
-    else:
-        # For regular accounts: balance represents money available
-        if transaction_type == "income":
-            new_balance = current_balance + amount_decimal
-        elif transaction_type == "expense":
-            new_balance = current_balance - amount_decimal
-        else:
-            new_balance = current_balance
-    
-    return new_balance
+
+    return compute_balance_after(account.balance, amount, account.type, transaction_type)
 
 def calculate_balance_after_transaction_for_account(account_id: str, account_type: str, 
                                                   current_balance: Decimal, 
@@ -152,7 +254,7 @@ def recalculate_subsequent_balances(db: Session, account_ids: list, modified_tra
         subsequent_transactions = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
             Transaction.date >= modified_transaction_date
-        ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).all()
+        ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).all()
         
         if not subsequent_transactions:
             continue
@@ -166,7 +268,7 @@ def recalculate_subsequent_balances(db: Session, account_ids: list, modified_tra
         previous_transaction = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
             Transaction.date < modified_transaction_date
-        ).order_by(Transaction.date.desc(), Transaction.created_at.desc()).first()
+        ).order_by(Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc()).first()
         
         if previous_transaction:
             # Use the balance from the previous transaction
@@ -213,7 +315,7 @@ def get_account_starting_balance_for_recalc(db: Session, account_id: str) -> Dec
     initial_transaction = db.query(Transaction).filter(
         Transaction.account_id == account_id,
         Transaction.description.ilike('%initial%')
-    ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).first()
+    ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).first()
     
     if initial_transaction:
         # If there's an initial funding transaction, start from 0
@@ -225,7 +327,7 @@ def get_account_starting_balance_for_recalc(db: Session, account_id: str) -> Dec
         # For safety, let's calculate it by examining the pattern of transactions
         earliest_transaction = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id)
-        ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).first()
+        ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).first()
         
         if earliest_transaction and earliest_transaction.type == 'income' and 'initial' in (earliest_transaction.description or '').lower():
             # If the earliest transaction is an income with "initial" in description, start from 0
@@ -252,7 +354,7 @@ def get_account_balance_at_date(db: Session, account_id: str, target_date: str) 
     transactions_before = db.query(Transaction).filter(
         (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
         Transaction.date < target_date
-    ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).all()
+    ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).all()
     
     running_balance = starting_balance
     
@@ -369,29 +471,22 @@ async def create_transaction(
             account_type=account.type,
             selection_method='form_create'
         )
-    
+
+    background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, db_transaction.id)
+    background_tasks.add_task(mongo_sync.mirror_account_upsert, db, transaction.account_id)
+    if transaction.to_account_id:
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, transaction.to_account_id)
+
     return db_transaction
 
-@router.get("/", response_model=PaginatedTransactionsResponse)
-def get_transactions(
-    page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(50, ge=1, le=1000, description="Page size"),
-    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
-    category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
-    exclude_category_ids: Optional[str] = Query(None, description="Comma-separated category IDs to exclude"),
-    payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs"),
-    exclude_payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs to exclude"),
-    transaction_type: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    description: Optional[str] = Query(None, description="Search in description"),
-    sort_by: Optional[str] = Query(None, description="Field to sort by"),
-    sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
-    exclude_accounts: Optional[bool] = Query(False, description="Exclude selected accounts"),
-    exclude_types: Optional[bool] = Query(False, description="Exclude selected transaction types"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
+def _get_transactions_pg(
+    db: Session,
+    user_id: uuid.UUID,
+    page: int, size: int,
+    account_ids, category_ids, exclude_category_ids, payee_ids, exclude_payee_ids,
+    transaction_type, start_date, end_date, description, sort_by, sort_order,
+    exclude_accounts, exclude_types,
+) -> PaginatedTransactionsResponse:
     # Build base query — selectinload avoids cartesian-product joins on large result sets
     query = db.query(Transaction).options(
         selectinload(Transaction.account),
@@ -404,10 +499,18 @@ def get_transactions(
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
         if exclude_accounts:
-            # Exclude transactions where the account is either source OR destination
+            # Exclude transactions where the account is either source OR destination.
+            # NOT (account_id IN (...) OR to_account_id IN (...)) is a NULL trap in SQL:
+            # to_account_id IS NULL for every non-transfer transaction, so
+            # "to_account_id IN (...)" evaluates to NULL (not false) for them, making
+            # the whole NOT(...) expression NULL - falsy in WHERE - which silently
+            # dropped nearly all non-transfer transactions from "exclude this account"
+            # results regardless of whether they touched the account at all. Expanding
+            # via De Morgan with an explicit IS NULL guard on the nullable column avoids
+            # the three-valued-logic trap.
             query = query.filter(
-                ~((Transaction.account_id.in_(account_id_list)) | 
-                  (Transaction.to_account_id.in_(account_id_list)))
+                ~Transaction.account_id.in_(account_id_list),
+                (Transaction.to_account_id.is_(None)) | (~Transaction.to_account_id.in_(account_id_list)),
             )
         else:
             # Include transactions where the account is either source OR destination (for transfers)
@@ -449,9 +552,16 @@ def get_transactions(
                 # Exclude transactions with no category
                 query = query.filter(Transaction.category_id.isnot(None))
         else:
-            # Normal case: exclude specific category IDs
+            # Normal case: exclude specific category IDs. An uncategorized transaction
+            # (category_id IS NULL) isn't one of the excluded categories and should stay
+            # visible, but "NOT (category_id IN (...))" is NULL (falsy) for a NULL
+            # column in SQL - the same three-valued-logic trap fixed for exclude_accounts
+            # above - so guard it explicitly instead of silently dropping every
+            # uncategorized transaction whenever this filter is used.
             exclude_category_id_list = [uuid.UUID(id) for id in exclude_category_id_parts]
-            query = query.filter(~Transaction.category_id.in_(exclude_category_id_list))
+            query = query.filter(
+                (Transaction.category_id.is_(None)) | (~Transaction.category_id.in_(exclude_category_id_list))
+            )
     
     if payee_ids:
         payee_id_parts = [id.strip() for id in payee_ids.split(',') if id.strip()]
@@ -486,9 +596,13 @@ def get_transactions(
                 # Exclude transactions with no payee
                 query = query.filter(Transaction.payee_id.isnot(None))
         else:
-            # Normal case: exclude specific payee IDs
+            # Normal case: exclude specific payee IDs - same NULL-trap fix as the
+            # category exclude branch above (an unassigned-payee transaction should
+            # stay visible, not be silently dropped by SQL's NULL IN (...) semantics).
             exclude_payee_id_list = [uuid.UUID(id) for id in exclude_payee_id_parts]
-            query = query.filter(~Transaction.payee_id.in_(exclude_payee_id_list))
+            query = query.filter(
+                (Transaction.payee_id.is_(None)) | (~Transaction.payee_id.in_(exclude_payee_id_list))
+            )
     
     if transaction_type:
         transaction_type_parts = [type.strip() for type in transaction_type.split(',') if type.strip()]
@@ -507,15 +621,15 @@ def get_transactions(
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
-        query = query.filter(Transaction.date <= end_date)
+        query = query.filter(func.date(Transaction.date) <= end_date)
     
     # Filter by description (case-insensitive search)
     if description:
         query = query.filter(Transaction.description.ilike(f"%{description}%"))
     
     # Filter by current user
-    query = query.filter(Transaction.user_id == current_user.id)
-    
+    query = query.filter(Transaction.user_id == user_id)
+
     # Get total count
     total = query.count()
     
@@ -547,14 +661,30 @@ def get_transactions(
         else:
             sort_column = Transaction.date
         
+        # Every sort needs a deterministic tiebreak: ties on the primary sort column
+        # (same date, same category name, etc.) would otherwise come back in
+        # whatever arbitrary order the DB's query plan happens to produce - not
+        # just inconsistent across requests, but inconsistent between the Postgres
+        # and Mongo read paths too (verified empirically: same filter/sort, same
+        # total count, different row order). date+created_at+id is already the
+        # deterministic chain used for balance recalculation, so reuse it as the
+        # universal tiebreak here as well.
+        is_date_sort = sort_column is Transaction.date
+
         # Apply sort order
         if sort_order == 'asc':
             query = query.order_by(sort_column.asc())
+            if not is_date_sort:
+                query = query.order_by(Transaction.date.asc())
+            query = query.order_by(Transaction.created_at.asc(), Transaction.id.asc())
         else:
             query = query.order_by(sort_column.desc())
+            if not is_date_sort:
+                query = query.order_by(Transaction.date.desc())
+            query = query.order_by(Transaction.created_at.desc(), Transaction.id.desc())
     else:
-        # Default sort by date descending
-        query = query.order_by(Transaction.date.desc())
+        # Default sort by date, created_at, id descending
+        query = query.order_by(Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc())
     
     # Get paginated results
     transactions = query.offset(skip).limit(size).all()
@@ -567,8 +697,78 @@ def get_transactions(
         pages=pages
     )
 
-@router.get("/summary", response_model=TransactionSummary)
-def get_transaction_summary(
+
+async def _get_transactions_mongo(
+    user_id: str,
+    page: int, size: int,
+    account_ids, category_ids, exclude_category_ids, payee_ids, exclude_payee_ids,
+    transaction_type, start_date, end_date, description, sort_by, sort_order,
+    exclude_accounts, exclude_types,
+) -> PaginatedTransactionsResponse:
+    mongo_filter = _build_mongo_transaction_filter(
+        user_id, account_ids, exclude_accounts, category_ids, exclude_category_ids,
+        payee_ids, exclude_payee_ids, transaction_type, exclude_types, start_date, end_date, description,
+    )
+
+    total = await TransactionDocument.find(mongo_filter).count()
+    skip = (page - 1) * size
+    pages = math.ceil(total / size) if total > 0 else 0
+    descending = sort_order != 'asc'
+
+    if sort_by in ('payee', 'category'):
+        # payee/category can be null (unlike account, which is always set - that's
+        # why 'account' sort doesn't need this path). Postgres defaults to NULLS LAST
+        # for ASC / NULLS FIRST for DESC; Mongo's dot-field sort does the opposite
+        # (missing fields always sort first) - verified empirically to diverge from
+        # Postgres whenever any matched transaction has no payee/category. Fetching
+        # and sorting in Python lets us replicate Postgres's null placement exactly.
+        all_docs = await TransactionDocument.find(mongo_filter).to_list()
+
+        def tiebreak(d: TransactionDocument):
+            return (d.date, d.created_at or datetime.min, d.id)
+
+        ref_field = 'payee' if sort_by == 'payee' else 'category'
+        null_items = [d for d in all_docs if getattr(d, ref_field) is None]
+        named_items = [d for d in all_docs if getattr(d, ref_field) is not None]
+        named_items.sort(key=lambda d: (getattr(d, ref_field).name.lower(), tiebreak(d)), reverse=descending)
+        null_items.sort(key=tiebreak, reverse=descending)
+        ordered = (null_items + named_items) if descending else (named_items + null_items)
+        transactions = ordered[skip:skip + size]
+    else:
+        sort_field_map = {
+            'date': 'date', 'description': 'description', 'amount': 'amount', 'type': 'type',
+            'account': 'account.name',
+        }
+        sort_field = sort_field_map.get(sort_by, 'date')
+        is_date_sort = sort_field == 'date'
+
+        # Same deterministic-tiebreak requirement as the Postgres path (see its comment):
+        # every sort, not just date, needs date+created_at+id appended so ties resolve
+        # consistently instead of in whatever arbitrary order each DB's query plan picks -
+        # verified empirically to diverge between Postgres and Mongo for tied values.
+        # Beanie aliases the declared `id: str` field to Mongo's `_id` in storage, so raw
+        # sort specs must use "_id", not "id", to hit the real indexed field.
+        sort_spec: List[tuple] = [(sort_field, -1 if descending else 1)]
+        if not is_date_sort:
+            sort_spec.append(("date", -1 if descending else 1))
+        sort_spec.append(("created_at", -1 if descending else 1))
+        sort_spec.append(("_id", -1 if descending else 1))
+
+        cursor = TransactionDocument.find(mongo_filter).sort(sort_spec).skip(skip).limit(size)
+        transactions = await cursor.to_list()
+
+    account_map, payee_map, category_map = await _lookup_maps_mongo(user_id)
+    items = [_transaction_doc_to_dict(t, account_map, payee_map, category_map) for t in transactions]
+
+    return PaginatedTransactionsResponse(
+        items=items, total=total, page=page, size=size, pages=pages
+    )
+
+
+@router.get("/", response_model=PaginatedTransactionsResponse)
+async def get_transactions(
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(50, ge=1, le=1000, description="Page size"),
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
     exclude_category_ids: Optional[str] = Query(None, description="Comma-separated category IDs to exclude"),
@@ -577,11 +777,29 @@ def get_transaction_summary(
     transaction_type: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    description: Optional[str] = Query(None, description="Search in description"),
+    sort_by: Optional[str] = Query(None, description="Field to sort by"),
+    sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
     exclude_accounts: Optional[bool] = Query(False, description="Exclude selected accounts"),
     exclude_types: Optional[bool] = Query(False, description="Exclude selected transaction types"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
+    args = (
+        page, size, account_ids, category_ids, exclude_category_ids, payee_ids, exclude_payee_ids,
+        transaction_type, start_date, end_date, description, sort_by, sort_order,
+        exclude_accounts, exclude_types,
+    )
+    if READ_SOURCE == "mongo":
+        return await _get_transactions_mongo(str(current_user.id), *args)
+    return await run_in_threadpool(_get_transactions_pg, db, uuid.UUID(str(current_user.id)), *args)
+
+
+def _get_transaction_summary_pg(
+    db: Session, user_id: uuid.UUID,
+    account_ids, category_ids, exclude_category_ids, payee_ids, exclude_payee_ids,
+    transaction_type, start_date, end_date, exclude_accounts, exclude_types,
+) -> TransactionSummary:
     # Build base query
     query = db.query(Transaction)
 
@@ -590,10 +808,18 @@ def get_transaction_summary(
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
         if exclude_accounts:
-            # Exclude transactions where the account is either source OR destination
+            # Exclude transactions where the account is either source OR destination.
+            # NOT (account_id IN (...) OR to_account_id IN (...)) is a NULL trap in SQL:
+            # to_account_id IS NULL for every non-transfer transaction, so
+            # "to_account_id IN (...)" evaluates to NULL (not false) for them, making
+            # the whole NOT(...) expression NULL - falsy in WHERE - which silently
+            # dropped nearly all non-transfer transactions from "exclude this account"
+            # results regardless of whether they touched the account at all. Expanding
+            # via De Morgan with an explicit IS NULL guard on the nullable column avoids
+            # the three-valued-logic trap.
             query = query.filter(
-                ~((Transaction.account_id.in_(account_id_list)) | 
-                  (Transaction.to_account_id.in_(account_id_list)))
+                ~Transaction.account_id.in_(account_id_list),
+                (Transaction.to_account_id.is_(None)) | (~Transaction.to_account_id.in_(account_id_list)),
             )
         else:
             # Include transactions where the account is either source OR destination (for transfers)
@@ -635,9 +861,16 @@ def get_transaction_summary(
                 # Exclude transactions with no category
                 query = query.filter(Transaction.category_id.isnot(None))
         else:
-            # Normal case: exclude specific category IDs
+            # Normal case: exclude specific category IDs. An uncategorized transaction
+            # (category_id IS NULL) isn't one of the excluded categories and should stay
+            # visible, but "NOT (category_id IN (...))" is NULL (falsy) for a NULL
+            # column in SQL - the same three-valued-logic trap fixed for exclude_accounts
+            # above - so guard it explicitly instead of silently dropping every
+            # uncategorized transaction whenever this filter is used.
             exclude_category_id_list = [uuid.UUID(id) for id in exclude_category_id_parts]
-            query = query.filter(~Transaction.category_id.in_(exclude_category_id_list))
+            query = query.filter(
+                (Transaction.category_id.is_(None)) | (~Transaction.category_id.in_(exclude_category_id_list))
+            )
     
     if payee_ids:
         payee_id_parts = [id.strip() for id in payee_ids.split(',') if id.strip()]
@@ -672,9 +905,13 @@ def get_transaction_summary(
                 # Exclude transactions with no payee
                 query = query.filter(Transaction.payee_id.isnot(None))
         else:
-            # Normal case: exclude specific payee IDs
+            # Normal case: exclude specific payee IDs - same NULL-trap fix as the
+            # category exclude branch above (an unassigned-payee transaction should
+            # stay visible, not be silently dropped by SQL's NULL IN (...) semantics).
             exclude_payee_id_list = [uuid.UUID(id) for id in exclude_payee_id_parts]
-            query = query.filter(~Transaction.payee_id.in_(exclude_payee_id_list))
+            query = query.filter(
+                (Transaction.payee_id.is_(None)) | (~Transaction.payee_id.in_(exclude_payee_id_list))
+            )
     
     if transaction_type:
         transaction_type_parts = [type.strip() for type in transaction_type.split(',') if type.strip()]
@@ -693,11 +930,11 @@ def get_transaction_summary(
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
-        query = query.filter(Transaction.date <= end_date)
-    
+        query = query.filter(func.date(Transaction.date) <= end_date)
+
     # Filter by current user
-    query = query.filter(Transaction.user_id == current_user.id)
-    
+    query = query.filter(Transaction.user_id == user_id)
+
     # Calculate summary statistics
     income_sum = query.filter(Transaction.type == 'income').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
     expense_sum = query.filter(Transaction.type == 'expense').with_entities(func.sum(Transaction.amount)).scalar() or Decimal('0')
@@ -729,6 +966,93 @@ def get_transaction_summary(
         net_amount=net_amount,
         transaction_count=transaction_count
     )
+
+
+async def _get_transaction_summary_mongo(
+    user_id: str,
+    account_ids, category_ids, exclude_category_ids, payee_ids, exclude_payee_ids,
+    transaction_type, start_date, end_date, exclude_accounts, exclude_types,
+) -> TransactionSummary:
+    """Fetch-then-sum in Python rather than a Mongo aggregation pipeline - matches
+    the same approach used for reward points summary/history and investment
+    replay elsewhere in this app, and keeps the exact fold-transfers-into-
+    income/expense semantics identical to the Postgres path above."""
+    mongo_filter = _build_mongo_transaction_filter(
+        user_id, account_ids, exclude_accounts, category_ids, exclude_category_ids,
+        payee_ids, exclude_payee_ids, transaction_type, exclude_types, start_date, end_date, None,
+    )
+    txns = await TransactionDocument.find(mongo_filter).to_list()
+
+    income_sum = sum((Decimal(str(t.amount)) for t in txns if t.type == 'income'), Decimal('0'))
+    expense_sum = sum((Decimal(str(t.amount)) for t in txns if t.type == 'expense'), Decimal('0'))
+    transfer_sum = sum((Decimal(str(t.amount)) for t in txns if t.type == 'transfer'), Decimal('0'))
+    transaction_count = len(txns)
+
+    account_id_list = [id.strip() for id in account_ids.split(',') if id.strip()] if account_ids else None
+    if account_id_list:
+        account_set = set(account_id_list)
+        if exclude_accounts:
+            transfer_expense_sum = sum(
+                (Decimal(str(t.amount)) for t in txns if t.type == 'transfer' and t.account_id not in account_set),
+                Decimal('0'),
+            )
+            transfer_income_sum = sum(
+                # SQL NULL semantics: NOT (NULL IN (...)) is NULL (falsy in WHERE), so a
+                # NULL to_account_id does not pass an exclude filter either - matches
+                # Transaction.to_account_id.in_(...) negation above. transfers always
+                # have a non-null to_account_id in practice, so this is a parity nicety.
+                (Decimal(str(t.amount)) for t in txns if t.type == 'transfer' and t.to_account_id is not None and t.to_account_id not in account_set),
+                Decimal('0'),
+            )
+        else:
+            transfer_expense_sum = sum(
+                (Decimal(str(t.amount)) for t in txns if t.type == 'transfer' and t.account_id in account_set),
+                Decimal('0'),
+            )
+            transfer_income_sum = sum(
+                (Decimal(str(t.amount)) for t in txns if t.type == 'transfer' and t.to_account_id in account_set),
+                Decimal('0'),
+            )
+    else:
+        transfer_expense_sum = transfer_sum
+        transfer_income_sum = transfer_sum
+
+    income_sum += transfer_income_sum
+    expense_sum += transfer_expense_sum
+    net_amount = income_sum - expense_sum
+
+    return TransactionSummary(
+        total_income=income_sum,
+        total_expense=expense_sum,
+        total_transfers=transfer_sum,
+        net_amount=net_amount,
+        transaction_count=transaction_count
+    )
+
+
+@router.get("/summary", response_model=TransactionSummary)
+async def get_transaction_summary(
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
+    exclude_category_ids: Optional[str] = Query(None, description="Comma-separated category IDs to exclude"),
+    payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs"),
+    exclude_payee_ids: Optional[str] = Query(None, description="Comma-separated payee IDs to exclude"),
+    transaction_type: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    exclude_accounts: Optional[bool] = Query(False, description="Exclude selected accounts"),
+    exclude_types: Optional[bool] = Query(False, description="Exclude selected transaction types"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    args = (
+        account_ids, category_ids, exclude_category_ids, payee_ids, exclude_payee_ids,
+        transaction_type, start_date, end_date, exclude_accounts, exclude_types,
+    )
+    if READ_SOURCE == "mongo":
+        return await _get_transaction_summary_mongo(str(current_user.id), *args)
+    return await run_in_threadpool(_get_transaction_summary_pg, db, uuid.UUID(str(current_user.id)), *args)
+
 
 @router.put("/bulk", response_model=List[TransactionResponse])
 async def bulk_update_transactions(
@@ -881,7 +1205,10 @@ async def bulk_update_transactions(
         # Refresh all updated transactions
         for transaction in updated_transactions:
             db.refresh(transaction)
-        
+            background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+        for account_id in all_affected_account_ids:
+            background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+
         return updated_transactions
     
     except Exception as e:
@@ -956,13 +1283,13 @@ async def export_transactions(
     if start_date:
         query = query.filter(Transaction.date >= start_date)
     if end_date:
-        query = query.filter(Transaction.date <= end_date)
+        query = query.filter(func.date(Transaction.date) <= end_date)
     
     # Filter by current user
     query = query.filter(Transaction.user_id == current_user.id)
     
     # Get all transactions (no pagination for export)
-    transactions = query.order_by(Transaction.date.desc()).all()
+    transactions = query.order_by(Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc()).all()
     
     # Convert to DataFrame
     data = []
@@ -1015,22 +1342,35 @@ async def export_transactions(
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-@router.get("/{transaction_id}", response_model=TransactionResponse)
-def get_transaction(
-    transaction_id: uuid.UUID, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    transaction = db.query(Transaction).options(
+def _get_transaction_pg(db: Session, transaction_id: uuid.UUID, user_id: uuid.UUID):
+    return db.query(Transaction).options(
         joinedload(Transaction.account),
         joinedload(Transaction.to_account),
         joinedload(Transaction.payee),
         joinedload(Transaction.category)
     ).filter(
         Transaction.id == transaction_id,
-        Transaction.user_id == current_user.id
+        Transaction.user_id == user_id
     ).first()
-    
+
+
+@router.get("/{transaction_id}", response_model=TransactionResponse)
+async def get_transaction(
+    transaction_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    if READ_SOURCE == "mongo":
+        transaction = await TransactionDocument.find_one(
+            TransactionDocument.id == str(transaction_id),
+            TransactionDocument.user_id == str(current_user.id),
+        )
+        if transaction is not None:
+            account_map, payee_map, category_map = await _lookup_maps_mongo(str(current_user.id))
+            transaction = _transaction_doc_to_dict(transaction, account_map, payee_map, category_map)
+    else:
+        transaction = await run_in_threadpool(_get_transaction_pg, db, transaction_id, uuid.UUID(str(current_user.id)))
+
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return transaction
@@ -1174,12 +1514,17 @@ async def update_transaction(
             'timestamp': datetime.now()
         }
     )
-    
+
+    background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+    for account_id in affected_account_ids:
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+
     return transaction
 
 @router.post("/recalculate-balances/{account_id}")
 async def recalculate_account_balances(
     account_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1201,7 +1546,7 @@ async def recalculate_account_balances(
         earliest_transaction = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
             Transaction.user_id == current_user.id
-        ).order_by(Transaction.date.asc(), Transaction.created_at.asc()).first()
+        ).order_by(Transaction.date.asc(), Transaction.created_at.asc(), Transaction.id.asc()).first()
         
         if not earliest_transaction:
             return {
@@ -1228,7 +1573,7 @@ async def recalculate_account_balances(
         last_transaction = db.query(Transaction).filter(
             (Transaction.account_id == account_id) | (Transaction.to_account_id == account_id),
             Transaction.user_id == current_user.id
-        ).order_by(Transaction.date.desc(), Transaction.created_at.desc()).first()
+        ).order_by(Transaction.date.desc(), Transaction.created_at.desc(), Transaction.id.desc()).first()
         
         if last_transaction:
             # Determine which balance field to use based on whether this account was source or destination
@@ -1246,7 +1591,10 @@ async def recalculate_account_balances(
                 db.add(account)
         
         db.commit()
-        
+
+        background_tasks.add_task(mongo_sync.mirror_account_transactions, db, account_id)
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+
         return {
             "success": True,
             "message": f"Successfully recalculated balances for account {account.name}",
@@ -1265,7 +1613,8 @@ async def recalculate_account_balances(
 
 @router.delete("/{transaction_id}")
 def delete_transaction(
-    transaction_id: uuid.UUID, 
+    transaction_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1275,7 +1624,10 @@ def delete_transaction(
     ).first()
     if transaction is None:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    
+
+    account_id = transaction.account_id
+    to_account_id = transaction.to_account_id
+
     # Reverse balance changes
     if transaction.type in ["income", "expense"]:
         update_account_balance(db, transaction.account_id, transaction.amount, transaction.type, is_reversal=True)
@@ -1291,11 +1643,18 @@ def delete_transaction(
     
     db.delete(transaction)
     db.commit()
+
+    background_tasks.add_task(mongo_sync.mirror_transaction_delete, transaction_id)
+    background_tasks.add_task(mongo_sync.mirror_account_upsert, db, account_id)
+    if to_account_id:
+        background_tasks.add_task(mongo_sync.mirror_account_upsert, db, to_account_id)
+
     return {"message": "Transaction deleted successfully"}
 
 
 @router.post("/cleanup-descriptions")
 async def cleanup_transaction_descriptions(
+    background_tasks: BackgroundTasks,
     filters: Optional[dict] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -1333,9 +1692,10 @@ async def cleanup_transaction_descriptions(
             # Update the transaction if any changes were made
             if modified_description != original_description:
                 transaction.description = modified_description
-    
+                background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+
     db.commit()
-    
+
     return {
         "message": "Transaction descriptions cleaned up successfully for ALL transactions",
         "pipe_symbol_removals": pipe_removals,
@@ -1346,6 +1706,7 @@ async def cleanup_transaction_descriptions(
 
 @router.post("/clear-fields")
 async def clear_transaction_fields(
+    background_tasks: BackgroundTasks,
     filters: Optional[dict] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -1378,15 +1739,20 @@ async def clear_transaction_fields(
     
     # Clear payee and category fields
     for transaction in filtered_transactions:
+        changed = False
         if transaction.payee_id:
             transaction.payee_id = None
             payee_clearings += 1
+            changed = True
         if transaction.category_id:
             transaction.category_id = None
             category_clearings += 1
-    
+            changed = True
+        if changed:
+            background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+
     db.commit()
-    
+
     return {
         "message": "Transaction fields cleared successfully",
         "payee_clearings": payee_clearings,
@@ -1398,6 +1764,7 @@ async def clear_transaction_fields(
 @router.post("/bulk-reassign")
 async def bulk_reassign_transactions(
     transaction_ids: List[str],
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -1518,7 +1885,10 @@ async def bulk_reassign_transactions(
     
     # Commit all changes
     db.commit()
-    
+
+    for transaction in transactions:
+        background_tasks.add_task(mongo_sync.mirror_transaction_upsert, db, transaction.id)
+
     return {
         "message": f"Bulk reassignment completed successfully",
         "total_transactions": len(transactions),
@@ -1530,31 +1900,44 @@ async def bulk_reassign_transactions(
     }
 
 
-@router.get("/reports/by-category")
-def get_transactions_by_category(
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
-    use_all_data: bool = Query(False, description="Use all historical data for comprehensive analysis"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Get transaction summary grouped by category with optional comprehensive historical analysis"""
-    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
-
-    # Apply filters only if not using all data for comprehensive analysis
+def _fetch_by_category_pg(db: Session, user_id: uuid.UUID, start_date, end_date, account_ids: Optional[str], use_all_data: bool):
+    query = db.query(Transaction).filter(Transaction.user_id == user_id)
     if not use_all_data:
         if start_date:
             query = query.filter(Transaction.date >= start_date)
         if end_date:
-            query = query.filter(Transaction.date <= end_date)
-
+            query = query.filter(func.date(Transaction.date) <= end_date)
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
         query = query.filter(Transaction.account_id.in_(account_id_list))
+    return query.options(joinedload(Transaction.category)).all()
 
-    transactions = query.options(joinedload(Transaction.category)).all()
 
+async def _fetch_by_category_mongo(user_id: str, start_date, end_date, account_ids: Optional[str], use_all_data: bool):
+    conditions: List[dict] = [{"user_id": user_id}]
+    if not use_all_data:
+        if start_date:
+            conditions.append({"date": {"$gte": datetime.combine(start_date, datetime.min.time())}})
+        if end_date:
+            conditions.append({"date": {"$lt": datetime.combine(end_date, datetime.min.time()) + timedelta(days=1)}})
+    if account_ids:
+        account_id_list = [id.strip() for id in account_ids.split(',') if id.strip()]
+        conditions.append({"account_id": {"$in": account_id_list}})
+    mongo_filter = {"$and": conditions} if len(conditions) > 1 else conditions[0]
+    return await TransactionDocument.find(mongo_filter).to_list()
+
+
+def _process_by_category(transactions) -> list:
+    """Shared processing for both backends - a Mongo TransactionDocument's embedded
+    `.category` ref (id/name/color) and a Postgres Transaction's joinedloaded
+    `.category` relationship expose the same attribute surface this loop needs."""
+    # Both fetch queries are unordered (no ORDER BY / sort), so the processing order
+    # below - and anything order-sensitive downstream, like which month wins a
+    # peak_month tie - would otherwise be whatever arbitrary order each DB's query
+    # plan happens to produce, differing between Postgres and Mongo (and even
+    # between repeated runs of the same Postgres query). Sort once here instead of
+    # chasing every individual order-dependent computation.
+    transactions = sorted(transactions, key=lambda t: (t.date, t.created_at or datetime.min, str(t.id)))
     category_data = {}
     monthly_trends = {}
 
@@ -1626,8 +2009,13 @@ def get_transactions_by_category(
         if category["transaction_count"] > 0:
             category["average_amount"] = category["total_amount"] / category["transaction_count"]
 
-            # Calculate spending trend over time
-            monthly_amounts = [data["amount"] for data in category["monthly_data"].values()]
+            # Calculate spending trend over time. monthly_data is keyed by "YYYY-MM"
+            # but populated in transaction-fetch order (the underlying query has no
+            # ORDER BY), so "last 3 months" must explicitly sort by month key first -
+            # otherwise "recent" is whatever order the DB happened to return rows in,
+            # which silently differs between Postgres and Mongo (and even between
+            # runs of the same Postgres query).
+            monthly_amounts = [category["monthly_data"][k]["amount"] for k in sorted(category["monthly_data"].keys())]
             if len(monthly_amounts) >= 3:
                 recent_avg = sum(monthly_amounts[-3:]) / 3
                 older_avg = sum(monthly_amounts[:-3]) / len(monthly_amounts[:-3]) if len(monthly_amounts) > 3 else recent_avg
@@ -1654,30 +2042,57 @@ def get_transactions_by_category(
     return sorted(category_data.values(), key=lambda x: x["total_amount"], reverse=True)
 
 
-@router.get("/reports/by-payee")
-def get_transactions_by_payee(
+@router.get("/reports/by-category")
+async def get_transactions_by_category(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     use_all_data: bool = Query(False, description="Use all historical data for comprehensive analysis"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
-    """Get transaction summary grouped by payee"""
-    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+    """Get transaction summary grouped by category with optional comprehensive historical analysis"""
+    if READ_SOURCE == "mongo":
+        transactions = await _fetch_by_category_mongo(str(current_user.id), start_date, end_date, account_ids, use_all_data)
+    else:
+        transactions = await run_in_threadpool(
+            _fetch_by_category_pg, db, uuid.UUID(str(current_user.id)), start_date, end_date, account_ids, use_all_data
+        )
+    return _process_by_category(transactions)
 
-    # Apply filters only if not using all data
+
+def _fetch_by_payee_pg(db: Session, user_id: uuid.UUID, start_date, end_date, account_ids: Optional[str], use_all_data: bool):
+    query = db.query(Transaction).filter(Transaction.user_id == user_id)
     if not use_all_data:
         if start_date:
             query = query.filter(Transaction.date >= start_date)
         if end_date:
-            query = query.filter(Transaction.date <= end_date)
+            query = query.filter(func.date(Transaction.date) <= end_date)
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
         query = query.filter(Transaction.account_id.in_(account_id_list))
+    return query.options(joinedload(Transaction.payee)).all()
 
-    transactions = query.options(joinedload(Transaction.payee)).all()
 
+async def _fetch_by_payee_mongo(user_id: str, start_date, end_date, account_ids: Optional[str], use_all_data: bool):
+    conditions: List[dict] = [{"user_id": user_id}]
+    if not use_all_data:
+        if start_date:
+            conditions.append({"date": {"$gte": datetime.combine(start_date, datetime.min.time())}})
+        if end_date:
+            conditions.append({"date": {"$lt": datetime.combine(end_date, datetime.min.time()) + timedelta(days=1)}})
+    if account_ids:
+        account_id_list = [id.strip() for id in account_ids.split(',') if id.strip()]
+        conditions.append({"account_id": {"$in": account_id_list}})
+    mongo_filter = {"$and": conditions} if len(conditions) > 1 else conditions[0]
+    return await TransactionDocument.find(mongo_filter).to_list()
+
+
+def _process_by_payee(transactions) -> list:
+    """Shared processing for both backends - see _process_by_category for why this
+    works unmodified against either a Mongo TransactionDocument or a Postgres
+    Transaction with joinedloaded .payee."""
+    transactions = sorted(transactions, key=lambda t: (t.date, t.created_at or datetime.min, str(t.id)))
     payee_data = {}
     for transaction in transactions:
         payee_name = transaction.payee.name if transaction.payee else "No Payee"
@@ -1745,7 +2160,7 @@ def get_transactions_by_payee(
             payee["active_months"] = len(payee["monthly_data"])
 
             # Calculate spending trend over time
-            monthly_amounts = [data["amount"] for data in payee["monthly_data"].values()]
+            monthly_amounts = [payee["monthly_data"][k]["amount"] for k in sorted(payee["monthly_data"].keys())]
             if len(monthly_amounts) >= 3:
                 recent_avg = sum(monthly_amounts[-3:]) / 3
                 older_avg = sum(monthly_amounts[:-3]) / len(monthly_amounts[:-3]) if len(monthly_amounts) > 3 else recent_avg
@@ -1771,26 +2186,75 @@ def get_transactions_by_payee(
     return sorted(payee_data.values(), key=lambda x: x["total_amount"], reverse=True)
 
 
-@router.get("/reports/by-account")
-def get_transactions_by_account(
+@router.get("/reports/by-payee")
+async def get_transactions_by_payee(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     use_all_data: bool = Query(False, description="Use all historical data for comprehensive analysis"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
-    """Get transaction summary grouped by account"""
-    query = db.query(Transaction).filter(Transaction.user_id == current_user.id)
+    """Get transaction summary grouped by payee"""
+    if READ_SOURCE == "mongo":
+        transactions = await _fetch_by_payee_mongo(str(current_user.id), start_date, end_date, account_ids, use_all_data)
+    else:
+        transactions = await run_in_threadpool(
+            _fetch_by_payee_pg, db, uuid.UUID(str(current_user.id)), start_date, end_date, account_ids, use_all_data
+        )
+    return _process_by_payee(transactions)
 
-    # Apply filters only if not using all data
+
+def _fetch_by_account_pg(db: Session, user_id: uuid.UUID, start_date, end_date, use_all_data: bool):
+    query = db.query(Transaction).filter(Transaction.user_id == user_id)
     if not use_all_data:
         if start_date:
             query = query.filter(Transaction.date >= start_date)
         if end_date:
-            query = query.filter(Transaction.date <= end_date)
+            query = query.filter(func.date(Transaction.date) <= end_date)
+    return query.options(joinedload(Transaction.account)).all()
 
-    transactions = query.options(joinedload(Transaction.account)).all()
 
+def _fetch_incoming_transfers_pg(db: Session, user_id: uuid.UUID, start_date, end_date, use_all_data: bool):
+    query = db.query(Transaction).filter(
+        Transaction.user_id == user_id,
+        Transaction.type == "transfer",
+        Transaction.to_account_id.isnot(None)
+    ).options(joinedload(Transaction.to_account))
+    if not use_all_data:
+        if start_date:
+            query = query.filter(Transaction.date >= start_date)
+        if end_date:
+            query = query.filter(func.date(Transaction.date) <= end_date)
+    return query.all()
+
+
+async def _fetch_by_account_mongo(user_id: str, start_date, end_date, use_all_data: bool):
+    conditions: List[dict] = [{"user_id": user_id}]
+    if not use_all_data:
+        if start_date:
+            conditions.append({"date": {"$gte": datetime.combine(start_date, datetime.min.time())}})
+        if end_date:
+            conditions.append({"date": {"$lt": datetime.combine(end_date, datetime.min.time()) + timedelta(days=1)}})
+    mongo_filter = {"$and": conditions} if len(conditions) > 1 else conditions[0]
+    return await TransactionDocument.find(mongo_filter).to_list()
+
+
+async def _fetch_incoming_transfers_mongo(user_id: str, start_date, end_date, use_all_data: bool):
+    conditions: List[dict] = [{"user_id": user_id}, {"type": "transfer"}, {"to_account_id": {"$ne": None}}]
+    if not use_all_data:
+        if start_date:
+            conditions.append({"date": {"$gte": datetime.combine(start_date, datetime.min.time())}})
+        if end_date:
+            conditions.append({"date": {"$lt": datetime.combine(end_date, datetime.min.time()) + timedelta(days=1)}})
+    return await TransactionDocument.find({"$and": conditions}).to_list()
+
+
+def _process_by_account(transactions, incoming_transfers) -> list:
+    """Shared processing for both backends - see _process_by_category for why this
+    works unmodified against either a Mongo TransactionDocument or a Postgres
+    Transaction with joinedloaded .account/.to_account."""
+    transactions = sorted(transactions, key=lambda t: (t.date, t.created_at or datetime.min, str(t.id)))
     account_data = {}
     for transaction in transactions:
         account_name = transaction.account.name if transaction.account else "Unknown Account"
@@ -1855,21 +2319,6 @@ def get_transactions_by_account(
             if transaction.account_id == transaction.account.id:
                 account_data[account_id]["transfers_out"] += amount
 
-    # Check for incoming transfers
-    incoming_transfers_query = db.query(Transaction).filter(
-        Transaction.user_id == current_user.id,
-        Transaction.type == "transfer",
-        Transaction.to_account_id.isnot(None)
-    ).options(joinedload(Transaction.to_account))
-    
-    if not use_all_data:
-        if start_date:
-            incoming_transfers_query = incoming_transfers_query.filter(Transaction.date >= start_date)
-        if end_date:
-            incoming_transfers_query = incoming_transfers_query.filter(Transaction.date <= end_date)
-    
-    incoming_transfers = incoming_transfers_query.all()
-
     for transfer in incoming_transfers:
         if transfer.to_account:
             to_account_id = str(transfer.to_account.id)
@@ -1885,7 +2334,7 @@ def get_transactions_by_account(
             account["active_months"] = len(account["monthly_data"])
 
             # Calculate activity trend over time
-            monthly_amounts = [data["amount"] for data in account["monthly_data"].values()]
+            monthly_amounts = [account["monthly_data"][k]["amount"] for k in sorted(account["monthly_data"].keys())]
             if len(monthly_amounts) >= 3:
                 recent_avg = sum(monthly_amounts[-3:]) / 3
                 older_avg = sum(monthly_amounts[:-3]) / len(monthly_amounts[:-3]) if len(monthly_amounts) > 3 else recent_avg
@@ -1911,33 +2360,51 @@ def get_transactions_by_account(
     return sorted(account_data.values(), key=lambda x: x["total_amount"], reverse=True)
 
 
-@router.get("/reports/monthly-trend")
-def get_monthly_trend(
-    months: int = Query(12, description="Number of months to include"),
-    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+@router.get("/reports/by-account")
+async def get_transactions_by_account(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    use_all_data: bool = Query(False, description="Use all historical data for comprehensive analysis"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
-    """Get monthly income vs expense trends"""
-    from datetime import datetime, timedelta
-    from sqlalchemy import extract, func
+    """Get transaction summary grouped by account"""
+    user_id_str = str(current_user.id)
+    if READ_SOURCE == "mongo":
+        transactions = await _fetch_by_account_mongo(user_id_str, start_date, end_date, use_all_data)
+        incoming_transfers = await _fetch_incoming_transfers_mongo(user_id_str, start_date, end_date, use_all_data)
+    else:
+        user_id = uuid.UUID(user_id_str)
+        transactions = await run_in_threadpool(_fetch_by_account_pg, db, user_id, start_date, end_date, use_all_data)
+        incoming_transfers = await run_in_threadpool(_fetch_incoming_transfers_pg, db, user_id, start_date, end_date, use_all_data)
+    return _process_by_account(transactions, incoming_transfers)
 
-    # Calculate start date
-    end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=months * 30)
 
+def _fetch_monthly_trend_pg(db: Session, user_id: uuid.UUID, start_date, end_date, account_ids: Optional[str]):
     query = db.query(Transaction).filter(
-        Transaction.user_id == current_user.id,
+        Transaction.user_id == user_id,
         Transaction.date >= start_date,
-        Transaction.date <= end_date
+        func.date(Transaction.date) <= end_date
     )
-
     if account_ids:
         account_id_list = [uuid.UUID(id.strip()) for id in account_ids.split(',') if id.strip()]
         query = query.filter(Transaction.account_id.in_(account_id_list))
+    return query.all()
 
-    transactions = query.all()
 
+async def _fetch_monthly_trend_mongo(user_id: str, start_date, end_date, account_ids: Optional[str]):
+    conditions: List[dict] = [
+        {"user_id": user_id},
+        {"date": {"$gte": datetime.combine(start_date, datetime.min.time())}},
+        {"date": {"$lt": datetime.combine(end_date, datetime.min.time()) + timedelta(days=1)}},
+    ]
+    if account_ids:
+        account_id_list = [id.strip() for id in account_ids.split(',') if id.strip()]
+        conditions.append({"account_id": {"$in": account_id_list}})
+    return await TransactionDocument.find({"$and": conditions}).to_list()
+
+
+def _process_monthly_trend(transactions) -> list:
     monthly_data = {}
     for transaction in transactions:
         month_key = transaction.date.strftime("%Y-%m")
@@ -1971,24 +2438,44 @@ def get_monthly_trend(
     return sorted(monthly_data.values(), key=lambda x: x["month"])
 
 
-@router.get("/reports/comprehensive-analysis")
-def get_comprehensive_financial_analysis(
+@router.get("/reports/monthly-trend")
+async def get_monthly_trend(
+    months: int = Query(12, description="Number of months to include"),
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
-    """Get comprehensive financial analysis using all historical data with advanced insights"""
-    from datetime import datetime, timedelta
-    from sqlalchemy import extract, func, case
-    import statistics
+    """Get monthly income vs expense trends"""
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=months * 30)
 
-    # Get ALL transactions for comprehensive analysis
-    all_transactions = db.query(Transaction).filter(
-        Transaction.user_id == current_user.id
+    if READ_SOURCE == "mongo":
+        transactions = await _fetch_monthly_trend_mongo(str(current_user.id), start_date, end_date, account_ids)
+    else:
+        transactions = await run_in_threadpool(
+            _fetch_monthly_trend_pg, db, uuid.UUID(str(current_user.id)), start_date, end_date, account_ids
+        )
+    return _process_monthly_trend(transactions)
+
+
+def _fetch_comprehensive_analysis_pg(db: Session, user_id: uuid.UUID):
+    return db.query(Transaction).filter(
+        Transaction.user_id == user_id
     ).options(
         joinedload(Transaction.category),
         joinedload(Transaction.payee),
         joinedload(Transaction.account)
-    ).order_by(Transaction.date).all()
+    ).order_by(Transaction.date, Transaction.created_at, Transaction.id).all()
+
+
+async def _fetch_comprehensive_analysis_mongo(user_id: str):
+    return await TransactionDocument.find(
+        TransactionDocument.user_id == user_id
+    ).sort([("date", 1), ("created_at", 1), ("_id", 1)]).to_list()
+
+
+def _process_comprehensive_analysis(all_transactions) -> dict:
+    import statistics
 
     if not all_transactions:
         return {"message": "No transaction data available for analysis"}
@@ -2125,6 +2612,19 @@ def get_comprehensive_financial_analysis(
     return analysis
 
 
+@router.get("/reports/comprehensive-analysis")
+async def get_comprehensive_financial_analysis(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """Get comprehensive financial analysis using all historical data with advanced insights"""
+    if READ_SOURCE == "mongo":
+        all_transactions = await _fetch_comprehensive_analysis_mongo(str(current_user.id))
+    else:
+        all_transactions = await run_in_threadpool(_fetch_comprehensive_analysis_pg, db, uuid.UUID(str(current_user.id)))
+    return _process_comprehensive_analysis(all_transactions)
+
+
 @router.post("/reports/retrain-models")
 def retrain_prediction_models(
     db: Session = Depends(get_db),
@@ -2173,24 +2673,23 @@ def retrain_prediction_models(
         return {"error": f"Model retraining failed: {str(e)}"}
 
 
-@router.get("/reports/prediction-insights")
-def get_prediction_insights(
-    months_ahead: int = Query(3, description="Number of months to predict ahead"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Get advanced prediction insights using retrained models and all historical data"""
-    from services.ai_trainer import TransactionAITrainer
-    from datetime import datetime, timedelta
-    import statistics
-
-    # Get all historical data for context
-    all_transactions = db.query(Transaction).filter(
-        Transaction.user_id == current_user.id
+def _fetch_prediction_insights_pg(db: Session, user_id: uuid.UUID):
+    return db.query(Transaction).filter(
+        Transaction.user_id == user_id
     ).options(
         joinedload(Transaction.category),
         joinedload(Transaction.payee)
-    ).order_by(Transaction.date).all()
+    ).order_by(Transaction.date, Transaction.created_at, Transaction.id).all()
+
+
+async def _fetch_prediction_insights_mongo(user_id: str):
+    return await TransactionDocument.find(
+        TransactionDocument.user_id == user_id
+    ).sort([("date", 1), ("created_at", 1), ("_id", 1)]).to_list()
+
+
+def _process_prediction_insights(all_transactions, months_ahead: int) -> dict:
+    import statistics
 
     if len(all_transactions) < 10:
         return {"message": "Insufficient historical data for accurate predictions"}
@@ -2274,5 +2773,19 @@ def get_prediction_insights(
         "data_quality": "excellent" if len(all_transactions) > 100 else "good" if len(all_transactions) > 50 else "fair",
         "next_retrain_recommended": len(all_transactions) < 100
     }
+
+
+@router.get("/reports/prediction-insights")
+async def get_prediction_insights(
+    months_ahead: int = Query(3, description="Number of months to predict ahead"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """Get advanced prediction insights using retrained models and all historical data"""
+    if READ_SOURCE == "mongo":
+        all_transactions = await _fetch_prediction_insights_mongo(str(current_user.id))
+    else:
+        all_transactions = await run_in_threadpool(_fetch_prediction_insights_pg, db, uuid.UUID(str(current_user.id)))
+    return _process_prediction_insights(all_transactions, months_ahead)
 
 
