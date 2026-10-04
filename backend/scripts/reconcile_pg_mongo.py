@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import hashlib
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -66,13 +67,19 @@ async def reconcile_user(db, user_id) -> bool:
         # float string so equal values checksum equal regardless of source type.
         return "" if v is None else f"{float(v):.2f}"
 
+    def _date_str(d):
+        # Postgres Transaction.date is a datetime, Mongo TransactionDocument.date is a plain
+        # date - str() of a datetime includes "00:00:00" that str() of a date doesn't, so
+        # normalize both to a date-only string before comparing.
+        return (d.date() if isinstance(d, datetime) else d).isoformat()
+
     pg_rows = [
-        (str(t.id), _num(t.amount), t.type, str(t.date), _num(t.balance_after_transaction))
+        (str(t.id), _num(t.amount), t.type, _date_str(t.date), _num(t.balance_after_transaction))
         for t in db.query(Transaction).filter(Transaction.user_id == user_id).all()
     ]
     mongo_txns = await TransactionDocument.find(TransactionDocument.user_id == user_id_str).to_list()
     mongo_rows = [
-        (t.id, _num(t.amount), t.type, str(t.date), _num(t.balance_after_transaction))
+        (t.id, _num(t.amount), t.type, _date_str(t.date), _num(t.balance_after_transaction))
         for t in mongo_txns
     ]
     pg_checksum = _transaction_checksum(pg_rows)
