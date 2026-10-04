@@ -20,6 +20,7 @@ conversion - not meaningful until a router has a Mongo-reading code path):
             print(d)
         sys.exit(1)
 """
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, List, Optional
 
@@ -34,6 +35,17 @@ def _normalize(value: Any) -> Any:
         return value
     if isinstance(value, (Decimal, float)):
         return f"{float(value):.{_FLOAT_PRECISION}f}"
+    if isinstance(value, datetime):
+        # Postgres returns tz-aware local datetimes (e.g. +05:30), Mongo stores
+        # naive UTC - same instant, different representation. Normalize both to
+        # UTC (treating naive values as already UTC, which is what pymongo/motor
+        # store) before comparing. BSON datetimes are also millisecond-precision
+        # only (truncated, not rounded), so truncate Postgres' microseconds to
+        # match instead of flagging the lost digits as drift.
+        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(timezone.utc)
+        dt = dt.replace(microsecond=(dt.microsecond // 1000) * 1000)
+        return dt.isoformat()
     if isinstance(value, dict):
         return {k: _normalize(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

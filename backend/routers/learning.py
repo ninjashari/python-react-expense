@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.orm import Session
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import case
 from typing import List
 import uuid
@@ -10,6 +11,15 @@ from models.users import User
 from models.transactions import Transaction
 from models.payees import Payee
 from models.categories import Category
+from models_mongo.learning import (
+    UserTransactionPatternDocument,
+    UserSelectionHistoryDocument,
+    UserCorrectionPatternDocument,
+    LearningStatisticsDocument,
+)
+from models_mongo.payees import PayeeDocument
+from models_mongo.categories import CategoryDocument
+from models_mongo.transactions import TransactionDocument
 from schemas.learning import (
     SmartSuggestionRequest,
     SmartSuggestionResponse,
@@ -24,6 +34,7 @@ from services.ollama_service import get_llm_suggestions
 from services.ai_cache import record_selection_and_maybe_retrain
 from services import mongo_sync
 from utils.auth import get_current_active_user
+from config import READ_SOURCE
 
 router = APIRouter()
 
@@ -183,15 +194,43 @@ def record_user_selection(
     return {"status": "success", "message": "Selection recorded for learning"}
 
 
+async def _get_user_patterns_mongo(user_id: str) -> List[UserTransactionPatternResponse]:
+    patterns = await UserTransactionPatternDocument.find(
+        UserTransactionPatternDocument.user_id == user_id
+    ).sort(-UserTransactionPatternDocument.confidence_score, -UserTransactionPatternDocument.usage_frequency).to_list()
+
+    payees = await PayeeDocument.find(PayeeDocument.user_id == user_id).to_list()
+    categories = await CategoryDocument.find(CategoryDocument.user_id == user_id).to_list()
+    payee_map = {p.id: p.name for p in payees}
+    category_map = {c.id: c.name for c in categories}
+
+    return [
+        UserTransactionPatternResponse(
+            id=pattern.id,
+            description_keywords=pattern.description_keywords,
+            payee_name=payee_map.get(pattern.payee_id) if pattern.payee_id else None,
+            category_name=category_map.get(pattern.category_id) if pattern.category_id else None,
+            confidence_score=pattern.confidence_score,
+            usage_frequency=pattern.usage_frequency,
+            success_rate=pattern.success_rate,
+            last_used=pattern.last_used,
+            created_at=pattern.created_at
+        )
+        for pattern in patterns
+    ]
+
+
 @router.get("/patterns", response_model=List[UserTransactionPatternResponse])
-def get_user_patterns(
+async def get_user_patterns(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
     """Get all learned patterns for the current user"""
-    
-    patterns = TransactionLearningService.get_user_patterns(db, str(current_user.id))
-    
+    if READ_SOURCE == "mongo":
+        return await _get_user_patterns_mongo(str(current_user.id))
+
+    patterns = await run_in_threadpool(TransactionLearningService.get_user_patterns, db, str(current_user.id))
+
     return [
         UserTransactionPatternResponse(
             id=str(pattern.id),
@@ -228,24 +267,14 @@ def record_learning_feedback(
     }
 
 
-@router.get("/statistics", response_model=LearningStatisticsResponse)
-def get_learning_statistics(
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Get learning system statistics for the current user"""
-    
+def _get_or_create_learning_statistics_pg(db: Session, user_id: uuid.UUID):
     from models.learning import LearningStatistics
-    
     stats = db.query(LearningStatistics).filter(
-        LearningStatistics.user_id == current_user.id
+        LearningStatistics.user_id == user_id
     ).first()
-    
     if not stats:
-        # Create initial statistics record
         stats = LearningStatistics(
-            user_id=current_user.id,
+            user_id=user_id,
             total_suggestions_made=0,
             total_suggestions_accepted=0,
             total_patterns_learned=0,
@@ -255,7 +284,45 @@ def get_learning_statistics(
         db.add(stats)
         db.commit()
         db.refresh(stats)
-        background_tasks.add_task(mongo_sync.mirror_learning_statistics_upsert, db, current_user.id)
+        return stats, True
+    return stats, False
+
+
+@router.get("/statistics", response_model=LearningStatisticsResponse)
+async def get_learning_statistics(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """Get learning system statistics for the current user"""
+    user_id = uuid.UUID(str(current_user.id))
+
+    if READ_SOURCE == "mongo":
+        stats_doc = await LearningStatisticsDocument.find_one(LearningStatisticsDocument.user_id == str(user_id))
+        if not stats_doc:
+            # Postgres stays the write source of truth even when reading from Mongo.
+            pg_stats, _ = await run_in_threadpool(_get_or_create_learning_statistics_pg, db, user_id)
+            background_tasks.add_task(mongo_sync.mirror_learning_statistics_upsert, db, user_id)
+            return LearningStatisticsResponse(
+                total_suggestions_made=pg_stats.total_suggestions_made,
+                total_suggestions_accepted=pg_stats.total_suggestions_accepted,
+                total_patterns_learned=pg_stats.total_patterns_learned,
+                average_confidence=pg_stats.average_confidence,
+                success_rate=pg_stats.success_rate,
+                last_updated=pg_stats.last_updated
+            )
+        return LearningStatisticsResponse(
+            total_suggestions_made=stats_doc.total_suggestions_made,
+            total_suggestions_accepted=stats_doc.total_suggestions_accepted,
+            total_patterns_learned=stats_doc.total_patterns_learned,
+            average_confidence=stats_doc.average_confidence,
+            success_rate=stats_doc.success_rate,
+            last_updated=stats_doc.last_updated
+        )
+
+    stats, created = await run_in_threadpool(_get_or_create_learning_statistics_pg, db, user_id)
+    if created:
+        background_tasks.add_task(mongo_sync.mirror_learning_statistics_upsert, db, user_id)
 
     return LearningStatisticsResponse(
         total_suggestions_made=stats.total_suggestions_made,
@@ -322,60 +389,37 @@ def reset_learning_patterns(
     return {"status": "success", "message": "All learning patterns reset"}
 
 
-@router.get("/analytics/performance")
-def get_learning_performance_analytics(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Get detailed performance analytics for the learning system"""
-    
+async def _get_learning_performance_analytics_mongo(user_id: str) -> dict:
     try:
-        from models.learning import UserSelectionHistory, UserTransactionPattern
-        from sqlalchemy import func, case
-        from datetime import datetime, timedelta
-        
-        # Get suggestion acceptance rates over time
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         seven_days_ago = datetime.utcnow() - timedelta(days=7)
-        
-        # Overall metrics - include all selections, not just suggested ones
-        total_suggestions = db.query(func.count(UserSelectionHistory.id)).filter(
-            UserSelectionHistory.user_id == current_user.id
-        ).scalar() or 0
-        
-        # Count selections that had some confidence (indicating AI involvement)
-        accepted_suggestions = db.query(func.count(UserSelectionHistory.id)).filter(
-            UserSelectionHistory.user_id == current_user.id,
-            UserSelectionHistory.suggestion_confidence.isnot(None),
-            UserSelectionHistory.suggestion_confidence > 0.0
-        ).scalar() or 0
-        
-        # Recent trends - all selections
-        recent_suggestions = db.query(func.count(UserSelectionHistory.id)).filter(
-            UserSelectionHistory.user_id == current_user.id,
-            UserSelectionHistory.created_at >= seven_days_ago
-        ).scalar() or 0
-        
-        # Confidence distribution - only for records with actual confidence values
-        confidence_ranges = db.query(
-            case(
-                (UserSelectionHistory.suggestion_confidence >= 0.8, 'high'),
-                (UserSelectionHistory.suggestion_confidence >= 0.6, 'medium'),
-                else_='low'
-            ).label('confidence_range'),
-            func.count(UserSelectionHistory.id).label('count')
-        ).filter(
-            UserSelectionHistory.user_id == current_user.id,
-            UserSelectionHistory.suggestion_confidence.isnot(None)
-        ).group_by('confidence_range').all()
-        
-        confidence_distribution = {range_name: count for range_name, count in confidence_ranges}
-        
-        # Most successful patterns
-        top_patterns = db.query(UserTransactionPattern).filter(
-            UserTransactionPattern.user_id == current_user.id
-        ).order_by(UserTransactionPattern.success_rate.desc()).limit(5).all()
-        
+
+        selections = await UserSelectionHistoryDocument.find(UserSelectionHistoryDocument.user_id == user_id).to_list()
+        total_suggestions = len(selections)
+        accepted_suggestions = sum(
+            1 for s in selections if s.suggestion_confidence is not None and s.suggestion_confidence > 0.0
+        )
+        recent_suggestions = sum(1 for s in selections if s.created_at and s.created_at >= seven_days_ago)
+
+        confidence_distribution = {'high': 0, 'medium': 0, 'low': 0}
+        for s in selections:
+            if s.suggestion_confidence is None:
+                continue
+            if s.suggestion_confidence >= 0.8:
+                confidence_distribution['high'] += 1
+            elif s.suggestion_confidence >= 0.6:
+                confidence_distribution['medium'] += 1
+            else:
+                confidence_distribution['low'] += 1
+
+        top_patterns = await UserTransactionPatternDocument.find(
+            UserTransactionPatternDocument.user_id == user_id
+        ).sort(-UserTransactionPatternDocument.success_rate, "_id").limit(5).to_list()
+
+        payees = await PayeeDocument.find(PayeeDocument.user_id == user_id).to_list()
+        categories = await CategoryDocument.find(CategoryDocument.user_id == user_id).to_list()
+        payee_map = {p.id: p.name for p in payees}
+        category_map = {c.id: c.name for c in categories}
+
         return {
             "overall_metrics": {
                 "total_suggestions_made": total_suggestions,
@@ -384,16 +428,16 @@ def get_learning_performance_analytics(
                 "recent_suggestions_7_days": recent_suggestions
             },
             "confidence_distribution": {
-                "high_confidence": confidence_distribution.get('high', 0),
-                "medium_confidence": confidence_distribution.get('medium', 0),
-                "low_confidence": confidence_distribution.get('low', 0)
+                "high_confidence": confidence_distribution['high'],
+                "medium_confidence": confidence_distribution['medium'],
+                "low_confidence": confidence_distribution['low']
             },
             "top_patterns": [
                 {
-                    "id": str(pattern.id),
-                    "keywords": pattern.description_keywords[:3],  # First 3 keywords
-                    "payee_name": pattern.payee.name if pattern.payee else None,
-                    "category_name": pattern.category.name if pattern.category else None,
+                    "id": pattern.id,
+                    "keywords": pattern.description_keywords[:3],
+                    "payee_name": payee_map.get(pattern.payee_id) if pattern.payee_id else None,
+                    "category_name": category_map.get(pattern.category_id) if pattern.category_id else None,
                     "success_rate": pattern.success_rate,
                     "usage_frequency": pattern.usage_frequency,
                     "confidence_score": pattern.confidence_score
@@ -401,9 +445,7 @@ def get_learning_performance_analytics(
                 for pattern in top_patterns
             ]
         }
-        
-    except Exception as e:
-        # Return default structure with empty data if there's an error
+    except Exception:
         return {
             "overall_metrics": {
                 "total_suggestions_made": 0,
@@ -420,161 +462,270 @@ def get_learning_performance_analytics(
         }
 
 
-@router.get("/analytics/patterns")
-def get_pattern_analytics(
+@router.get("/analytics/performance")
+async def get_learning_performance_analytics(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
+):
+    """Get detailed performance analytics for the learning system"""
+    if READ_SOURCE == "mongo":
+        return await _get_learning_performance_analytics_mongo(str(current_user.id))
+
+    def _pg():
+        from models.learning import UserSelectionHistory, UserTransactionPattern
+        from sqlalchemy import func, case
+
+        try:
+            # Get suggestion acceptance rates over time
+            seven_days_ago = datetime.utcnow() - timedelta(days=7)
+
+            # Overall metrics - include all selections, not just suggested ones
+            total_suggestions = db.query(func.count(UserSelectionHistory.id)).filter(
+                UserSelectionHistory.user_id == current_user.id
+            ).scalar() or 0
+
+            # Count selections that had some confidence (indicating AI involvement)
+            accepted_suggestions = db.query(func.count(UserSelectionHistory.id)).filter(
+                UserSelectionHistory.user_id == current_user.id,
+                UserSelectionHistory.suggestion_confidence.isnot(None),
+                UserSelectionHistory.suggestion_confidence > 0.0
+            ).scalar() or 0
+
+            # Recent trends - all selections
+            recent_suggestions = db.query(func.count(UserSelectionHistory.id)).filter(
+                UserSelectionHistory.user_id == current_user.id,
+                UserSelectionHistory.created_at >= seven_days_ago
+            ).scalar() or 0
+
+            # Confidence distribution - only for records with actual confidence values
+            confidence_ranges = db.query(
+                case(
+                    (UserSelectionHistory.suggestion_confidence >= 0.8, 'high'),
+                    (UserSelectionHistory.suggestion_confidence >= 0.6, 'medium'),
+                    else_='low'
+                ).label('confidence_range'),
+                func.count(UserSelectionHistory.id).label('count')
+            ).filter(
+                UserSelectionHistory.user_id == current_user.id,
+                UserSelectionHistory.suggestion_confidence.isnot(None)
+            ).group_by('confidence_range').all()
+
+            confidence_distribution = {range_name: count for range_name, count in confidence_ranges}
+
+            # Most successful patterns
+            top_patterns = db.query(UserTransactionPattern).filter(
+                UserTransactionPattern.user_id == current_user.id
+            ).order_by(UserTransactionPattern.success_rate.desc(), UserTransactionPattern.id).limit(5).all()
+
+            return {
+                "overall_metrics": {
+                    "total_suggestions_made": total_suggestions,
+                    "total_suggestions_accepted": accepted_suggestions,
+                    "acceptance_rate": (accepted_suggestions / total_suggestions * 100) if total_suggestions > 0 else 0,
+                    "recent_suggestions_7_days": recent_suggestions
+                },
+                "confidence_distribution": {
+                    "high_confidence": confidence_distribution.get('high', 0),
+                    "medium_confidence": confidence_distribution.get('medium', 0),
+                    "low_confidence": confidence_distribution.get('low', 0)
+                },
+                "top_patterns": [
+                    {
+                        "id": str(pattern.id),
+                        "keywords": pattern.description_keywords[:3],  # First 3 keywords
+                        "payee_name": pattern.payee.name if pattern.payee else None,
+                        "category_name": pattern.category.name if pattern.category else None,
+                        "success_rate": pattern.success_rate,
+                        "usage_frequency": pattern.usage_frequency,
+                        "confidence_score": pattern.confidence_score
+                    }
+                    for pattern in top_patterns
+                ]
+            }
+
+        except Exception:
+            # Return default structure with empty data if there's an error
+            return {
+                "overall_metrics": {
+                    "total_suggestions_made": 0,
+                    "total_suggestions_accepted": 0,
+                    "acceptance_rate": 0.0,
+                    "recent_suggestions_7_days": 0
+                },
+                "confidence_distribution": {
+                    "high_confidence": 0,
+                    "medium_confidence": 0,
+                    "low_confidence": 0
+                },
+                "top_patterns": []
+            }
+
+    return await run_in_threadpool(_pg)
+
+
+def _process_pattern_analytics(all_patterns) -> dict:
+    from collections import defaultdict
+
+    category_agg = defaultdict(lambda: [0, 0.0])  # count, confidence sum
+    payee_agg = defaultdict(lambda: [0, 0.0])
+    keyword_frequency: dict = {}
+
+    for pattern in all_patterns:
+        category_agg[pattern.category_id][0] += 1
+        category_agg[pattern.category_id][1] += pattern.confidence_score
+        payee_agg[pattern.payee_id][0] += 1
+        payee_agg[pattern.payee_id][1] += pattern.confidence_score
+        if pattern.description_keywords:
+            for keyword in pattern.description_keywords:
+                keyword_frequency[keyword] = keyword_frequency.get(keyword, 0) + 1
+
+    # Tiebreak alphabetically - ties would otherwise keep whatever arbitrary order
+    # the (unordered) pattern fetch produced, differing between Postgres and Mongo.
+    top_keywords = sorted(keyword_frequency.items(), key=lambda x: (-x[1], x[0]))[:10]
+
+    return {
+        "pattern_distribution": {
+            "by_category": len(category_agg),
+            "by_payee": len(payee_agg),
+            "total_patterns": len(all_patterns)
+        },
+        "keyword_insights": {
+            "total_unique_keywords": len(keyword_frequency),
+            "most_frequent_keywords": [
+                {"keyword": keyword, "frequency": freq}
+                for keyword, freq in top_keywords
+            ]
+        },
+        "category_breakdown": [
+            {
+                "category_id": str(cat_id) if cat_id else None,
+                "pattern_count": count,
+                "average_confidence": float(total_conf / count) if count else 0.0
+            }
+            for cat_id, (count, total_conf) in category_agg.items()
+        ],
+        "payee_breakdown": [
+            {
+                "payee_id": str(payee_id) if payee_id else None,
+                "pattern_count": count,
+                "average_confidence": float(total_conf / count) if count else 0.0
+            }
+            for payee_id, (count, total_conf) in payee_agg.items()
+        ]
+    }
+
+
+_EMPTY_PATTERN_ANALYTICS = {
+    "pattern_distribution": {"by_category": 0, "by_payee": 0, "total_patterns": 0},
+    "keyword_insights": {"total_unique_keywords": 0, "most_frequent_keywords": []},
+    "category_breakdown": [],
+    "payee_breakdown": []
+}
+
+
+@router.get("/analytics/patterns")
+async def get_pattern_analytics(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
 ):
     """Get detailed pattern analytics and insights"""
-    
     try:
-        from models.learning import UserTransactionPattern
-        from sqlalchemy import func
-        
-        # Pattern distribution by category
-        category_patterns = db.query(
-            UserTransactionPattern.category_id,
-            func.count(UserTransactionPattern.id).label('pattern_count'),
-            func.avg(UserTransactionPattern.confidence_score).label('avg_confidence')
-        ).filter(
-            UserTransactionPattern.user_id == current_user.id
-        ).group_by(UserTransactionPattern.category_id).all()
-        
-        # Pattern distribution by payee
-        payee_patterns = db.query(
-            UserTransactionPattern.payee_id,
-            func.count(UserTransactionPattern.id).label('pattern_count'),
-            func.avg(UserTransactionPattern.confidence_score).label('avg_confidence')
-        ).filter(
-            UserTransactionPattern.user_id == current_user.id
-        ).group_by(UserTransactionPattern.payee_id).all()
-        
-        # Most frequent keywords
-        all_patterns = db.query(UserTransactionPattern).filter(
-            UserTransactionPattern.user_id == current_user.id
-        ).all()
-        
-        keyword_frequency = {}
-        for pattern in all_patterns:
-            if pattern.description_keywords:
-                for keyword in pattern.description_keywords:
-                    keyword_frequency[keyword] = keyword_frequency.get(keyword, 0) + 1
-        
-        top_keywords = sorted(keyword_frequency.items(), key=lambda x: x[1], reverse=True)[:10]
-        
-        return {
-            "pattern_distribution": {
-                "by_category": len(category_patterns),
-                "by_payee": len(payee_patterns),
-                "total_patterns": len(all_patterns)
-            },
-            "keyword_insights": {
-                "total_unique_keywords": len(keyword_frequency),
-                "most_frequent_keywords": [
-                    {"keyword": keyword, "frequency": freq} 
-                    for keyword, freq in top_keywords
-                ]
-            },
-            "category_breakdown": [
-                {
-                    "category_id": str(cat_id) if cat_id else None,
-                    "pattern_count": count,
-                    "average_confidence": float(avg_conf or 0)
-                }
-                for cat_id, count, avg_conf in category_patterns
-            ],
-            "payee_breakdown": [
-                {
-                    "payee_id": str(payee_id) if payee_id else None,
-                    "pattern_count": count,
-                    "average_confidence": float(avg_conf or 0)
-                }
-                for payee_id, count, avg_conf in payee_patterns
-            ]
-        }
-        
-    except Exception as e:
-        # Return default structure with empty data if there's an error
-        return {
-            "pattern_distribution": {
-                "by_category": 0,
-                "by_payee": 0,
-                "total_patterns": 0
-            },
-            "keyword_insights": {
-                "total_unique_keywords": 0,
-                "most_frequent_keywords": []
-            },
-            "category_breakdown": [],
-            "payee_breakdown": []
-        }
+        if READ_SOURCE == "mongo":
+            all_patterns = await UserTransactionPatternDocument.find(
+                UserTransactionPatternDocument.user_id == str(current_user.id)
+            ).to_list()
+        else:
+            def _fetch_pg():
+                from models.learning import UserTransactionPattern
+                return db.query(UserTransactionPattern).filter(
+                    UserTransactionPattern.user_id == current_user.id
+                ).all()
+            all_patterns = await run_in_threadpool(_fetch_pg)
+        return _process_pattern_analytics(all_patterns)
+    except Exception:
+        return _EMPTY_PATTERN_ANALYTICS
+
+
+def _process_accuracy_analytics(selections) -> dict:
+    from collections import defaultdict
+
+    daily_agg = defaultdict(lambda: [0, 0])  # total, accurate
+    field_agg = defaultdict(lambda: [0, 0.0])  # count, confidence sum
+
+    for s in selections:
+        if s.created_at:
+            day = s.created_at.date() if hasattr(s.created_at, 'date') else s.created_at
+            daily_agg[day][0] += 1
+            if s.suggestion_confidence is not None and s.suggestion_confidence >= 0.7:
+                daily_agg[day][1] += 1
+        if s.suggestion_confidence is not None:
+            field_agg[s.field_type][0] += 1
+            field_agg[s.field_type][1] += s.suggestion_confidence
+
+    return {
+        "daily_accuracy": [
+            {
+                "date": str(day),
+                "total_suggestions": total,
+                "accurate_suggestions": accurate,
+                "accuracy_rate": (accurate / total * 100) if total > 0 and accurate else 0
+            }
+            for day, (total, accurate) in sorted(daily_agg.items())
+        ],
+        "field_accuracy": [
+            {
+                "field_type": field_type,
+                "average_confidence": float(total_conf / count) if count else 0.0,
+                "suggestion_count": count
+            }
+            for field_type, (count, total_conf) in field_agg.items()
+        ]
+    }
 
 
 @router.get("/analytics/accuracy")
-def get_accuracy_analytics(
+async def get_accuracy_analytics(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
     """Get suggestion accuracy analytics over time"""
-    
     try:
-        from models.learning import UserSelectionHistory
-        from sqlalchemy import func, case
-        from datetime import datetime, timedelta
-        
-        # Daily accuracy for last 30 days
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        
-        daily_accuracy = db.query(
-            func.date(UserSelectionHistory.created_at).label('date'),
-            func.count(UserSelectionHistory.id).label('total_suggestions'),
-            func.sum(
-                case(
-                    (UserSelectionHistory.suggestion_confidence >= 0.7, 1),
-                    else_=0
-                )
-            ).label('accurate_suggestions')
-        ).filter(
-            UserSelectionHistory.user_id == current_user.id,
-            UserSelectionHistory.created_at >= thirty_days_ago
-        ).group_by(func.date(UserSelectionHistory.created_at)).all()
-        
-        # Field-specific accuracy - include all records with confidence data
-        field_accuracy = db.query(
-            UserSelectionHistory.field_type,
-            func.avg(UserSelectionHistory.suggestion_confidence).label('avg_confidence'),
-            func.count(UserSelectionHistory.id).label('suggestion_count')
-        ).filter(
-            UserSelectionHistory.user_id == current_user.id,
-            UserSelectionHistory.suggestion_confidence.isnot(None)
-        ).group_by(UserSelectionHistory.field_type).all()
-        
-        return {
-            "daily_accuracy": [
-                {
-                    "date": str(date),
-                    "total_suggestions": total,
-                    "accurate_suggestions": accurate or 0,
-                    "accuracy_rate": (accurate / total * 100) if total > 0 and accurate else 0
-                }
-                for date, total, accurate in daily_accuracy
-            ],
-            "field_accuracy": [
-                {
-                    "field_type": field_type,
-                    "average_confidence": float(avg_conf or 0),
-                    "suggestion_count": count
-                }
-                for field_type, avg_conf, count in field_accuracy
-            ]
-        }
-        
-    except Exception as e:
-        # Return default structure with empty data if there's an error
-        return {
-            "daily_accuracy": [],
-            "field_accuracy": []
-        }
+        if READ_SOURCE == "mongo":
+            selections = await UserSelectionHistoryDocument.find(
+                UserSelectionHistoryDocument.user_id == str(current_user.id),
+                UserSelectionHistoryDocument.created_at >= thirty_days_ago,
+            ).to_list()
+            # Field-specific accuracy intentionally ignores the 30-day window (matches
+            # the Postgres query below, which only applies created_at >= thirty_days_ago
+            # to daily_accuracy, not field_accuracy).
+            all_with_confidence = await UserSelectionHistoryDocument.find(
+                UserSelectionHistoryDocument.user_id == str(current_user.id),
+                UserSelectionHistoryDocument.suggestion_confidence != None,  # noqa: E711 - Beanie query operator
+            ).to_list()
+        else:
+            from models.learning import UserSelectionHistory
+
+            def _fetch_pg():
+                recent = db.query(UserSelectionHistory).filter(
+                    UserSelectionHistory.user_id == current_user.id,
+                    UserSelectionHistory.created_at >= thirty_days_ago,
+                ).all()
+                with_confidence = db.query(UserSelectionHistory).filter(
+                    UserSelectionHistory.user_id == current_user.id,
+                    UserSelectionHistory.suggestion_confidence.isnot(None),
+                ).all()
+                return recent, with_confidence
+            selections, all_with_confidence = await run_in_threadpool(_fetch_pg)
+
+        # daily_accuracy only needs the 30-day-windowed set; field_accuracy only
+        # needs the has-confidence set - merge without double counting by computing
+        # them from their respective inputs directly.
+        daily_result = _process_accuracy_analytics(selections)["daily_accuracy"]
+        field_result = _process_accuracy_analytics(all_with_confidence)["field_accuracy"]
+        return {"daily_accuracy": daily_result, "field_accuracy": field_result}
+    except Exception:
+        return {"daily_accuracy": [], "field_accuracy": []}
 
 
 @router.post("/auto-categorize")
@@ -1085,128 +1236,124 @@ def smart_import_preprocess(
     }
 
 
-@router.get("/predictions/spending-patterns")
-def get_spending_pattern_predictions(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Predict future spending patterns based on historical data"""
-    
+def _fetch_spending_predictions_pg(db: Session, user_id: uuid.UUID, one_year_ago):
     from models.transactions import Transaction
-    from models.categories import Category
-    from sqlalchemy import func, extract
-    from datetime import datetime, timedelta
-    import calendar
-    
-    # Get transactions from last 12 months
-    one_year_ago = datetime.utcnow() - timedelta(days=365)
-    
-    # Monthly spending by category
-    monthly_spending = db.query(
-        extract('month', Transaction.date).label('month'),
-        extract('year', Transaction.date).label('year'),
-        Transaction.category_id,
-        func.sum(Transaction.amount).label('total_amount'),
-        func.count(Transaction.id).label('transaction_count')
-    ).filter(
-        Transaction.user_id == current_user.id,
+    return db.query(Transaction).options(joinedload(Transaction.category)).filter(
+        Transaction.user_id == user_id,
         Transaction.type == 'expense',
         Transaction.date >= one_year_ago
-    ).group_by(
-        extract('month', Transaction.date),
-        extract('year', Transaction.date),
-        Transaction.category_id
     ).all()
-    
+
+
+async def _fetch_spending_predictions_mongo(user_id: str, one_year_ago):
+    return await TransactionDocument.find(
+        TransactionDocument.user_id == user_id,
+        TransactionDocument.type == 'expense',
+        TransactionDocument.date >= one_year_ago,
+    ).to_list()
+
+
+def _process_spending_predictions(transactions) -> dict:
+    import calendar
+
+    # Deterministic chronological order - both fetches are unordered, and
+    # "recent 3 months" below depends on insertion order into monthly_amounts.
+    transactions = sorted(transactions, key=lambda t: (t.date, t.created_at or datetime.min, str(t.id)))
+
+    # Group into (year, month, category_id) -> {total_amount, transaction_count},
+    # replicating the original SQL GROUP BY in Python.
+    monthly_spending: dict = {}
+    for t in transactions:
+        key = (t.date.year, t.date.month, t.category_id)
+        if key not in monthly_spending:
+            monthly_spending[key] = [0.0, 0, t.category.name if t.category else None, t.category.color if t.category else None]
+        monthly_spending[key][0] += float(t.amount)
+        monthly_spending[key][1] += 1
+
     # Calculate averages and predictions
     category_predictions = {}
-    
-    for month, year, category_id, total_amount, transaction_count in monthly_spending:
+    for (year, month, category_id), (total_amount, transaction_count, cat_name, cat_color) in monthly_spending.items():
         if category_id not in category_predictions:
             category_predictions[category_id] = {
                 'monthly_amounts': [],
                 'transaction_counts': [],
-                'category_id': category_id
+                'category_id': category_id,
+                'category_name': cat_name,
+                'category_color': cat_color,
             }
-        
-        category_predictions[category_id]['monthly_amounts'].append(float(total_amount))
+        category_predictions[category_id]['monthly_amounts'].append(total_amount)
         category_predictions[category_id]['transaction_counts'].append(transaction_count)
-    
+
     # Generate predictions for next 3 months
     predictions = []
     current_month = datetime.utcnow().month
     current_year = datetime.utcnow().year
-    
+
     for category_id, data in category_predictions.items():
         if len(data['monthly_amounts']) >= 3:  # Need at least 3 months of data
             avg_amount = sum(data['monthly_amounts']) / len(data['monthly_amounts'])
             avg_transactions = sum(data['transaction_counts']) / len(data['transaction_counts'])
-            
+
             # Simple trend calculation
             recent_avg = sum(data['monthly_amounts'][-3:]) / min(3, len(data['monthly_amounts']))
             trend_factor = recent_avg / avg_amount if avg_amount > 0 else 1.0
-            
-            category = db.query(Category).filter(Category.id == category_id).first()
-            
+
             for i in range(1, 4):  # Next 3 months
                 predicted_month = (current_month + i - 1) % 12 + 1
                 predicted_year = current_year + ((current_month + i - 1) // 12)
-                
+
                 predicted_amount = avg_amount * trend_factor
                 predicted_transactions = int(avg_transactions)
-                
+
                 predictions.append({
                     'month': predicted_month,
                     'year': predicted_year,
                     'month_name': calendar.month_name[predicted_month],
-                    'category_id': str(category_id),
-                    'category_name': category.name if category else 'Unknown',
-                    'category_color': category.color if category else '#666666',
+                    'category_id': str(category_id) if category_id else None,
+                    'category_name': data['category_name'] or 'Unknown',
+                    'category_color': data['category_color'] or '#666666',
                     'predicted_amount': predicted_amount,
                     'predicted_transactions': predicted_transactions,
                     'confidence': min(0.9, len(data['monthly_amounts']) / 12),  # Higher confidence with more data
                     'trend': 'increasing' if trend_factor > 1.1 else 'decreasing' if trend_factor < 0.9 else 'stable'
                 })
-    
+
     return {
         "predictions": sorted(predictions, key=lambda x: (x['year'], x['month'], -x['predicted_amount'])),
-        "total_months_analyzed": len(set([(m, y) for m, y, _, _, _ in monthly_spending])),
+        "total_months_analyzed": len(set([(y, m) for y, m, _ in monthly_spending.keys()])),
         "categories_with_predictions": len(category_predictions)
     }
 
 
-@router.get("/predictions/anomalies")
-def detect_spending_anomalies(
+@router.get("/predictions/spending-patterns")
+async def get_spending_pattern_predictions(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
-    """Detect unusual spending patterns and potential anomalies"""
-    
-    from models.transactions import Transaction
-    from models.payees import Payee
-    from sqlalchemy import func
-    from datetime import datetime, timedelta
+    """Predict future spending patterns based on historical data"""
+    one_year_ago = datetime.utcnow() - timedelta(days=365)
+    if READ_SOURCE == "mongo":
+        transactions = await _fetch_spending_predictions_mongo(str(current_user.id), one_year_ago)
+    else:
+        transactions = await run_in_threadpool(
+            _fetch_spending_predictions_pg, db, uuid.UUID(str(current_user.id)), one_year_ago
+        )
+    return _process_spending_predictions(transactions)
+
+
+def _process_spending_anomalies(recent_transactions, baseline_transactions) -> dict:
     import statistics
-    
-    # Get recent transactions (last 90 days)
-    ninety_days_ago = datetime.utcnow() - timedelta(days=90)
-    recent_transactions = db.query(Transaction).filter(
-        Transaction.user_id == current_user.id,
-        Transaction.date >= ninety_days_ago,
-        Transaction.type == 'expense'
-    ).all()
-    
-    # Get historical baseline (6 months before that)
-    baseline_start = ninety_days_ago - timedelta(days=180)
-    baseline_transactions = db.query(Transaction).filter(
-        Transaction.user_id == current_user.id,
-        Transaction.date >= baseline_start,
-        Transaction.date < ninety_days_ago,
-        Transaction.type == 'expense'
-    ).all()
-    
+
+    # Deterministic order: both fetch queries are unordered, and several dict
+    # groupings below (category counts, new_payees) are built by iterating these
+    # lists, so arbitrary fetch order would otherwise make tie-breaking in the
+    # final sort (and dict insertion order) differ between Postgres and Mongo.
+    sort_key = lambda t: (t.date, t.created_at or datetime.min, str(t.id))
+    recent_transactions = sorted(recent_transactions, key=sort_key)
+    baseline_transactions = sorted(baseline_transactions, key=sort_key)
+
     anomalies = []
-    
+
     if baseline_transactions:
         # Calculate baseline statistics
         baseline_amounts = [float(t.amount) for t in baseline_transactions]
@@ -1232,28 +1379,35 @@ def detect_spending_anomalies(
                 'deviation_factor': float(transaction.amount) / baseline_mean if baseline_mean > 0 else 0
             })
         
-        # Detect frequency anomalies by category
+        # Detect frequency anomalies by category. Category names come from each
+        # transaction's own .category attribute (joinedloaded relationship on
+        # Postgres, embedded CategoryRef on Mongo) instead of a fresh lookup, so
+        # this works unmodified against either backend.
+        category_names = {}
         category_baseline_counts = {}
         for transaction in baseline_transactions:
             cat_id = transaction.category_id or 'uncategorized'
             category_baseline_counts[cat_id] = category_baseline_counts.get(cat_id, 0) + 1
-        
+            if transaction.category:
+                category_names[cat_id] = transaction.category.name
+
         category_recent_counts = {}
         for transaction in recent_transactions:
             cat_id = transaction.category_id or 'uncategorized'
             category_recent_counts[cat_id] = category_recent_counts.get(cat_id, 0) + 1
-        
+            if transaction.category:
+                category_names[cat_id] = transaction.category.name
+
         # Adjust for time period difference (90 days recent vs 180 days baseline)
         time_adjustment = 90 / 180
-        
+
         for cat_id, recent_count in category_recent_counts.items():
             baseline_count = category_baseline_counts.get(cat_id, 0) * time_adjustment
             if baseline_count > 0 and recent_count > baseline_count * 2:  # More than double the expected frequency
-                category = db.query(Category).filter(Category.id == cat_id).first() if cat_id != 'uncategorized' else None
                 anomalies.append({
                     'type': 'unusual_frequency',
                     'category_id': str(cat_id) if cat_id != 'uncategorized' else None,
-                    'category_name': category.name if category else 'Uncategorized',
+                    'category_name': category_names.get(cat_id, 'Uncategorized'),
                     'recent_count': recent_count,
                     'expected_count': int(baseline_count),
                     'frequency_factor': recent_count / baseline_count if baseline_count > 0 else 0,
@@ -1300,73 +1454,123 @@ def detect_spending_anomalies(
     }
 
 
-@router.get("/recommendations/budget")
-def get_budget_recommendations(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Generate intelligent budget recommendations based on spending patterns"""
-    
+def _fetch_anomalies_pg(db: Session, user_id: uuid.UUID, ninety_days_ago, baseline_start):
     from models.transactions import Transaction
-    from models.categories import Category
-    from sqlalchemy import func, extract
-    from datetime import datetime, timedelta
-    import statistics
-    
-    # Get last 6 months of expense data
-    six_months_ago = datetime.utcnow() - timedelta(days=180)
-    
-    # Monthly spending by category
-    monthly_category_spending = db.query(
-        extract('month', Transaction.date).label('month'),
-        extract('year', Transaction.date).label('year'),
-        Transaction.category_id,
-        func.sum(Transaction.amount).label('monthly_total')
-    ).filter(
-        Transaction.user_id == current_user.id,
-        Transaction.type == 'expense',
-        Transaction.date >= six_months_ago
-    ).group_by(
-        extract('month', Transaction.date),
-        extract('year', Transaction.date),
-        Transaction.category_id
+    recent = db.query(Transaction).options(joinedload(Transaction.category), joinedload(Transaction.payee)).filter(
+        Transaction.user_id == user_id,
+        Transaction.date >= ninety_days_ago,
+        Transaction.type == 'expense'
     ).all()
-    
-    # Calculate category-based budget recommendations
-    category_budgets = {}
-    
-    for month, year, category_id, monthly_total in monthly_category_spending:
-        if category_id not in category_budgets:
-            category_budgets[category_id] = []
-        category_budgets[category_id].append(float(monthly_total))
-    
+    baseline = db.query(Transaction).options(joinedload(Transaction.category), joinedload(Transaction.payee)).filter(
+        Transaction.user_id == user_id,
+        Transaction.date >= baseline_start,
+        Transaction.date < ninety_days_ago,
+        Transaction.type == 'expense'
+    ).all()
+    return recent, baseline
+
+
+async def _fetch_anomalies_mongo(user_id: str, ninety_days_ago, baseline_start):
+    recent = await TransactionDocument.find(
+        TransactionDocument.user_id == user_id,
+        TransactionDocument.date >= ninety_days_ago,
+        TransactionDocument.type == 'expense',
+    ).to_list()
+    baseline = await TransactionDocument.find(
+        TransactionDocument.user_id == user_id,
+        TransactionDocument.date >= baseline_start,
+        TransactionDocument.date < ninety_days_ago,
+        TransactionDocument.type == 'expense',
+    ).to_list()
+    return recent, baseline
+
+
+@router.get("/predictions/anomalies")
+async def detect_spending_anomalies(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """Detect unusual spending patterns and potential anomalies"""
+    ninety_days_ago = datetime.utcnow() - timedelta(days=90)
+    baseline_start = ninety_days_ago - timedelta(days=180)
+
+    if READ_SOURCE == "mongo":
+        recent, baseline = await _fetch_anomalies_mongo(str(current_user.id), ninety_days_ago, baseline_start)
+    else:
+        recent, baseline = await run_in_threadpool(
+            _fetch_anomalies_pg, db, uuid.UUID(str(current_user.id)), ninety_days_ago, baseline_start
+        )
+    return _process_spending_anomalies(recent, baseline)
+
+
+def _fetch_budget_recommendations_pg(db: Session, user_id: uuid.UUID, six_months_ago):
+    from models.transactions import Transaction
+    expenses = db.query(Transaction).options(joinedload(Transaction.category)).filter(
+        Transaction.user_id == user_id, Transaction.type == 'expense', Transaction.date >= six_months_ago
+    ).all()
+    incomes = db.query(Transaction).filter(
+        Transaction.user_id == user_id, Transaction.type == 'income', Transaction.date >= six_months_ago
+    ).all()
+    return expenses, incomes
+
+
+async def _fetch_budget_recommendations_mongo(user_id: str, six_months_ago):
+    expenses = await TransactionDocument.find(
+        TransactionDocument.user_id == user_id, TransactionDocument.type == 'expense',
+        TransactionDocument.date >= six_months_ago,
+    ).to_list()
+    incomes = await TransactionDocument.find(
+        TransactionDocument.user_id == user_id, TransactionDocument.type == 'income',
+        TransactionDocument.date >= six_months_ago,
+    ).to_list()
+    return expenses, incomes
+
+
+def _process_budget_recommendations(expenses, incomes) -> dict:
+    import statistics
+
+    sort_key = lambda t: (t.date, t.created_at or datetime.min, str(t.id))
+    expenses = sorted(expenses, key=sort_key)
+    incomes = sorted(incomes, key=sort_key)
+
+    # Group expenses into (year, month, category_id) -> monthly total, replicating
+    # the original SQL GROUP BY in Python.
+    monthly_category_totals: dict = {}
+    category_names: dict = {}
+    for t in expenses:
+        key = (t.date.year, t.date.month, t.category_id)
+        monthly_category_totals[key] = monthly_category_totals.get(key, 0.0) + float(t.amount)
+        if t.category:
+            category_names[t.category_id] = (t.category.name, t.category.color)
+
+    category_budgets: dict = {}
+    for (year, month, category_id), total in monthly_category_totals.items():
+        category_budgets.setdefault(category_id, []).append(total)
+
     recommendations = []
     total_recommended_budget = 0
-    
+
     for category_id, monthly_amounts in category_budgets.items():
         if len(monthly_amounts) >= 2:  # Need at least 2 months of data
             avg_spending = statistics.mean(monthly_amounts)
             spending_stdev = statistics.stdev(monthly_amounts) if len(monthly_amounts) > 1 else 0
-            
-            # Calculate trend
+
             recent_avg = statistics.mean(monthly_amounts[-2:]) if len(monthly_amounts) >= 2 else avg_spending
             trend_factor = recent_avg / avg_spending if avg_spending > 0 else 1.0
-            
-            # Budget recommendation: average + some buffer for variability
+
             buffer_factor = 1.2 + (spending_stdev / avg_spending * 0.5) if avg_spending > 0 else 1.2
             recommended_budget = avg_spending * buffer_factor * trend_factor
-            
-            category = db.query(Category).filter(Category.id == category_id).first()
-            
-            # Determine priority based on spending consistency and amount
+
+            name, color = category_names.get(category_id, (None, None))
+
             consistency_score = 1 - (spending_stdev / avg_spending) if avg_spending > 0 else 0
             priority = 'high' if avg_spending > 500 and consistency_score > 0.7 else \
                       'medium' if avg_spending > 100 or consistency_score > 0.5 else 'low'
-            
+
             recommendations.append({
-                'category_id': str(category_id),
-                'category_name': category.name if category else 'Uncategorized',
-                'category_color': category.color if category else '#666666',
+                'category_id': str(category_id) if category_id else None,
+                'category_name': name or 'Uncategorized',
+                'category_color': color or '#666666',
                 'current_avg_spending': avg_spending,
                 'recommended_budget': recommended_budget,
                 'spending_variance': spending_stdev,
@@ -1376,24 +1580,19 @@ def get_budget_recommendations(
                 'months_analyzed': len(monthly_amounts),
                 'savings_opportunity': max(0, avg_spending - recommended_budget * 0.8) if trend_factor < 1.0 else 0
             })
-            
+
             total_recommended_budget += recommended_budget
-    
-    # Get income data for budget feasibility check
-    monthly_income = db.query(
-        func.avg(func.sum(Transaction.amount)).label('avg_monthly_income')
-    ).filter(
-        Transaction.user_id == current_user.id,
-        Transaction.type == 'income',
-        Transaction.date >= six_months_ago
-    ).group_by(
-        extract('month', Transaction.date),
-        extract('year', Transaction.date)
-    ).scalar() or 0
-    
-    # Calculate savings recommendation
+
+    # Average monthly income: group incomes by (year, month), sum each, then average
+    # those monthly sums - matches func.avg(func.sum(...)).group_by(month, year).
+    monthly_income_totals: dict = {}
+    for t in incomes:
+        key = (t.date.year, t.date.month)
+        monthly_income_totals[key] = monthly_income_totals.get(key, 0.0) + float(t.amount)
+    monthly_income = statistics.mean(monthly_income_totals.values()) if monthly_income_totals else 0
+
     savings_rate = (float(monthly_income) - total_recommended_budget) / float(monthly_income) if monthly_income > 0 else 0
-    
+
     return {
         "category_recommendations": sorted(recommendations, key=lambda x: -x['current_avg_spending']),
         "summary": {
@@ -1411,41 +1610,52 @@ def get_budget_recommendations(
     }
 
 
-@router.get("/trends/forecast")
-def get_expense_trend_forecast(
+@router.get("/recommendations/budget")
+async def get_budget_recommendations(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
-    """Generate expense trend analysis and forecasting"""
-    
+    """Generate intelligent budget recommendations based on spending patterns"""
+    six_months_ago = datetime.utcnow() - timedelta(days=180)
+    if READ_SOURCE == "mongo":
+        expenses, incomes = await _fetch_budget_recommendations_mongo(str(current_user.id), six_months_ago)
+    else:
+        expenses, incomes = await run_in_threadpool(
+            _fetch_budget_recommendations_pg, db, uuid.UUID(str(current_user.id)), six_months_ago
+        )
+    return _process_budget_recommendations(expenses, incomes)
+
+
+def _fetch_trend_forecast_pg(db: Session, user_id: uuid.UUID, one_year_ago):
     from models.transactions import Transaction
-    from sqlalchemy import func, extract
-    from datetime import datetime, timedelta
-    import calendar
-    
-    # Get 12 months of data
-    one_year_ago = datetime.utcnow() - timedelta(days=365)
-    
-    # Monthly totals by type
-    monthly_totals = db.query(
-        extract('month', Transaction.date).label('month'),
-        extract('year', Transaction.date).label('year'),
-        Transaction.type,
-        func.sum(Transaction.amount).label('total_amount'),
-        func.count(Transaction.id).label('transaction_count')
-    ).filter(
-        Transaction.user_id == current_user.id,
-        Transaction.date >= one_year_ago
-    ).group_by(
-        extract('month', Transaction.date),
-        extract('year', Transaction.date),
-        Transaction.type
+    return db.query(Transaction).filter(
+        Transaction.user_id == user_id, Transaction.date >= one_year_ago
     ).all()
-    
+
+
+async def _fetch_trend_forecast_mongo(user_id: str, one_year_ago):
+    return await TransactionDocument.find(
+        TransactionDocument.user_id == user_id, TransactionDocument.date >= one_year_ago,
+    ).to_list()
+
+
+def _process_trend_forecast(transactions) -> dict:
+    import calendar
+
+    # Group into (year, month, type) -> {total_amount, transaction_count}, replicating
+    # the original SQL GROUP BY in Python (commutative sum, no fetch-order dependency).
+    grouped: dict = {}
+    for t in transactions:
+        key = (t.date.year, t.date.month, t.type)
+        if key not in grouped:
+            grouped[key] = [0.0, 0]
+        grouped[key][0] += float(t.amount)
+        grouped[key][1] += 1
+
     # Organize data by month and type
     monthly_data = {}
-    
-    for month, year, transaction_type, total_amount, transaction_count in monthly_totals:
+
+    for (year, month, transaction_type), (total_amount, transaction_count) in grouped.items():
         month_key = f"{year}-{month:02d}"
         if month_key not in monthly_data:
             monthly_data[month_key] = {
@@ -1548,6 +1758,21 @@ def get_expense_trend_forecast(
         }
     }
 
+
+@router.get("/trends/forecast")
+async def get_expense_trend_forecast(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    """Generate expense trend analysis and forecasting"""
+    one_year_ago = datetime.utcnow() - timedelta(days=365)
+    if READ_SOURCE == "mongo":
+        transactions = await _fetch_trend_forecast_mongo(str(current_user.id), one_year_ago)
+    else:
+        transactions = await run_in_threadpool(_fetch_trend_forecast_pg, db, uuid.UUID(str(current_user.id)), one_year_ago)
+    return _process_trend_forecast(transactions)
+
+
 @router.post("/train")
 def manually_train_model(
     db: Session = Depends(get_db),
@@ -1609,21 +1834,7 @@ def cleanup_selection_history(
         raise HTTPException(status_code=500, detail=f"Failed to cleanup selection history: {str(e)}")
 
 
-@router.get("/correction-patterns")
-def get_correction_patterns(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    Get user's correction patterns to understand how often they correct AI suggestions.
-    Useful for improving the learning system and debugging suggestion accuracy.
-    """
-    from models.learning import UserCorrectionPattern
-    
-    correction_patterns = db.query(UserCorrectionPattern).filter(
-        UserCorrectionPattern.user_id == current_user.id
-    ).order_by(UserCorrectionPattern.correction_frequency.desc()).all()
-    
+def _process_correction_patterns(correction_patterns) -> dict:
     patterns_data = []
     for pattern in correction_patterns:
         patterns_data.append({
@@ -1639,7 +1850,7 @@ def get_correction_patterns(
             "last_seen": pattern.last_seen.isoformat() if pattern.last_seen else None,
             "context_data": pattern.context_data
         })
-    
+
     return {
         "correction_patterns": patterns_data,
         "total_patterns": len(patterns_data),
@@ -1651,15 +1862,131 @@ def get_correction_patterns(
     }
 
 
-@router.get("/correction-insights")
-def get_correction_insights(
+@router.get("/correction-patterns")
+async def get_correction_patterns(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
+):
+    """
+    Get user's correction patterns to understand how often they correct AI suggestions.
+    Useful for improving the learning system and debugging suggestion accuracy.
+    """
+    if READ_SOURCE == "mongo":
+        patterns = await UserCorrectionPatternDocument.find(
+            UserCorrectionPatternDocument.user_id == str(current_user.id)
+        ).sort(-UserCorrectionPatternDocument.correction_frequency, "_id").to_list()
+    else:
+        def _fetch_pg():
+            from models.learning import UserCorrectionPattern
+            return db.query(UserCorrectionPattern).filter(
+                UserCorrectionPattern.user_id == current_user.id
+            ).order_by(UserCorrectionPattern.correction_frequency.desc(), UserCorrectionPattern.id).all()
+        patterns = await run_in_threadpool(_fetch_pg)
+    return _process_correction_patterns(patterns)
+
+
+def _process_correction_insights(corrections) -> dict:
+    """Mirrors TransactionLearningService.get_correction_insights - a Mongo
+    UserCorrectionPatternDocument and a Postgres UserCorrectionPattern expose the
+    same attribute surface this needs, so the logic works unmodified either way."""
+    try:
+        from collections import defaultdict
+        import re
+
+        if not corrections:
+            return {"message": "No correction patterns found", "insights": []}
+
+        insights = []
+
+        suggestion_corrections = defaultdict(list)
+        for correction in corrections:
+            key = f"{correction.original_suggestion_type}:{correction.original_suggestion_name}"
+            suggestion_corrections[key].append(correction)
+
+        problematic_suggestions = []
+        for suggestion, correction_list in suggestion_corrections.items():
+            total_corrections = sum(c.correction_frequency for c in correction_list)
+            if total_corrections >= 2:
+                suggestion_type, suggestion_name = suggestion.split(":", 1)
+                correction_counts = defaultdict(int)
+                for correction in correction_list:
+                    correction_counts[correction.user_correction_name] += correction.correction_frequency
+                most_common_correction = max(correction_counts.items(), key=lambda x: x[1])
+                problematic_suggestions.append({
+                    "suggestion_type": suggestion_type,
+                    "suggestion_name": suggestion_name,
+                    "total_corrections": total_corrections,
+                    "most_common_correction": most_common_correction[0],
+                    "correction_frequency": most_common_correction[1]
+                })
+
+        problematic_suggestions.sort(key=lambda x: x["total_corrections"], reverse=True)
+
+        if problematic_suggestions:
+            insights.append({
+                "type": "frequently_corrected_suggestions",
+                "title": "Frequently Corrected Suggestions",
+                "description": "These suggestions are often corrected by the user",
+                "data": problematic_suggestions[:10],
+                "suggestion": "Consider updating the learning patterns for these suggestions"
+            })
+
+        description_patterns = defaultdict(list)
+        for correction in corrections:
+            if correction.transaction_description:
+                words = re.findall(r'\b\w+\b', correction.transaction_description.lower())
+                for word in words:
+                    if len(word) > 3:
+                        description_patterns[word].append(correction)
+
+        problematic_keywords = []
+        for keyword, correction_list in description_patterns.items():
+            if len(correction_list) >= 2:
+                total_corrections = sum(c.correction_frequency for c in correction_list)
+                problematic_keywords.append({
+                    "keyword": keyword,
+                    "correction_count": len(correction_list),
+                    "total_corrections": total_corrections
+                })
+
+        problematic_keywords.sort(key=lambda x: x["total_corrections"], reverse=True)
+
+        if problematic_keywords:
+            insights.append({
+                "type": "problematic_keywords",
+                "title": "Keywords Often Associated with Corrections",
+                "description": "Transaction descriptions containing these keywords often lead to corrections",
+                "data": problematic_keywords[:10],
+                "suggestion": "Improve pattern recognition for transactions containing these keywords"
+            })
+
+        return {
+            "total_corrections": len(corrections),
+            "unique_patterns": len(suggestion_corrections),
+            "insights": insights
+        }
+
+    except Exception as e:
+        return {"error": f"Failed to analyze correction patterns: {str(e)}"}
+
+
+@router.get("/correction-insights")
+async def get_correction_insights(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
 ):
     """
     Get insights from user correction patterns to understand and improve AI suggestion accuracy.
     """
-    insights = TransactionLearningService.get_correction_insights(db, current_user.id)
+    if READ_SOURCE == "mongo":
+        corrections = await UserCorrectionPatternDocument.find(
+            UserCorrectionPatternDocument.user_id == str(current_user.id)
+        ).to_list()
+        insights = _process_correction_insights(corrections)
+    else:
+        insights = await run_in_threadpool(
+            TransactionLearningService.get_correction_insights, db, current_user.id
+        )
 
     return {
         "status": "success",

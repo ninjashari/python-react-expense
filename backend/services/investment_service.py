@@ -24,6 +24,9 @@ from sqlalchemy import func, case
 from models.accounts import Account
 from models.categories import Category
 from models.transactions import Transaction
+from models_mongo.accounts import AccountDocument
+from models_mongo.categories import CategoryDocument
+from models_mongo.transactions import TransactionDocument
 
 BALANCE_TRACKED_TYPES = ['investment', 'ppf']
 
@@ -97,7 +100,12 @@ def replay_category_transactions(txns: Sequence[ReplayTxn]) -> CategoryReplayRes
     realized_gain_loss = Decimal('0')
     events: List[CategoryReplayEvent] = []
 
-    for txn in sorted(txns, key=lambda t: t.date):
+    # Tiebreak by id for same-date transactions: without it, ties resolve in
+    # whatever arbitrary order the caller's fetch produced, which silently
+    # diverges between Postgres and Mongo (verified empirically) and makes the
+    # running_principal/realized_gain_loss sequence non-deterministic even on a
+    # single backend across requests.
+    for txn in sorted(txns, key=lambda t: (t.date, str(t.id))):
         delta = Decimal('0')
         if txn.direction == 'invested':
             running_principal += txn.amount
@@ -143,6 +151,29 @@ def fetch_group_b_transactions(db: Session, user_id, group_a_account_ids: Set[uu
     if group_a_account_ids:
         q = q.filter(~Transaction.account_id.in_(group_a_account_ids))
     return q.order_by(Transaction.date.asc()).all()
+
+
+async def fetch_group_b_transactions_mongo(user_id: str, group_a_account_ids: Set) -> List[TransactionDocument]:
+    """Mongo equivalent of fetch_group_b_transactions - filters by category.is_investment
+    using the embedded CategoryRef snapshot rather than a join, since TransactionDocument
+    already carries it."""
+    categories = await CategoryDocument.find(
+        CategoryDocument.user_id == user_id, CategoryDocument.is_investment == True  # noqa: E712
+    ).to_list()
+    investment_category_ids = {c.id for c in categories}
+    if not investment_category_ids:
+        return []
+
+    group_a_ids_str = {str(a) for a in group_a_account_ids} if group_a_account_ids else set()
+    txns = await TransactionDocument.find(
+        TransactionDocument.user_id == user_id,
+        TransactionDocument.category_id != None,  # noqa: E711 - Beanie query operator
+        {"type": {"$in": ['income', 'expense']}},
+    ).sort("date").to_list()
+    return [
+        t for t in txns
+        if t.category_id in investment_category_ids and t.account_id not in group_a_ids_str
+    ]
 
 
 def replay_all_group_b_categories(txns: List[Transaction]) -> Dict[uuid.UUID, CategoryReplayResult]:
@@ -249,6 +280,54 @@ def compute_group_a(
     )
 
 
+async def compute_group_a_mongo(
+    user_id: str, account_id_filter: Optional[Set] = None
+) -> GroupACalcResult:
+    all_accounts = await AccountDocument.find(AccountDocument.user_id == user_id).to_list()
+    accounts = [a for a in all_accounts if a.type in BALANCE_TRACKED_TYPES]
+    if account_id_filter is not None:
+        filter_str = {str(a) for a in account_id_filter}
+        accounts = [a for a in accounts if a.id in filter_str]
+    account_ids = {a.id for a in accounts}
+
+    primary_leg: Dict[str, Decimal] = {}
+    transfer_in_leg: Dict[str, Decimal] = {}
+    if account_ids:
+        txns = await TransactionDocument.find(
+            TransactionDocument.user_id == user_id,
+        ).to_list()
+        for t in txns:
+            if t.account_id in account_ids:
+                if t.type in ('expense', 'transfer'):
+                    primary_leg[t.account_id] = primary_leg.get(t.account_id, Decimal('0')) - Decimal(str(t.amount))
+                else:
+                    primary_leg.setdefault(t.account_id, Decimal('0'))
+            if t.to_account_id and t.to_account_id in account_ids:
+                transfer_in_leg[t.to_account_id] = transfer_in_leg.get(t.to_account_id, Decimal('0')) + Decimal(str(t.amount))
+
+    results = []
+    total_balance = Decimal('0')
+    total_net_invested = Decimal('0')
+    total_gain_loss = Decimal('0')
+    for acc in accounts:
+        net_invested = primary_leg.get(acc.id, Decimal('0')) + transfer_in_leg.get(acc.id, Decimal('0'))
+        balance = Decimal(str(acc.balance)) if acc.balance is not None else Decimal('0')
+        implied_gain_loss = balance - net_invested
+        total_balance += balance
+        total_net_invested += net_invested
+        total_gain_loss += implied_gain_loss
+        results.append(GroupAAccountResult(account=acc, net_invested=net_invested, implied_gain_loss=implied_gain_loss))
+
+    results.sort(key=lambda r: r.account.name.lower())
+
+    return GroupACalcResult(
+        accounts=results,
+        total_balance=total_balance,
+        total_net_invested=total_net_invested,
+        total_implied_gain_loss=total_gain_loss,
+    )
+
+
 def group_a_transaction_events(db: Session, user_id, account_ids: List[uuid.UUID]) -> List[Transaction]:
     """Raw transaction rows feeding Group A's timeline: transfers into a Group A account
     ('invested') and expense/transfer outflows on a Group A account ('withdrawn')."""
@@ -265,6 +344,21 @@ def group_a_transaction_events(db: Session, user_id, account_ids: List[uuid.UUID
         .order_by(Transaction.date.asc())
         .all()
     )
+
+
+async def group_a_transaction_events_mongo(user_id: str, account_ids: List) -> List[TransactionDocument]:
+    """Mongo equivalent of group_a_transaction_events."""
+    if not account_ids:
+        return []
+    account_ids_str = {str(a) for a in account_ids}
+    txns = await TransactionDocument.find(
+        TransactionDocument.user_id == user_id,
+    ).sort("date").to_list()
+    return [
+        t for t in txns
+        if (t.to_account_id and t.to_account_id in account_ids_str)
+        or (t.account_id in account_ids_str and t.type in ('expense', 'transfer'))
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import date
@@ -9,6 +10,8 @@ from database import get_db
 from models.accounts import Account
 from models.categories import Category
 from models.users import User
+from models_mongo.accounts import AccountDocument
+from models_mongo.categories import CategoryDocument
 from schemas.investments import (
     InvestmentAccountSummary,
     GroupATotals,
@@ -25,13 +28,17 @@ from schemas.investments import (
 from services.investment_service import (
     BALANCE_TRACKED_TYPES,
     compute_group_a,
+    compute_group_a_mongo,
     fetch_group_b_transactions,
+    fetch_group_b_transactions_mongo,
     replay_all_group_b_categories,
     build_group_b_account_cashflow,
     group_a_transaction_events,
+    group_a_transaction_events_mongo,
     build_timeline,
 )
 from utils.auth import get_current_active_user
+from config import READ_SOURCE
 
 router = APIRouter()
 
@@ -42,35 +49,40 @@ def _parse_ids(raw: Optional[str]) -> Optional[set]:
     return {uuid.UUID(part.strip()) for part in raw.split(',') if part.strip()}
 
 
-@router.get("/summary", response_model=InvestmentsSummaryResponse)
-def get_investments_summary(
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
-    category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
-    direction: InvestmentDirection = InvestmentDirection.both,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    Investments summary split into two non-overlapping groups:
-    - Group A: accounts of type 'investment'/'ppf' — balance-tracked, with a
-      lifetime net-invested figure (including transfers) and an implied gain/loss.
-    - Group B: transactions tagged with an investment category on any OTHER
-      account — cash-flow only, plus a running-principal "realized gain/loss"
-      heuristic (see services/investment_service.replay_category_transactions).
+def _fetch_summary_inputs_pg(db: Session, user_id: uuid.UUID, account_id_filter):
+    group_a_calc = compute_group_a(db, user_id, account_id_filter)
+    all_group_a_account_ids = {
+        a.id for a in db.query(Account.id)
+        .filter(Account.user_id == user_id, Account.type.in_(BALANCE_TRACKED_TYPES))
+        .all()
+    }
+    group_b_txns = fetch_group_b_transactions(db, user_id, all_group_a_account_ids)
+    categories = (
+        db.query(Category)
+        .filter(Category.user_id == user_id, Category.is_investment.is_(True))
+        .all()
+    )
+    categories_by_id = {c.id: c for c in categories}
+    return group_a_calc, all_group_a_account_ids, group_b_txns, categories_by_id
 
-    account_ids/category_ids are SCOPE filters: they change which Group A accounts
-    and Group B categories are included at all (and therefore feed the lifetime
-    totals). start_date/end_date/direction are VIEW filters: they only trim the
-    displayed period/period-direction cash-flow figures — they never affect the
-    lifetime running-principal/realized-gain-loss numbers, which always reflect a
-    category's full history.
-    """
-    account_id_filter = _parse_ids(account_ids)
-    category_id_filter = _parse_ids(category_ids)
 
-    group_a_calc = compute_group_a(db, current_user.id, account_id_filter)
+async def _fetch_summary_inputs_mongo(user_id: str, account_id_filter):
+    group_a_calc = await compute_group_a_mongo(user_id, account_id_filter)
+    all_accounts = await AccountDocument.find(AccountDocument.user_id == user_id).to_list()
+    all_group_a_account_ids = {a.id for a in all_accounts if a.type in BALANCE_TRACKED_TYPES}
+    group_b_txns = await fetch_group_b_transactions_mongo(user_id, all_group_a_account_ids)
+    categories = await CategoryDocument.find(
+        CategoryDocument.user_id == user_id, CategoryDocument.is_investment == True  # noqa: E712
+    ).to_list()
+    categories_by_id = {c.id: c for c in categories}
+    return group_a_calc, all_group_a_account_ids, group_b_txns, categories_by_id
+
+
+def _process_investments_summary(
+    group_a_calc, all_group_a_account_ids, group_b_txns, categories_by_id,
+    category_id_filter, account_id_filter, direction, start_date, end_date,
+) -> InvestmentsSummaryResponse:
+    group_b_replay = replay_all_group_b_categories(group_b_txns)
 
     group_a_accounts = [
         InvestmentAccountSummary(
@@ -94,24 +106,6 @@ def get_investments_summary(
             total_implied_gain_loss=float(group_a_calc.total_implied_gain_loss),
         ),
     )
-
-    # Group B exclusion is defined against ALL balance-tracked accounts, regardless of the
-    # account_ids scope filter — filtering only changes what's *included*, not what qualifies
-    # as "another account" in the first place.
-    all_group_a_account_ids = {
-        a.id for a in db.query(Account.id)
-        .filter(Account.user_id == current_user.id, Account.type.in_(BALANCE_TRACKED_TYPES))
-        .all()
-    }
-    group_b_txns = fetch_group_b_transactions(db, current_user.id, all_group_a_account_ids)
-    group_b_replay = replay_all_group_b_categories(group_b_txns)
-
-    categories = (
-        db.query(Category)
-        .filter(Category.user_id == current_user.id, Category.is_investment.is_(True))
-        .all()
-    )
-    categories_by_id = {c.id: c for c in categories}
 
     include_invested = direction in (InvestmentDirection.invested, InvestmentDirection.both)
     include_withdrawn = direction in (InvestmentDirection.withdrawn, InvestmentDirection.both)
@@ -218,42 +212,89 @@ def get_investments_summary(
     )
 
 
-@router.get("/timeline", response_model=InvestmentsTimelineResponse)
-def get_investments_timeline(
+@router.get("/summary", response_model=InvestmentsSummaryResponse)
+async def get_investments_summary(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
     category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
     direction: InvestmentDirection = InvestmentDirection.both,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
+    current_user=Depends(get_current_active_user)
 ):
     """
-    Chronological invest/withdraw events across both groups, for the activity feed and the
-    cumulative timeline chart. Filters here are VIEW filters applied to the merged, already-
-    replayed event list — a category's running_principal_after/realized_gain_loss_delta always
-    reflect its full lifetime history even if some events end up hidden by these filters.
+    Investments summary split into two non-overlapping groups:
+    - Group A: accounts of type 'investment'/'ppf' — balance-tracked, with a
+      lifetime net-invested figure (including transfers) and an implied gain/loss.
+    - Group B: transactions tagged with an investment category on any OTHER
+      account — cash-flow only, plus a running-principal "realized gain/loss"
+      heuristic (see services/investment_service.replay_category_transactions).
+
+    account_ids/category_ids are SCOPE filters: they change which Group A accounts
+    and Group B categories are included at all (and therefore feed the lifetime
+    totals). start_date/end_date/direction are VIEW filters: they only trim the
+    displayed period/period-direction cash-flow figures — they never affect the
+    lifetime running-principal/realized-gain-loss numbers, which always reflect a
+    category's full history.
     """
     account_id_filter = _parse_ids(account_ids)
     category_id_filter = _parse_ids(category_ids)
 
+    if READ_SOURCE == "mongo":
+        user_id_str = str(current_user.id)
+        account_id_filter_mongo = {str(a) for a in account_id_filter} if account_id_filter is not None else None
+        category_id_filter_mongo = {str(c) for c in category_id_filter} if category_id_filter is not None else None
+        group_a_calc, all_group_a_account_ids, group_b_txns, categories_by_id = await _fetch_summary_inputs_mongo(
+            user_id_str, account_id_filter_mongo
+        )
+        return _process_investments_summary(
+            group_a_calc, all_group_a_account_ids, group_b_txns, categories_by_id,
+            category_id_filter_mongo, account_id_filter_mongo, direction, start_date, end_date,
+        )
+
+    group_a_calc, all_group_a_account_ids, group_b_txns, categories_by_id = await run_in_threadpool(
+        _fetch_summary_inputs_pg, db, current_user.id, account_id_filter
+    )
+    return _process_investments_summary(
+        group_a_calc, all_group_a_account_ids, group_b_txns, categories_by_id,
+        category_id_filter, account_id_filter, direction, start_date, end_date,
+    )
+
+
+def _fetch_timeline_inputs_pg(db: Session, user_id: uuid.UUID):
     all_group_a_account_ids = {
         a.id for a in db.query(Account.id)
-        .filter(Account.user_id == current_user.id, Account.type.in_(BALANCE_TRACKED_TYPES))
+        .filter(Account.user_id == user_id, Account.type.in_(BALANCE_TRACKED_TYPES))
         .all()
     }
-
-    group_a_txns = group_a_transaction_events(db, current_user.id, list(all_group_a_account_ids))
-    group_b_txns = fetch_group_b_transactions(db, current_user.id, all_group_a_account_ids)
-    group_b_replay = replay_all_group_b_categories(group_b_txns)
-
+    group_a_txns = group_a_transaction_events(db, user_id, list(all_group_a_account_ids))
+    group_b_txns = fetch_group_b_transactions(db, user_id, all_group_a_account_ids)
     categories = (
         db.query(Category)
-        .filter(Category.user_id == current_user.id, Category.is_investment.is_(True))
+        .filter(Category.user_id == user_id, Category.is_investment.is_(True))
         .all()
     )
     categories_by_id = {c.id: c for c in categories}
+    return all_group_a_account_ids, group_a_txns, group_b_txns, categories_by_id
 
+
+async def _fetch_timeline_inputs_mongo(user_id: str):
+    all_accounts = await AccountDocument.find(AccountDocument.user_id == user_id).to_list()
+    all_group_a_account_ids = {a.id for a in all_accounts if a.type in BALANCE_TRACKED_TYPES}
+    group_a_txns = await group_a_transaction_events_mongo(user_id, list(all_group_a_account_ids))
+    group_b_txns = await fetch_group_b_transactions_mongo(user_id, all_group_a_account_ids)
+    categories = await CategoryDocument.find(
+        CategoryDocument.user_id == user_id, CategoryDocument.is_investment == True  # noqa: E712
+    ).to_list()
+    categories_by_id = {c.id: c for c in categories}
+    return all_group_a_account_ids, group_a_txns, group_b_txns, categories_by_id
+
+
+def _process_investments_timeline(
+    all_group_a_account_ids, group_a_txns, group_b_txns, categories_by_id,
+    account_id_filter, category_id_filter, direction, start_date, end_date,
+) -> InvestmentsTimelineResponse:
+    group_b_replay = replay_all_group_b_categories(group_b_txns)
     direction_value = None if direction == InvestmentDirection.both else direction.value
 
     events = build_timeline(
@@ -290,3 +331,41 @@ def get_investments_timeline(
     ]
 
     return InvestmentsTimelineResponse(events=response_events, total_count=len(response_events))
+
+
+@router.get("/timeline", response_model=InvestmentsTimelineResponse)
+async def get_investments_timeline(
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    account_ids: Optional[str] = Query(None, description="Comma-separated account IDs"),
+    category_ids: Optional[str] = Query(None, description="Comma-separated category IDs"),
+    direction: InvestmentDirection = InvestmentDirection.both,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    """
+    Chronological invest/withdraw events across both groups, for the activity feed and the
+    cumulative timeline chart. Filters here are VIEW filters applied to the merged, already-
+    replayed event list — a category's running_principal_after/realized_gain_loss_delta always
+    reflect its full lifetime history even if some events end up hidden by these filters.
+    """
+    account_id_filter = _parse_ids(account_ids)
+    category_id_filter = _parse_ids(category_ids)
+
+    if READ_SOURCE == "mongo":
+        user_id_str = str(current_user.id)
+        account_id_filter_mongo = {str(a) for a in account_id_filter} if account_id_filter is not None else None
+        category_id_filter_mongo = {str(c) for c in category_id_filter} if category_id_filter is not None else None
+        all_group_a_account_ids, group_a_txns, group_b_txns, categories_by_id = await _fetch_timeline_inputs_mongo(user_id_str)
+        return _process_investments_timeline(
+            all_group_a_account_ids, group_a_txns, group_b_txns, categories_by_id,
+            account_id_filter_mongo, category_id_filter_mongo, direction, start_date, end_date,
+        )
+
+    all_group_a_account_ids, group_a_txns, group_b_txns, categories_by_id = await run_in_threadpool(
+        _fetch_timeline_inputs_pg, db, current_user.id
+    )
+    return _process_investments_timeline(
+        all_group_a_account_ids, group_a_txns, group_b_txns, categories_by_id,
+        account_id_filter, category_id_filter, direction, start_date, end_date,
+    )

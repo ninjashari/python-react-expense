@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime
 from typing import Optional
 
 from beanie import Document
@@ -36,7 +36,7 @@ class TransactionDocument(Document):
     type: str
     description: Optional[str] = None
     notes: Optional[str] = None
-    date: date
+    date: datetime  # matches Transaction.date (Postgres DATETIME, not DATE) - see models/transactions.py
     balance_after_transaction: Optional[float] = None
     to_account_balance_after: Optional[float] = None
     reward_points: Optional[float] = None

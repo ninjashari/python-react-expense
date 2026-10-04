@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
+import re
 import pandas as pd
 import io
 import json
@@ -11,11 +13,13 @@ from models.categories import Category
 from models.users import User
 from models.transactions import Transaction
 from models.learning import UserTransactionPattern
+from models_mongo.categories import CategoryDocument
 from schemas.categories import CategoryCreate, CategoryUpdate, CategoryResponse
 from utils.auth import get_current_active_user
 from utils.color_generator import assign_unique_colors_bulk, generate_unique_color
 from utils.slug import create_slug
 from services import mongo_sync
+from config import READ_SOURCE
 
 router = APIRouter()
 
@@ -58,35 +62,73 @@ def create_category(
         db.rollback()
         raise HTTPException(status_code=400, detail="Failed to create category")
 
-@router.get("/", response_model=List[CategoryResponse])
-def get_categories(
-    search: str = "", 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    query = db.query(Category).filter(Category.user_id == current_user.id)
+def _get_categories_pg(db: Session, user_id, search: str) -> List[Category]:
+    """Blocking Postgres read - must run via run_in_threadpool from the async endpoint."""
+    query = db.query(Category).filter(Category.user_id == user_id)
     if search:
         query = query.filter(Category.name.ilike(f"%{search}%"))
-    
-    # Order by creation date descending (newest first)
     query = query.order_by(Category.created_at.desc())
-    
     categories = query.all()  # No pagination - return all results
-    
+
     # Auto-assign colors to categories that don't have them
     needs_update = False
     for category in categories:
         if not category.color:
             try:
-                category.color = generate_unique_color(db, category.name, str(current_user.id), "categories")
+                category.color = generate_unique_color(db, category.name, str(user_id), "categories")
                 needs_update = True
             except Exception as e:
                 print(f"Failed to generate color for category {category.name}: {e}")
-    
+
     if needs_update:
         db.commit()
-    
+
     return categories
+
+
+async def _backfill_color_mongo(db: Session, background_tasks: BackgroundTasks, doc: CategoryDocument, user_id: str):
+    """Mongo read-path color backfill: color uniqueness is still arbitrated via the
+    Postgres row (generate_unique_color's uniqueness source), written to Postgres
+    first (write source of truth), then mirrored - same ordering as every other
+    write in this app, just triggered from a read instead of a mutation endpoint."""
+    def _pg_write():
+        pg_category = db.query(Category).filter(Category.id == uuid.UUID(doc.id)).first()
+        if pg_category and not pg_category.color:
+            pg_category.color = generate_unique_color(db, pg_category.name, user_id, "categories")
+            db.commit()
+            return pg_category.color
+        return pg_category.color if pg_category else None
+
+    new_color = await run_in_threadpool(_pg_write)
+    if new_color:
+        doc.color = new_color
+        background_tasks.add_task(mongo_sync.mirror_category_upsert, db, uuid.UUID(doc.id))
+    return doc
+
+
+async def _get_categories_mongo(db: Session, background_tasks: BackgroundTasks, user_id: str, search: str) -> List[CategoryDocument]:
+    query = CategoryDocument.find(CategoryDocument.user_id == user_id)
+    if search:
+        query = query.find({"name": {"$regex": re.escape(search), "$options": "i"}})
+    categories = await query.sort(-CategoryDocument.created_at).to_list()
+
+    for i, category in enumerate(categories):
+        if not category.color:
+            categories[i] = await _backfill_color_mongo(db, background_tasks, category, user_id)
+
+    return categories
+
+
+@router.get("/", response_model=List[CategoryResponse])
+async def get_categories(
+    background_tasks: BackgroundTasks,
+    search: str = "",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user)
+):
+    if READ_SOURCE == "mongo":
+        return await _get_categories_mongo(db, background_tasks, str(current_user.id), search)
+    return await run_in_threadpool(_get_categories_pg, db, uuid.UUID(str(current_user.id)), search)
 
 @router.delete("/unused")
 def delete_unused_categories(
@@ -198,16 +240,26 @@ def export_categories(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to export categories: {str(e)}")
 
+def _get_category_pg(db: Session, category_id: uuid.UUID, user_id: uuid.UUID):
+    return db.query(Category).filter(
+        Category.id == category_id,
+        Category.user_id == user_id
+    ).first()
+
+
 @router.get("/{category_id}", response_model=CategoryResponse)
-def get_category(
+async def get_category(
     category_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
-    category = db.query(Category).filter(
-        Category.id == category_id,
-        Category.user_id == current_user.id
-    ).first()
+    if READ_SOURCE == "mongo":
+        category = await CategoryDocument.find_one(
+            CategoryDocument.id == str(category_id),
+            CategoryDocument.user_id == str(current_user.id),
+        )
+    else:
+        category = await run_in_threadpool(_get_category_pg, db, category_id, uuid.UUID(str(current_user.id)))
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
     return category

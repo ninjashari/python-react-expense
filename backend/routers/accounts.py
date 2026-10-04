@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -12,10 +13,12 @@ from database import get_db
 from models.accounts import Account
 from models.transactions import Transaction
 from models.users import User
+from models_mongo.accounts import AccountDocument
 from schemas.accounts import AccountCreate, AccountUpdate, AccountResponse
 from utils.auth import get_current_active_user
 from routers.transactions import update_account_balance
 from services import mongo_sync
+from config import READ_SOURCE
 
 router = APIRouter()
 
@@ -49,14 +52,19 @@ def create_account(
         db.rollback()
         raise HTTPException(status_code=400, detail="Failed to create account")
 
+def _get_accounts_pg(db: Session, user_id: uuid.UUID) -> List[Account]:
+    return db.query(Account).filter(Account.user_id == user_id).order_by(Account.created_at.desc()).all()
+
+
 @router.get("/", response_model=List[AccountResponse])
-def get_accounts(
+async def get_accounts(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
     # Order by creation date descending (newest first) and return all accounts
-    accounts = db.query(Account).filter(Account.user_id == current_user.id).order_by(Account.created_at.desc()).all()
-    return accounts
+    if READ_SOURCE == "mongo":
+        return await AccountDocument.find(AccountDocument.user_id == str(current_user.id)).sort(-AccountDocument.created_at).to_list()
+    return await run_in_threadpool(_get_accounts_pg, db, uuid.UUID(str(current_user.id)))
 
 @router.get("/export")
 def export_accounts(
@@ -115,16 +123,26 @@ def export_accounts(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to export accounts: {str(e)}")
 
+def _get_account_pg(db: Session, account_id: uuid.UUID, user_id: uuid.UUID):
+    return db.query(Account).filter(
+        Account.id == account_id,
+        Account.user_id == user_id
+    ).first()
+
+
 @router.get("/{account_id}", response_model=AccountResponse)
-def get_account(
+async def get_account(
     account_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user=Depends(get_current_active_user)
 ):
-    account = db.query(Account).filter(
-        Account.id == account_id, 
-        Account.user_id == current_user.id
-    ).first()
+    if READ_SOURCE == "mongo":
+        account = await AccountDocument.find_one(
+            AccountDocument.id == str(account_id),
+            AccountDocument.user_id == str(current_user.id),
+        )
+    else:
+        account = await run_in_threadpool(_get_account_pg, db, account_id, uuid.UUID(str(current_user.id)))
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     return account
